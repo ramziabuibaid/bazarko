@@ -1,29 +1,11 @@
-// هذا الملف سيُولَّد تلقائياً من Supabase CLI لاحقاً
-// npx supabase gen types typescript --project-id YOUR_PROJECT_ID > lib/supabase/database.types.ts
+// Generated-compatible type definitions for Bazarko
+// To regenerate: npx supabase gen types typescript --project-id hncjwffgicesmlpuwegr > lib/supabase/database.types.ts
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
 
 export interface Database {
   public: {
     Tables: {
-      countries: {
-        Row: {
-          code: string
-          name_ar: string
-          name_en: string
-          currency_code: string
-          currency_symbol: string
-          domain_prefix: string
-          is_active: boolean
-          launch_date: string | null
-          settings: Json
-        }
-        Insert: Omit<Database['public']['Tables']['countries']['Row'], 'is_active' | 'settings'> & {
-          is_active?: boolean
-          settings?: Json
-        }
-        Update: Partial<Database['public']['Tables']['countries']['Row']>
-      }
       profiles: {
         Row: {
           id: string
@@ -31,6 +13,7 @@ export interface Database {
           avatar_url: string | null
           phone: string | null
           country_code: string | null
+          is_admin: boolean
           created_at: string
           updated_at: string
         }
@@ -56,13 +39,13 @@ export interface Database {
           currency_code: string
           tax_number: string | null
           tax_rate: number
-          status: 'active' | 'suspended' | 'pending' | 'closed'
-          plan: 'free' | 'pro' | 'business'
+          plan: 'free' | 'basic' | 'pro'
           plan_expires_at: string | null
+          is_active: boolean
+          suspended_at: string | null
+          suspended_reason: string | null
           modules: Json
           settings: Json
-          marketplace_status: 'none' | 'pending' | 'approved' | 'suspended'
-          marketplace_joined_at: string | null
           created_at: string
           updated_at: string
         }
@@ -148,6 +131,67 @@ export interface Database {
         } & Partial<Omit<Database['public']['Tables']['products']['Row'], 'id' | 'store_id' | 'name' | 'slug' | 'price' | 'stock_available' | 'created_at' | 'updated_at'>>
         Update: Partial<Omit<Database['public']['Tables']['products']['Row'], 'id' | 'stock_available'>>
       }
+      orders: {
+        Row: {
+          id: string
+          store_id: string
+          customer_id: string | null
+          order_number: string
+          status: 'pending' | 'confirmed' | 'processing' | 'ready' | 'shipped' | 'delivered' | 'cancelled' | 'returned'
+          payment_status: 'unpaid' | 'partial' | 'paid' | 'refunded'
+          payment_method: 'cash' | 'bank_transfer' | 'check' | 'online' | 'credit' | null
+          subtotal: number
+          discount_type: 'fixed' | 'percentage' | null
+          discount_value: number
+          discount_amount: number
+          shipping_amount: number
+          tax_amount: number
+          total_amount: number
+          amount_paid: number
+          amount_remaining: number
+          customer_name: string | null
+          customer_phone: string | null
+          customer_email: string | null
+          delivery_company_id: string | null
+          tracking_number: string | null
+          shipping_address: string | null
+          shipping_city: string | null
+          expected_delivery: string | null
+          source: 'store' | 'dashboard' | 'phone' | 'whatsapp' | 'marketplace'
+          customer_notes: string | null
+          internal_notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          store_id: string
+          order_number: string
+          subtotal: number
+          total_amount: number
+        } & Partial<Omit<Database['public']['Tables']['orders']['Row'], 'id' | 'store_id' | 'order_number' | 'subtotal' | 'total_amount' | 'amount_remaining' | 'created_at' | 'updated_at'>>
+        Update: Partial<Omit<Database['public']['Tables']['orders']['Row'], 'id' | 'amount_remaining'>>
+      }
+      order_items: {
+        Row: {
+          id: string
+          order_id: string
+          product_id: string | null
+          product_name: string
+          quantity: number
+          unit_price: number
+          total_price: number
+          created_at: string
+        }
+        Insert: {
+          order_id: string
+          product_name: string
+          quantity: number
+          unit_price: number
+          total_price: number
+          product_id?: string | null
+        }
+        Update: Partial<Database['public']['Tables']['order_items']['Row']>
+      }
       customers: {
         Row: {
           id: string
@@ -175,43 +219,216 @@ export interface Database {
         Insert: { store_id: string; name: string } & Partial<Omit<Database['public']['Tables']['customers']['Row'], 'id' | 'store_id' | 'name' | 'created_at' | 'updated_at'>>
         Update: Partial<Omit<Database['public']['Tables']['customers']['Row'], 'id'>>
       }
-      orders: {
+      customer_ledger: {
         Row: {
           id: string
           store_id: string
+          customer_id: string
+          type: 'invoice' | 'payment' | 'credit_note' | 'debit_note' | 'order'
+          date: string
+          description: string
+          debit: number
+          credit: number
+          balance: number
+          reference_id: string | null
+          reference_type: string | null
+          created_by: string | null
+          created_at: string
+        }
+        Insert: {
+          store_id: string
+          customer_id: string
+          type: string
+          date: string
+          description: string
+          debit: number
+          credit: number
+          balance: number
+          reference_id?: string | null
+          reference_type?: string | null
+          created_by?: string | null
+        }
+        Update: Partial<Database['public']['Tables']['customer_ledger']['Row']>
+      }
+      invoices: {
+        Row: {
+          id: string
+          store_id: string
+          invoice_number: string
           customer_id: string | null
-          order_number: string
-          status: 'pending' | 'confirmed' | 'processing' | 'ready' | 'shipped' | 'delivered' | 'cancelled' | 'returned'
-          payment_status: 'unpaid' | 'partial' | 'paid' | 'refunded'
-          payment_method: 'cash' | 'bank_transfer' | 'check' | 'online' | 'credit' | null
+          customer_name: string | null
+          order_id: string | null
+          issue_date: string
+          due_date: string | null
+          status: 'draft' | 'sent' | 'paid' | 'cancelled'
           subtotal: number
-          discount_type: 'fixed' | 'percentage' | null
-          discount_value: number
           discount_amount: number
-          shipping_amount: number
           tax_amount: number
-          total_amount: number
+          total: number
           amount_paid: number
-          amount_remaining: number
-          delivery_company_id: string | null
-          tracking_number: string | null
-          shipping_address: string | null
-          shipping_city: string | null
-          expected_delivery: string | null
-          source: 'store' | 'dashboard' | 'phone' | 'whatsapp' | 'marketplace'
-          customer_notes: string | null
-          internal_notes: string | null
+          notes: string | null
+          created_by: string | null
           created_at: string
           updated_at: string
         }
         Insert: {
           store_id: string
-          order_number: string
+          invoice_number: string
+          issue_date: string
           subtotal: number
-          total_amount: number
-        } & Partial<Omit<Database['public']['Tables']['orders']['Row'], 'id' | 'store_id' | 'order_number' | 'subtotal' | 'total_amount' | 'amount_remaining' | 'created_at' | 'updated_at'>>
-        Update: Partial<Omit<Database['public']['Tables']['orders']['Row'], 'id' | 'amount_remaining'>>
+          total: number
+        } & Partial<Omit<Database['public']['Tables']['invoices']['Row'], 'id' | 'store_id' | 'invoice_number' | 'issue_date' | 'subtotal' | 'total' | 'created_at' | 'updated_at'>>
+        Update: Partial<Omit<Database['public']['Tables']['invoices']['Row'], 'id'>>
       }
+      invoice_items: {
+        Row: {
+          id: string
+          invoice_id: string
+          description: string
+          quantity: number
+          unit_price: number
+          total: number
+          created_at: string
+        }
+        Insert: {
+          invoice_id: string
+          description: string
+          quantity: number
+          unit_price: number
+          total: number
+        }
+        Update: Partial<Database['public']['Tables']['invoice_items']['Row']>
+      }
+      vouchers: {
+        Row: {
+          id: string
+          store_id: string
+          voucher_number: string
+          type: 'receipt' | 'payment'
+          date: string
+          amount: number
+          account_id: string | null
+          account_name: string | null
+          customer_id: string | null
+          description: string | null
+          payment_method: string | null
+          reference: string | null
+          created_by: string | null
+          created_at: string
+        }
+        Insert: {
+          store_id: string
+          voucher_number: string
+          type: 'receipt' | 'payment'
+          date: string
+          amount: number
+        } & Partial<Omit<Database['public']['Tables']['vouchers']['Row'], 'id' | 'store_id' | 'voucher_number' | 'type' | 'date' | 'amount' | 'created_at'>>
+        Update: Partial<Omit<Database['public']['Tables']['vouchers']['Row'], 'id'>>
+      }
+      inventory_movements: {
+        Row: {
+          id: string
+          store_id: string
+          product_id: string
+          type: 'purchase' | 'sale' | 'adjustment' | 'return' | 'transfer'
+          quantity: number
+          unit_cost: number | null
+          reference_id: string | null
+          reference_type: string | null
+          notes: string | null
+          created_by: string | null
+          created_at: string
+        }
+        Insert: {
+          store_id: string
+          product_id: string
+          type: string
+          quantity: number
+          unit_cost?: number | null
+          reference_id?: string | null
+          reference_type?: string | null
+          notes?: string | null
+          created_by?: string | null
+        }
+        Update: Partial<Database['public']['Tables']['inventory_movements']['Row']>
+      }
+      repair_jobs: {
+        Row: {
+          id: string
+          store_id: string
+          job_number: string
+          customer_name: string
+          customer_phone: string | null
+          device_type: string
+          device_brand: string | null
+          device_model: string | null
+          device_condition: string | null
+          reported_issue: string | null
+          diagnosis: string | null
+          work_done: string | null
+          status: 'received' | 'diagnosing' | 'in_repair' | 'waiting_parts' | 'ready' | 'delivered' | 'cancelled'
+          priority: 'normal' | 'urgent'
+          estimated_cost: number | null
+          final_cost: number | null
+          deposit_paid: number | null
+          invoice_id: string | null
+          assigned_to: string | null
+          received_at: string
+          estimated_done: string | null
+          delivered_at: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          store_id: string
+          job_number: string
+          customer_name: string
+          device_type: string
+        } & Partial<Omit<Database['public']['Tables']['repair_jobs']['Row'], 'id' | 'store_id' | 'job_number' | 'customer_name' | 'device_type' | 'created_at' | 'updated_at'>>
+        Update: Partial<Omit<Database['public']['Tables']['repair_jobs']['Row'], 'id'>>
+      }
+      repair_job_parts: {
+        Row: {
+          id: string
+          job_id: string
+          product_id: string | null
+          name: string
+          quantity: number
+          unit_cost: number
+          total_cost: number
+          created_at: string
+        }
+        Insert: {
+          job_id: string
+          name: string
+          quantity: number
+          unit_cost: number
+          total_cost: number
+          product_id?: string | null
+        }
+        Update: Partial<Database['public']['Tables']['repair_job_parts']['Row']>
+      }
+      repair_job_history: {
+        Row: {
+          id: string
+          job_id: string
+          status: string
+          notes: string | null
+          created_by: string | null
+          created_at: string
+        }
+        Insert: {
+          job_id: string
+          status: string
+          notes?: string | null
+          created_by?: string | null
+        }
+        Update: Partial<Database['public']['Tables']['repair_job_history']['Row']>
+      }
+    }
+    Views: {
+      [_ in never]: never
     }
     Functions: {
       generate_sequence_number: {
@@ -222,6 +439,16 @@ export interface Database {
         Args: { p_store_id: string }
         Returns: boolean
       }
+      is_platform_admin: {
+        Args: Record<PropertyKey, never>
+        Returns: boolean
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
     }
   }
 }

@@ -87,7 +87,7 @@ export default async function MovementsPage({ searchParams }: Props) {
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {movements.map((m: {
+              {(movements as any[]).map((m: {
                 id: string
                 type: string
                 quantity: number

@@ -30,7 +30,7 @@ export default async function AdminStoresPage({ searchParams }: { searchParams: 
 
   const { data: stores } = await query
 
-  const storesList = (stores ?? []) as Array<{
+  const storesList = (stores ?? []) as unknown as Array<{
     id: string; name: string; subdomain: string; country_code: string
     plan: string; is_active: boolean; created_at: string
     suspended_at: string | null; suspended_reason: string | null

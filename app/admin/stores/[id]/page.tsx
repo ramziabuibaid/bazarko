@@ -21,7 +21,7 @@ export default async function AdminStoreDetailPage({ params }: Props) {
 
   if (!store) notFound()
 
-  const s = store as {
+  const s = store as unknown as {
     id: string; name: string; subdomain: string; country_code: string
     phone: string | null; plan: string; is_active: boolean; currency_code: string
     created_at: string; suspended_at: string | null; suspended_reason: string | null

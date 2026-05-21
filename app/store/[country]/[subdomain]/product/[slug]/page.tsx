@@ -69,9 +69,9 @@ export default async function ProductPage({ params }: Props) {
 
           {/* التفاصيل */}
           <div>
-            {(product.categories as { name: string } | null)?.name && (
+            {(product.categories as unknown as { name: string } | null)?.name && (
               <p className="mb-2 text-sm text-gray-400">
-                {(product.categories as { name: string }).name}
+                {(product.categories as unknown as { name: string }).name}
               </p>
             )}
             <h1 className="text-2xl font-bold text-gray-900">{product.name}</h1>

@@ -52,7 +52,7 @@ export default async function MarketplaceSearchPage({ params, searchParams }: Pr
     stores: { name: string; subdomain: string; country_code: string }
   }
 
-  const productsList = (products ?? []) as ProductRow[]
+  const productsList = (products ?? []) as unknown as ProductRow[]
   const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
   const countryLower = params.country.toLowerCase()
 

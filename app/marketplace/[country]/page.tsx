@@ -59,9 +59,9 @@ export default async function MarketplaceHomePage({ params }: Props) {
     stores: { name: string; subdomain: string; country_code: string }
   }
 
-  const storesList   = (stores ?? []) as StoreRow[]
-  const productsList = (allProducts ?? []) as ProductRow[]
-  const featured     = (featuredProducts ?? []) as ProductRow[]
+  const storesList   = (stores ?? []) as unknown as StoreRow[]
+  const productsList = (allProducts ?? []) as unknown as ProductRow[]
+  const featured     = (featuredProducts ?? []) as unknown as ProductRow[]
 
   const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
   const countryLower = params.country.toLowerCase()

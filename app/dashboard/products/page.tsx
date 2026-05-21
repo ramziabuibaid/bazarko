@@ -94,8 +94,8 @@ export default async function ProductsPage({
       </div>
 
       <ProductsTable
-        products={products ?? []}
-        categories={categories ?? []}
+        products={(products ?? []) as any}
+        categories={(categories ?? []) as any}
         storeId={store.id}
         currencyCode={store.currency_code}
         filters={searchParams}
