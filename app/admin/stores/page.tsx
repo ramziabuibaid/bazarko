@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import Link from 'next/link'
 
 const PLAN_COLORS: Record<string, string> = {
@@ -12,7 +12,7 @@ const COUNTRY_LABELS: Record<string, string> = { PS: '🇵🇸 فلسطين', SY
 interface SearchParams { plan?: string; country?: string; status?: string }
 
 export default async function AdminStoresPage({ searchParams }: { searchParams: SearchParams }) {
-  const supabase = createClient()
+  const supabase = createAdminClient()
 
   let query = supabase
     .from('stores')

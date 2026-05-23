@@ -45,7 +45,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
     .select('id, name, description, logo_url, cover_url, phone, whatsapp, city, currency_code, country_code')
     .eq('subdomain', params.subdomain)
     .eq('country_code', params.country.toUpperCase())
-    .eq('status', 'active')
+    .eq('is_active', true)
     .single()
 
   if (!store) notFound()

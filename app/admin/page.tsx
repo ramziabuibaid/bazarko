@@ -1,8 +1,8 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import Link from 'next/link'
 
 export default async function AdminOverviewPage() {
-  const supabase = createClient()
+  const supabase = createAdminClient()
 
   const monthStart = new Date()
   monthStart.setDate(1)

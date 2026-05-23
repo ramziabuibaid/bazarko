@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import StoreActions from './StoreActions'
@@ -6,7 +6,7 @@ import StoreActions from './StoreActions'
 interface Props { params: { id: string } }
 
 export default async function AdminStoreDetailPage({ params }: Props) {
-  const supabase = createClient()
+  const supabase = createAdminClient()
 
   const { data: store } = await supabase
     .from('stores')
