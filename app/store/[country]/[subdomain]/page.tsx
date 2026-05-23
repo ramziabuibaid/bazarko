@@ -81,7 +81,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
 
   return (
     <div className="min-h-screen bg-white" dir="rtl">
-      <StoreHeader store={store} />
+      <StoreHeader store={store} country={params.country} subdomain={params.subdomain} />
 
       <main className="mx-auto max-w-6xl px-4 py-8">
 

@@ -43,7 +43,7 @@ export default async function ProductPage({ params }: Props) {
 
   return (
     <div className="min-h-screen bg-white" dir="rtl">
-      <StoreHeader store={store} />
+      <StoreHeader store={store} country={params.country} subdomain={params.subdomain} />
 
       <main className="mx-auto max-w-4xl px-4 py-8">
         <div className="grid gap-8 md:grid-cols-2">

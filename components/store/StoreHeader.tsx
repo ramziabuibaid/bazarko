@@ -2,7 +2,6 @@
 
 import { useCart } from '@/lib/store/cart'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
 
 interface Store {
   id: string
@@ -13,14 +12,14 @@ interface Store {
   currency_code: string
 }
 
-export default function StoreHeader({ store }: { store: Store }) {
-  const count = useCart(s => s.count())
-  const pathname = usePathname()
+interface Props {
+  store: Store
+  country: string
+  subdomain: string
+}
 
-  // استخراج country/subdomain من الـ pathname
-  const segments = pathname.split('/')
-  const country = segments[2] ?? ''
-  const subdomain = segments[3] ?? ''
+export default function StoreHeader({ store, country, subdomain }: Props) {
+  const count = useCart(s => s.count())
 
   return (
     <header className="sticky top-0 z-40 border-b border-gray-100 bg-white/95 backdrop-blur">

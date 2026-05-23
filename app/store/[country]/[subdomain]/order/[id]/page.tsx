@@ -57,7 +57,7 @@ export default async function OrderTrackingPage({ params }: Props) {
 
   return (
     <div className="min-h-screen bg-white" dir="rtl">
-      <StoreHeader store={store} />
+      <StoreHeader store={store} country={params.country} subdomain={params.subdomain} />
 
       <main className="mx-auto max-w-2xl px-4 py-8">
         <div className="mb-2 text-sm text-gray-400">تتبع طلبيتك</div>
