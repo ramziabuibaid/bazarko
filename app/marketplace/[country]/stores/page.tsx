@@ -72,7 +72,7 @@ export default async function MarketplaceStoresPage({ params }: Props) {
               <p className="font-semibold text-white group-hover:text-sky-400 transition-colors leading-tight">
                 {store.name}
               </p>
-              <p className="text-xs text-slate-500 mt-0.5" dir="ltr">{store.subdomain}.bazarko.com</p>
+              <p className="text-xs text-slate-500 mt-0.5" dir="ltr">{store.subdomain}.bazarko.app</p>
 
               <div className="mt-3 flex items-center justify-between">
                 <span className="text-xs text-slate-500">

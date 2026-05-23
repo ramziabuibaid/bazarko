@@ -58,7 +58,7 @@ export default async function AdminStoreDetailPage({ params }: Props) {
           </Link>
           <div>
             <h1 className="text-xl font-semibold text-white">{s.name}</h1>
-            <p className="text-sm text-slate-400" dir="ltr">{s.subdomain}.bazarko.com · {s.country_code}</p>
+            <p className="text-sm text-slate-400" dir="ltr">{s.subdomain}.bazarko.app · {s.country_code}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">

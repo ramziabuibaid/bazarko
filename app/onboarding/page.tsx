@@ -225,7 +225,7 @@ export default function OnboardingPage() {
                   dir="ltr"
                 />
                 <span className="whitespace-nowrap px-3 text-sm text-slate-400">
-                  .{selectedCountry?.code.toLowerCase()}.bazarko.com
+                  .{selectedCountry?.code.toLowerCase()}.bazarko.app
                 </span>
               </div>
 
@@ -248,7 +248,7 @@ export default function OnboardingPage() {
               {/* معاينة الرابط */}
               {form.subdomain.length >= 3 && (
                 <div className="mt-3 rounded-lg bg-slate-800/50 px-4 py-2 text-sm text-slate-400" dir="ltr">
-                  {form.subdomain}.{selectedCountry?.code.toLowerCase()}.bazarko.com
+                  {form.subdomain}.{selectedCountry?.code.toLowerCase()}.bazarko.app
                 </div>
               )}
             </div>

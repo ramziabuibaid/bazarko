@@ -119,7 +119,7 @@ export default async function AdminStoresPage({ searchParams }: { searchParams: 
               <tr key={store.id} className="hover:bg-white/3 transition-colors">
                 <td className="px-4 py-3">
                   <p className="font-medium text-white">{store.name}</p>
-                  <p className="text-xs text-slate-500" dir="ltr">{store.subdomain}.bazarko.com</p>
+                  <p className="text-xs text-slate-500" dir="ltr">{store.subdomain}.bazarko.app</p>
                 </td>
                 <td className="px-4 py-3 text-slate-300">
                   {store.profiles?.full_name ?? '—'}

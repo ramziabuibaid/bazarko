@@ -97,7 +97,7 @@ export default async function AdminOverviewPage() {
                 <div className={`h-2 w-2 rounded-full ${store.is_active ? 'bg-emerald-500' : 'bg-red-500'}`} />
                 <div>
                   <p className="text-sm font-medium text-white">{store.name}</p>
-                  <p className="text-xs text-slate-500" dir="ltr">{store.subdomain}.bazarko.com · {store.country_code}</p>
+                  <p className="text-xs text-slate-500" dir="ltr">{store.subdomain}.bazarko.app · {store.country_code}</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">

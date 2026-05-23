@@ -188,7 +188,7 @@ export default async function MarketplaceHomePage({ params }: Props) {
                   🏪
                 </div>
                 <p className="font-semibold text-white group-hover:text-sky-400 transition-colors">{store.name}</p>
-                <p className="text-xs text-slate-500 mt-0.5" dir="ltr">{store.subdomain}.bazarko.com</p>
+                <p className="text-xs text-slate-500 mt-0.5" dir="ltr">{store.subdomain}.bazarko.app</p>
                 <p className="mt-3 text-xs text-sky-400 group-hover:underline">تسوق الآن ←</p>
               </Link>
             ))}

@@ -163,7 +163,7 @@ export async function sendInvoiceEmail(params: SendInvoiceEmailParams): Promise<
 
   try {
     await resend.emails.send({
-      from: `${params.storeName} <invoices@bazarko.com>`,
+      from: `${params.storeName} <invoices@bazarko.app>`,
       to: params.to,
       subject: `فاتورة ${params.invoiceNumber} من ${params.storeName}`,
       html: buildInvoiceHtml(params),

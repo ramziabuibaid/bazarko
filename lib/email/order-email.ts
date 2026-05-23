@@ -132,7 +132,7 @@ export async function sendOrderEmail(params: SendOrderEmailParams): Promise<void
 
   try {
     await resend.emails.send({
-      from: `${params.storeName} <orders@bazarko.com>`,
+      from: `${params.storeName} <orders@bazarko.app>`,
       to: params.to,
       subject: `✅ تأكيد طلبيتك ${params.orderNumber} — ${params.storeName}`,
       html: buildEmailHtml(params),

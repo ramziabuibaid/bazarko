@@ -105,7 +105,7 @@ export default async function AdminPlansPage() {
                     <span className={`h-1.5 w-1.5 rounded-full ${s.is_active ? 'bg-emerald-500' : 'bg-red-500'}`} />
                     <div>
                       <p className="text-sm text-white">{s.name}</p>
-                      <p className="text-xs text-slate-500" dir="ltr">{s.subdomain}.bazarko.com</p>
+                      <p className="text-xs text-slate-500" dir="ltr">{s.subdomain}.bazarko.app</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-4 text-xs text-slate-500">

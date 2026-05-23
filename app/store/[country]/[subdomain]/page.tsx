@@ -170,7 +170,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
         <p>{store.name}</p>
         {store.city && <p className="mt-1">{store.city}</p>}
         <p className="mt-3 text-xs">
-          مدعوم من <a href="https://bazarko.com" className="text-sky-500 hover:underline">Bazarko</a>
+          مدعوم من <a href="https://bazarko.app" className="text-sky-500 hover:underline">Bazarko</a>
         </p>
       </footer>
     </div>

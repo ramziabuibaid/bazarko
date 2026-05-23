@@ -153,7 +153,7 @@ export async function POST(req: NextRequest) {
 
   // إرسال الإيميل
   if (resolvedEmail) {
-    const domain = process.env.NEXT_PUBLIC_DOMAIN ?? 'bazarko.com'
+    const domain = process.env.NEXT_PUBLIC_DOMAIN ?? 'bazarko.app'
     const trackingUrl = `https://${store.subdomain}.${store.country_code.toLowerCase()}.${domain}/order/${order.id}`
 
     await sendOrderEmail({

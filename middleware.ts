@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 
-const MAIN_DOMAIN = process.env.NEXT_PUBLIC_DOMAIN || 'bazarko.com'
+const MAIN_DOMAIN = process.env.NEXT_PUBLIC_DOMAIN || 'bazarko.app'
 const COUNTRY_PREFIXES = ['ps', 'sy', 'jo', 'lb']
 
 export async function middleware(request: NextRequest) {
@@ -49,7 +49,7 @@ export async function middleware(request: NextRequest) {
     return response
   }
 
-  // ── الدومين الرئيسي (bazarko.com) ──
+  // ── الدومين الرئيسي (bazarko.app) ──
   if (hostname === MAIN_DOMAIN || hostname === `www.${MAIN_DOMAIN}`) {
     if (pathname.startsWith('/dashboard') && !user) {
       return NextResponse.redirect(new URL('/login', request.url))
@@ -57,7 +57,7 @@ export async function middleware(request: NextRequest) {
     return response
   }
 
-  // ── Marketplace دولة (ps.bazarko.com) ──
+  // ── Marketplace دولة (ps.bazarko.app) ──
   const countryMatch = hostname.match(
     new RegExp(`^(${COUNTRY_PREFIXES.join('|')})\\.${MAIN_DOMAIN.replace('.', '\\.')}$`)
   )
@@ -68,7 +68,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.rewrite(url)
   }
 
-  // ── متجر تاجر (storename.ps.bazarko.com) ──
+  // ── متجر تاجر (storename.ps.bazarko.app) ──
   const storeMatch = hostname.match(
     new RegExp(`^([a-z0-9-]+)\\.(${COUNTRY_PREFIXES.join('|')})\\.${MAIN_DOMAIN.replace('.', '\\.')}$`)
   )
