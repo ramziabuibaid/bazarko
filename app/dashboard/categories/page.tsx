@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { getStoreForUser } from '@/lib/supabase/getStore'
 import { redirect } from 'next/navigation'
 import CategoryManager from '@/components/dashboard/categories/CategoryManager'
 
@@ -7,10 +8,13 @@ export default async function CategoriesPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  const storeId = await getStoreForUser(supabase, user!.id)
+  if (!storeId) redirect('/onboarding')
+
   const { data: store } = await supabase
     .from('stores')
     .select('id')
-    .eq('owner_id', user.id)
+    .eq('id', storeId)
     .single()
 
   if (!store) redirect('/onboarding')

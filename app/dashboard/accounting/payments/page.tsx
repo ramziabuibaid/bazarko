@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { getStoreForUser } from '@/lib/supabase/getStore'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import VouchersTable from '@/components/dashboard/accounting/VouchersTable'
@@ -8,10 +9,13 @@ export default async function PaymentsPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  const storeId = await getStoreForUser(supabase, user!.id)
+  if (!storeId) redirect('/onboarding')
+
   const { data: store } = await supabase
     .from('stores')
     .select('id, currency_code')
-    .eq('owner_id', user.id)
+    .eq('id', storeId)
     .single()
   if (!store) redirect('/onboarding')
 

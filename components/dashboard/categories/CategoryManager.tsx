@@ -28,16 +28,21 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
   const [deleteId, setDeleteId] = useState<string | null>(null)
 
   const [form, setForm] = useState({ name: '', slug: '', parent_id: '' })
+  const [searchQuery, setSearchQuery] = useState('')
+  const [saveError, setSaveError] = useState('')
+  const [deleteError, setDeleteError] = useState('')
 
   function openAdd() {
     setEditing(null)
     setForm({ name: '', slug: '', parent_id: '' })
+    setSaveError('')
     setShowModal(true)
   }
 
   function openEdit(cat: Category) {
     setEditing(cat)
     setForm({ name: cat.name, slug: cat.slug, parent_id: cat.parent_id ?? '' })
+    setSaveError('')
     setShowModal(true)
   }
 
@@ -47,6 +52,7 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
 
   async function save() {
     if (!form.name.trim()) return
+    setSaveError('')
     setLoading(true)
     const supabase = createClient()
 
@@ -63,11 +69,12 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
         .update({ name: payload.name, slug: payload.slug, parent_id: payload.parent_id })
         .eq('id', editing.id)
 
-      if (!error) {
-        setCategories(cats => cats.map(c =>
-          c.id === editing.id ? { ...c, ...payload } : c
-        ))
+      if (error) {
+        setSaveError(error.message.includes('duplicate') ? 'يوجد فئة بنفس الرابط (slug)' : error.message)
+        setLoading(false)
+        return
       }
+      setCategories(cats => cats.map(c => c.id === editing.id ? { ...c, ...payload } : c))
     } else {
       const { data, error } = await supabase
         .from('categories')
@@ -75,9 +82,12 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
         .select()
         .single()
 
-      if (!error && data) {
-        setCategories(cats => [...cats, data])
+      if (error) {
+        setSaveError(error.message.includes('duplicate') ? 'يوجد فئة بنفس الرابط (slug)' : error.message)
+        setLoading(false)
+        return
       }
+      if (data) setCategories(cats => [...cats, data])
     }
 
     setLoading(false)
@@ -97,24 +107,52 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
   }
 
   async function confirmDelete(id: string) {
+    setDeleteError('')
     setLoading(true)
     const supabase = createClient()
-    await supabase.from('categories').delete().eq('id', id)
+    const { error } = await supabase.from('categories').delete().eq('id', id)
+    if (error) {
+      setDeleteError(error.message)
+      setLoading(false)
+      return
+    }
     setCategories(cats => cats.filter(c => c.id !== id))
     setDeleteId(null)
     setLoading(false)
+    router.refresh()
   }
 
   const rootCategories = categories.filter(c => !c.parent_id)
   const getChildren = (id: string) => categories.filter(c => c.parent_id === id)
   const parentOptions = categories.filter(c => !c.parent_id && c.id !== editing?.id)
 
+  const q = searchQuery.trim().toLowerCase()
+  const filteredRoots = rootCategories.filter(cat =>
+    !q ||
+    cat.name.toLowerCase().includes(q) ||
+    getChildren(cat.id).some(ch => ch.name.toLowerCase().includes(q))
+  )
+  function getFilteredChildren(parentId: string) {
+    const children = getChildren(parentId)
+    if (!q) return children
+    const parentMatches = categories.find(c => c.id === parentId)?.name.toLowerCase().includes(q)
+    return parentMatches ? children : children.filter(ch => ch.name.toLowerCase().includes(q))
+  }
+
   return (
     <>
-      <div className="mb-4 flex justify-end">
+      {/* شريط البحث والإضافة */}
+      <div className="mb-4 flex gap-2">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder="ابحث في الفئات..."
+          className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-relaxed text-white placeholder-slate-500 outline-none focus:border-sky-500/50"
+        />
         <button
           onClick={openAdd}
-          className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400"
+          className="shrink-0 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm font-medium text-sky-400 hover:bg-sky-500/20 transition-colors"
         >
           + فئة جديدة
         </button>
@@ -127,9 +165,13 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
             أضف أول فئة
           </button>
         </div>
+      ) : filteredRoots.length === 0 ? (
+        <div className="rounded-xl border border-white/5 py-10 text-center">
+          <p className="text-slate-500">لا توجد نتائج لـ &quot;{searchQuery}&quot;</p>
+        </div>
       ) : (
         <div className="space-y-2">
-          {rootCategories.map(cat => (
+          {filteredRoots.map(cat => (
             <div key={cat.id}>
               <CategoryRow
                 cat={cat}
@@ -137,7 +179,7 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
                 onToggle={() => toggleActive(cat)}
                 onDelete={() => setDeleteId(cat.id)}
               />
-              {getChildren(cat.id).map(child => (
+              {getFilteredChildren(cat.id).map(child => (
                 <div key={child.id} className="mr-6 mt-1">
                   <CategoryRow
                     cat={child}
@@ -208,6 +250,10 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
               )}
             </div>
 
+            {saveError && (
+              <p className="mt-4 rounded-xl bg-red-500/10 px-4 py-2.5 text-sm text-red-400">{saveError}</p>
+            )}
+
             <div className="mt-6 flex justify-end gap-3">
               <button
                 onClick={() => setShowModal(false)}
@@ -227,25 +273,56 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
         </div>
       )}
 
-      {/* Confirm Delete */}
+      {/* نافذة تأكيد الحذف */}
       {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900 p-6 text-center">
-            <p className="text-white">هل تريد حذف هذه الفئة؟</p>
-            <p className="mt-1 text-sm text-slate-400">المنتجات المرتبطة بها لن تُحذف</p>
-            <div className="mt-5 flex justify-center gap-3">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+          onClick={() => setDeleteId(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-red-500/20 bg-slate-900 p-6"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-red-500/15">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
+                  <polyline points="3 6 5 6 17 6" />
+                  <path d="M8 6V4h4v2" />
+                  <path d="M16 6l-1 11H5L4 6" />
+                  <line x1="10" y1="11" x2="10" y2="15" />
+                  <line x1="8" y1="11" x2="8" y2="15" />
+                  <line x1="12" y1="11" x2="12" y2="15" />
+                </svg>
+              </div>
+              <div>
+                <p className="font-semibold text-white">حذف الفئة</p>
+                <p className="mt-0.5 text-sm text-slate-400">
+                  &quot;{categories.find(c => c.id === deleteId)?.name}&quot;
+                </p>
+              </div>
+            </div>
+
+            <p className="mb-5 text-sm text-slate-500">
+              هذا الإجراء لا يمكن التراجع عنه. المنتجات المرتبطة بهذه الفئة لن تُحذف.
+            </p>
+
+            {deleteError && (
+              <p className="mb-4 rounded-xl bg-red-500/10 px-4 py-2.5 text-sm text-red-400">{deleteError}</p>
+            )}
+
+            <div className="flex gap-3">
               <button
                 onClick={() => setDeleteId(null)}
-                className="rounded-xl border border-white/10 px-5 py-2 text-sm text-slate-400"
+                className="flex-1 rounded-xl border border-white/10 py-2.5 text-sm text-slate-400 hover:text-white transition-colors"
               >
                 إلغاء
               </button>
               <button
                 onClick={() => confirmDelete(deleteId)}
                 disabled={loading}
-                className="rounded-xl bg-red-500 px-5 py-2 text-sm font-medium text-white hover:bg-red-400 disabled:opacity-50"
+                className="flex-1 rounded-xl border border-red-500/40 bg-red-500/15 py-2.5 text-sm font-semibold text-red-400 hover:bg-red-500 hover:text-white hover:border-red-500 disabled:opacity-50 transition-all"
               >
-                حذف
+                {loading ? 'جاري الحذف...' : 'تأكيد الحذف'}
               </button>
             </div>
           </div>
@@ -277,14 +354,18 @@ function CategoryRow({
         <span className={`rounded-full px-2 py-0.5 text-xs ${cat.is_active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
           {cat.is_active ? 'نشط' : 'مخفي'}
         </span>
-        <button onClick={onToggle} className="rounded-lg p-1.5 text-slate-400 hover:bg-white/5 hover:text-white" title="تفعيل/إخفاء">
+        <button onClick={onToggle} className="rounded-lg p-1.5 text-slate-400 hover:bg-white/5 hover:text-white transition-colors" title="تفعيل/إخفاء">
           {cat.is_active ? '👁️' : '🙈'}
         </button>
-        <button onClick={onEdit} className="rounded-lg p-1.5 text-slate-400 hover:bg-white/5 hover:text-white" title="تعديل">
+        <button onClick={onEdit} className="rounded-lg p-1.5 text-slate-400 hover:bg-white/5 hover:text-white transition-colors" title="تعديل">
           ✏️
         </button>
-        <button onClick={onDelete} className="rounded-lg p-1.5 text-slate-400 hover:bg-red-500/10 hover:text-red-400" title="حذف">
-          🗑️
+        <button
+          onClick={onDelete}
+          className="rounded-lg border border-red-500/25 bg-red-500/8 px-2.5 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/20 hover:border-red-500/50 transition-colors"
+          title="حذف"
+        >
+          حذف
         </button>
       </div>
     </div>

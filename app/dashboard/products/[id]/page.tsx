@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { getStoreForUser } from '@/lib/supabase/getStore'
 import { redirect, notFound } from 'next/navigation'
 import ProductForm from '@/components/dashboard/products/ProductForm'
 
@@ -7,10 +8,13 @@ export default async function EditProductPage({ params }: { params: { id: string
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  const storeId = await getStoreForUser(supabase, user!.id)
+  if (!storeId) redirect('/onboarding')
+
   const { data: store } = await supabase
     .from('stores')
     .select('id, currency_code')
-    .eq('owner_id', user.id)
+    .eq('id', storeId)
     .single()
 
   if (!store) redirect('/onboarding')

@@ -93,10 +93,36 @@ export default function CustomersTable({ customers, currencyCode, storeId, activ
   }
 
   return (
-    <div className="space-y-4">
-      {/* تبويبات النوع */}
+    <div className="space-y-3">
+      {/* صف البحث وزر الإضافة */}
+      <div className="flex gap-2">
+        <form onSubmit={handleSearch} className="flex flex-1 gap-2">
+          <input
+            name="q"
+            defaultValue={searchQuery}
+            placeholder="ابحث بالاسم أو الهاتف..."
+            className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-relaxed text-white placeholder-slate-500 outline-none focus:border-sky-500/50"
+          />
+          <button
+            type="submit"
+            className="rounded-xl border border-white/10 px-4 py-3 text-sm text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+          >
+            بحث
+          </button>
+        </form>
+        <button
+          onClick={() => setShowAdd(true)}
+          className="shrink-0 flex items-center gap-1.5 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm font-medium text-sky-400 hover:bg-sky-500/20 transition-colors"
+        >
+          <span className="text-base leading-none">+</span>
+          <span className="hidden sm:inline">زبون جديد</span>
+          <span className="sm:hidden">جديد</span>
+        </button>
+      </div>
+
+      {/* صف الفلاتر والترتيب */}
       <div className="flex items-center justify-between gap-2">
-        <div className="flex gap-1 overflow-x-auto pb-1">
+        <div className="flex gap-1 overflow-x-auto">
           {TYPE_TABS.map(tab => (
             <Link
               key={tab.key}
@@ -111,31 +137,10 @@ export default function CustomersTable({ customers, currencyCode, storeId, activ
             </Link>
           ))}
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="shrink-0 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500"
-        >
-          + زبون جديد
-        </button>
-      </div>
-
-      {/* البحث والترتيب */}
-      <div className="flex gap-2">
-        <form onSubmit={handleSearch} className="flex flex-1 gap-2">
-          <input
-            name="q"
-            defaultValue={searchQuery}
-            placeholder="ابحث بالاسم أو الهاتف..."
-            className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-sky-500/50"
-          />
-          <button type="submit" className="rounded-xl bg-white/5 px-4 py-2 text-sm text-slate-300 hover:bg-white/10">
-            بحث
-          </button>
-        </form>
         <select
           value={sort}
           onChange={e => router.push(buildUrl({ sort: e.target.value }))}
-          className="rounded-xl border border-white/10 bg-slate-800 px-3 py-2 text-sm text-slate-300 outline-none"
+          className="shrink-0 rounded-xl border border-white/10 bg-slate-800 px-3 py-2 text-sm text-slate-300 outline-none"
         >
           <option value="created_at">الأحدث</option>
           <option value="balance">الأعلى ذمة</option>

@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { getStoreForUser } from '@/lib/supabase/getStore'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 
@@ -7,10 +8,13 @@ export default async function AlertsPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  const storeId = await getStoreForUser(supabase, user!.id)
+  if (!storeId) redirect('/onboarding')
+
   const { data: store } = await supabase
     .from('stores')
     .select('id, currency_code')
-    .eq('owner_id', user.id)
+    .eq('id', storeId)
     .single()
   if (!store) redirect('/onboarding')
 
@@ -20,16 +24,19 @@ export default async function AlertsPage() {
     .eq('store_id', store.id)
     .eq('is_active', true)
     .eq('track_stock', true)
-    .lte('stock_available', 5)
     .order('stock_available', { ascending: true })
 
-  // نفلتر يدوياً حسب low_stock_alert الخاص بكل منتج
-  const alerts = (products ?? []).filter((p: {
+  type AlertProduct = {
     id: string; name: string; sku: string | null; thumbnail_url: string | null
     stock_quantity: number; stock_available: number; low_stock_alert: number | null; price: number
-  }) => p.stock_available <= (p.low_stock_alert ?? 5))
+  }
 
-  type AlertProduct = typeof alerts[number]
+  // نفد المخزون تماماً أو وصل لحد التنبيه المضبوط يدوياً
+  const alerts = (products ?? [] as AlertProduct[]).filter((p: AlertProduct) =>
+    p.stock_available <= 0 ||
+    (p.low_stock_alert != null && p.low_stock_alert > 0 && p.stock_available <= p.low_stock_alert)
+  )
+
   const outOfStock = alerts.filter((p: AlertProduct) => p.stock_available <= 0)
   const lowStock   = alerts.filter((p: AlertProduct) => p.stock_available > 0)
 

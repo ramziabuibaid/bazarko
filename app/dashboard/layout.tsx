@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import Sidebar from '@/components/dashboard/Sidebar'
+import { getStoreForUser } from '@/lib/supabase/getStore'
+import DashboardShell from '@/components/dashboard/DashboardShell'
 
 export default async function DashboardLayout({
   children,
@@ -9,28 +10,18 @@ export default async function DashboardLayout({
 }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
 
-  if (!user) {
-    redirect('/login')
-  }
+  const storeId = await getStoreForUser(supabase, user.id)
+  if (!storeId) redirect('/onboarding')
 
-  // جلب بيانات المتجر
   const { data: store } = await supabase
     .from('stores')
     .select('id, name, subdomain, country_code, plan, modules, full_subdomain')
-    .eq('owner_id', user.id)
+    .eq('id', storeId)
     .single()
 
-  if (!store) {
-    redirect('/onboarding')
-  }
+  if (!store) redirect('/onboarding')
 
-  return (
-    <div className="flex h-screen overflow-hidden bg-slate-950 text-white" dir="rtl">
-      <Sidebar store={store} />
-      <main className="flex-1 overflow-y-auto">
-        {children}
-      </main>
-    </div>
-  )
+  return <DashboardShell store={store}>{children}</DashboardShell>
 }

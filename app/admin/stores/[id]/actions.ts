@@ -47,3 +47,39 @@ export async function updateStorePlan(storeId: string, plan: string, expiresAt: 
   revalidatePath(`/admin/stores/${storeId}`)
   revalidatePath('/admin/stores')
 }
+
+export async function updateStoreDomain(storeId: string, newSubdomain: string) {
+  await assertAdmin()
+  const sanitized = newSubdomain.trim().toLowerCase().replace(/[^a-z0-9-]/g, '')
+  if (!sanitized || sanitized.length < 3) throw new Error('الـ subdomain يجب أن يكون 3 أحرف على الأقل ويحتوي أحرف إنجليزية أو أرقام فقط')
+
+  const supabase = createAdminClient()
+  const { data: store } = await supabase.from('stores').select('country_code').eq('id', storeId).single()
+  if (!store) throw new Error('المتجر غير موجود')
+
+  const { data: existing } = await supabase
+    .from('stores')
+    .select('id')
+    .eq('subdomain', sanitized)
+    .eq('country_code', store.country_code)
+    .neq('id', storeId)
+    .maybeSingle()
+
+  if (existing) throw new Error('هذا الـ subdomain مستخدم من متجر آخر في نفس البلد')
+
+  const { error } = await supabase.from('stores').update({ subdomain: sanitized }).eq('id', storeId)
+  if (error) throw new Error(error.message)
+
+  revalidatePath(`/admin/stores/${storeId}`)
+  revalidatePath('/admin/stores')
+  revalidatePath('/admin')
+}
+
+export async function resetUserPassword(userId: string, newPassword: string) {
+  await assertAdmin()
+  if (newPassword.length < 8) throw new Error('كلمة السر يجب أن تكون 8 أحرف على الأقل')
+
+  const supabase = createAdminClient()
+  const { error } = await supabase.auth.admin.updateUserById(userId, { password: newPassword })
+  if (error) throw new Error(error.message)
+}

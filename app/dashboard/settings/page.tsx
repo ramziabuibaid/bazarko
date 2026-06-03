@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { getStoreForUser } from '@/lib/supabase/getStore'
 import { redirect } from 'next/navigation'
 import StoreSettingsForm from '@/components/dashboard/settings/StoreSettingsForm'
 
@@ -7,10 +8,13 @@ export default async function SettingsPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  const storeId = await getStoreForUser(supabase, user!.id)
+  if (!storeId) redirect('/onboarding')
+
   const { data: store } = await supabase
     .from('stores')
     .select('id, name, description, logo_url, cover_url, phone, whatsapp, email, city, address, subdomain, country_code, currency_code, full_subdomain')
-    .eq('owner_id', user.id)
+    .eq('id', storeId)
     .single()
 
   if (!store) redirect('/onboarding')

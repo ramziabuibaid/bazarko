@@ -1,5 +1,6 @@
 import './globals.css'
 import type { Metadata } from 'next'
+import NextTopLoader from 'nextjs-toploader'
 
 export const metadata: Metadata = {
   title: 'Bazarko — منصة التجارة الإلكترونية العربية',
@@ -18,7 +19,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ar" dir="rtl">
-      <body className="bg-slate-950 text-white antialiased">{children}</body>
+      <body className="bg-slate-950 text-white antialiased">
+        <NextTopLoader color="#38bdf8" height={3} showSpinner={false} shadow={false} />
+        {children}
+      </body>
     </html>
   )
 }

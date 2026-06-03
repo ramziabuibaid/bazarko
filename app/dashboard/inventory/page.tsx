@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { getStoreForUser } from '@/lib/supabase/getStore'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import InventoryTable from '@/components/dashboard/inventory/InventoryTable'
@@ -12,10 +13,13 @@ export default async function InventoryPage({ searchParams }: Props) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  const storeId = await getStoreForUser(supabase, user!.id)
+  if (!storeId) redirect('/onboarding')
+
   const { data: store } = await supabase
     .from('stores')
     .select('id, currency_code')
-    .eq('owner_id', user.id)
+    .eq('id', storeId)
     .single()
   if (!store) redirect('/onboarding')
 
@@ -48,8 +52,13 @@ export default async function InventoryPage({ searchParams }: Props) {
   type StockRow = { stock_quantity: number; stock_available: number; low_stock_alert: number | null; cost_price: number | null; track_stock: boolean }
   const tracked = (all ?? [] as StockRow[]).filter((p: StockRow) => p.track_stock)
   const outOfStock  = tracked.filter((p: StockRow) => (p.stock_available ?? 0) <= 0).length
-  const lowStock    = tracked.filter((p: StockRow) => (p.stock_available ?? 0) > 0 && (p.stock_available ?? 0) <= (p.low_stock_alert ?? 5)).length
-  const totalValue  = tracked.reduce((s: number, p: StockRow) => s + (p.stock_quantity ?? 0) * (p.cost_price ?? p.stock_available ?? 0), 0)
+  const lowStock    = tracked.filter((p: StockRow) =>
+    (p.stock_available ?? 0) > 0 &&
+    p.low_stock_alert != null &&
+    p.low_stock_alert > 0 &&
+    (p.stock_available ?? 0) <= p.low_stock_alert
+  ).length
+  const totalValue  = tracked.reduce((s: number, p: StockRow) => s + (p.stock_quantity ?? 0) * (p.cost_price ?? 0), 0)
 
   return (
     <div className="p-6">

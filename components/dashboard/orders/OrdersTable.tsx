@@ -126,88 +126,151 @@ export default function OrdersTable({
           name="q"
           defaultValue={searchQuery}
           placeholder="ابحث برقم الطلبية أو اسم الزبون أو رقم الهاتف..."
-          className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-sky-500/50"
+          className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-relaxed text-white placeholder-slate-500 outline-none focus:border-sky-500/50"
         />
         <button
           type="submit"
-          className="rounded-xl bg-sky-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-sky-500"
+          className="rounded-xl border border-white/10 px-4 py-3 text-sm text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
         >
           بحث
         </button>
         {searchQuery && (
           <Link
             href={buildUrl({ q: '', page: '1' })}
-            className="rounded-xl border border-white/10 px-4 py-2.5 text-sm text-slate-400 hover:text-white"
+            className="rounded-xl border border-white/10 px-4 py-3 text-sm text-slate-400 hover:text-white transition-colors"
           >
             ✕
           </Link>
         )}
       </form>
 
-      {/* الجدول */}
-      {orders.length === 0 ? (
+      {/* فارغ */}
+      {orders.length === 0 && (
         <div className="rounded-2xl border border-white/5 bg-white/3 py-16 text-center">
           <p className="text-4xl">📦</p>
           <p className="mt-3 text-slate-400">لا توجد طلبيات</p>
         </div>
-      ) : (
-        <div className="overflow-hidden rounded-2xl border border-white/5">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-white/5 bg-white/3">
-                <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">رقم الطلبية</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الزبون</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">المدينة</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الإجمالي</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الدفع</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الحالة</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">التاريخ</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {orders.map(order => {
-                const st = STATUS_LABELS[order.status] ?? { label: order.status, color: 'bg-white/10 text-white' }
-                return (
-                  <tr key={order.id} className="hover:bg-white/3 transition-colors">
-                    <td className="px-4 py-3">
-                      <span className="font-mono text-sm text-white" dir="ltr">{order.order_number}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="text-sm text-white">{order.customer_name ?? '—'}</p>
-                      {order.customer_phone && (
-                        <p className="text-xs text-slate-500" dir="ltr">{order.customer_phone}</p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-300">{order.shipping_city ?? '—'}</td>
-                    <td className="px-4 py-3 text-sm font-semibold text-white">
-                      {order.total_amount.toLocaleString('ar')} {currencyCode}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-300">
-                      {PAYMENT_LABELS[order.payment_method] ?? order.payment_method}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${st.color}`}>
-                        {st.label}
+      )}
+
+      {orders.length > 0 && (
+        <>
+          {/* ── موبايل: بطاقات ── */}
+          <div className="md:hidden space-y-3">
+            {orders.map(order => {
+              const st = STATUS_LABELS[order.status] ?? { label: order.status, color: 'bg-white/10 text-white' }
+              return (
+                <div key={order.id} className="rounded-2xl border border-white/5 bg-slate-900 p-4">
+                  {/* رقم الطلبية + الحالة */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-sm font-semibold text-white" dir="ltr">
+                      {order.order_number}
+                    </span>
+                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${st.color}`}>
+                      {st.label}
+                    </span>
+                  </div>
+
+                  {/* الزبون */}
+                  <div className="mt-2.5">
+                    <p className="text-sm font-medium text-white">{order.customer_name ?? '—'}</p>
+                    {order.customer_phone && (
+                      <p className="mt-0.5 text-xs text-slate-400" dir="ltr">{order.customer_phone}</p>
+                    )}
+                  </div>
+
+                  {/* فاصل */}
+                  <div className="my-3 border-t border-white/5" />
+
+                  {/* الإجمالي + طريقة الدفع */}
+                  <div className="flex items-center justify-between text-sm">
+                    <div>
+                      <span className="text-xs text-slate-500">الإجمالي: </span>
+                      <span className="font-bold text-white" dir="ltr">
+                        {order.total_amount.toLocaleString('ar')} {currencyCode}
                       </span>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-500">
-                      {formatDate(order.created_at)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Link
-                        href={`/dashboard/orders/${order.id}`}
-                        className="rounded-lg bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-white"
-                      >
-                        تفاصيل
-                      </Link>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+                    </div>
+                    <div>
+                      <span className="text-xs text-slate-500">الدفع: </span>
+                      <span className="text-xs text-slate-300">
+                        {PAYMENT_LABELS[order.payment_method] ?? order.payment_method}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* التاريخ + زر العرض */}
+                  <div className="mt-3 flex items-center justify-between">
+                    <p className="text-xs text-slate-500">{formatDate(order.created_at)}</p>
+                    <Link
+                      href={`/dashboard/orders/${order.id}`}
+                      className="rounded-xl border border-white/10 px-4 py-1.5 text-xs font-semibold text-slate-300 hover:border-sky-500/30 hover:bg-sky-500/10 hover:text-sky-400 transition-colors"
+                    >
+                      عرض ←
+                    </Link>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* ── ديسكتوب: جدول ── */}
+          <div className="hidden md:block overflow-hidden rounded-2xl border border-white/5">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-white/5 bg-white/3">
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">رقم الطلبية</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الزبون</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">المدينة</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الإجمالي</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الدفع</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الحالة</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">التاريخ</th>
+                  <th className="px-4 py-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {orders.map(order => {
+                  const st = STATUS_LABELS[order.status] ?? { label: order.status, color: 'bg-white/10 text-white' }
+                  return (
+                    <tr key={order.id} className="hover:bg-white/3 transition-colors">
+                      <td className="px-4 py-3">
+                        <span className="font-mono text-sm text-white" dir="ltr">{order.order_number}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <p className="text-sm text-white">{order.customer_name ?? '—'}</p>
+                        {order.customer_phone && (
+                          <p className="text-xs text-slate-500" dir="ltr">{order.customer_phone}</p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-300">{order.shipping_city ?? '—'}</td>
+                      <td className="px-4 py-3 text-sm font-semibold text-white">
+                        {order.total_amount.toLocaleString('ar')} {currencyCode}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-300">
+                        {PAYMENT_LABELS[order.payment_method] ?? order.payment_method}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${st.color}`}>
+                          {st.label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-500">
+                        {formatDate(order.created_at)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Link
+                          href={`/dashboard/orders/${order.id}`}
+                          className="rounded-lg bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-white"
+                        >
+                          تفاصيل
+                        </Link>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {/* الترقيم */}

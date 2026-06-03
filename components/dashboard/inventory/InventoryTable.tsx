@@ -37,20 +37,21 @@ const MOVEMENT_TYPES = [
 ]
 
 function stockBadge(available: number, alert: number | null): { label: string; cls: string } {
-  if (available <= 0)                         return { label: 'نفد',          cls: 'bg-red-500/15 text-red-400' }
-  if (available <= (alert ?? 5))              return { label: `⚠️ ${available}`, cls: 'bg-yellow-500/15 text-yellow-400' }
-  return { label: String(available),          cls: 'bg-emerald-500/15 text-emerald-400' }
+  if (available <= 0) return { label: 'نفد', cls: 'bg-red-500/15 text-red-400' }
+  if (alert != null && alert > 0 && available <= alert) return { label: `⚠️ ${available}`, cls: 'bg-yellow-500/15 text-yellow-400' }
+  return { label: String(available), cls: 'bg-emerald-500/15 text-emerald-400' }
 }
 
 export default function InventoryTable({ products, currencyCode, storeId, userId, searchQuery, statusFilter }: Props) {
   const router = useRouter()
   const [adjustProduct, setAdjustProduct] = useState<Product | null>(null)
-  const [adjType, setAdjType]     = useState('purchase')
-  const [adjQty, setAdjQty]       = useState('')
-  const [adjDir, setAdjDir]       = useState('+')   // لـ adjustment فقط
-  const [adjNotes, setAdjNotes]   = useState('')
-  const [saving, setSaving]       = useState(false)
-  const [adjError, setAdjError]   = useState('')
+  const [adjType, setAdjType]           = useState('purchase')
+  const [adjQty, setAdjQty]             = useState('')
+  const [adjDir, setAdjDir]             = useState('+')
+  const [adjNotes, setAdjNotes]         = useState('')
+  const [adjAlert, setAdjAlert]         = useState('')
+  const [saving, setSaving]             = useState(false)
+  const [adjError, setAdjError]         = useState('')
 
   function handleSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -67,28 +68,41 @@ export default function InventoryTable({ products, currencyCode, storeId, userId
     setAdjQty('')
     setAdjDir('+')
     setAdjNotes('')
+    setAdjAlert(p.low_stock_alert != null ? String(p.low_stock_alert) : '')
     setAdjError('')
   }
 
   async function submitAdj(e: React.FormEvent) {
     e.preventDefault()
     if (!adjustProduct) return
-    const qty = parseInt(adjQty)
-    if (!qty || qty <= 0) { setAdjError('أدخل كمية صحيحة أكبر من صفر'); return }
 
-    const mt = MOVEMENT_TYPES.find(m => m.value === adjType)!
-    const signedQty = mt.sign === 0 ? (adjDir === '+' ? qty : -qty) : mt.sign * qty
+    const hasQty   = adjQty.trim() !== ''
+    const hasAlert = adjAlert.trim() !== ''
 
-    const qBefore = adjustProduct.stock_quantity
-    const qAfter  = qBefore + signedQty
+    if (!hasQty && !hasAlert) {
+      setAdjError('أدخل كمية للتعديل أو حدد حد إعادة الطلب')
+      return
+    }
 
-    if (qAfter < 0) { setAdjError('المخزون لا يمكن أن يصبح سالباً'); return }
-
-    setSaving(true)
     const supabase = createClient()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const productUpdate: Record<string, any> = { updated_at: new Date().toISOString() }
+    let hasError = false
 
-    const [{ error: mvErr }, { error: pErr }] = await Promise.all([
-      supabase.from('stock_movements').insert({
+    // تعديل الكمية
+    if (hasQty) {
+      const qty = parseInt(adjQty)
+      if (!qty || qty <= 0) { setAdjError('أدخل كمية صحيحة أكبر من صفر'); return }
+
+      const mt = MOVEMENT_TYPES.find(m => m.value === adjType)!
+      const signedQty = mt.sign === 0 ? (adjDir === '+' ? qty : -qty) : mt.sign * qty
+      const qBefore   = adjustProduct.stock_quantity
+      const qAfter    = qBefore + signedQty
+
+      if (qAfter < 0) { setAdjError('المخزون لا يمكن أن يصبح سالباً'); return }
+
+      setSaving(true)
+      const { error: mvErr } = await supabase.from('stock_movements').insert({
         store_id: storeId,
         product_id: adjustProduct.id,
         type: adjType,
@@ -97,15 +111,27 @@ export default function InventoryTable({ products, currencyCode, storeId, userId
         quantity_after: qAfter,
         notes: adjNotes.trim() || null,
         created_by: userId,
-      }),
-      supabase.from('products').update({
-        stock_quantity: qAfter,
-        updated_at: new Date().toISOString(),
-      }).eq('id', adjustProduct.id),
-    ])
+      })
+      if (mvErr) hasError = true
+      productUpdate.stock_quantity = qAfter
+    } else {
+      setSaving(true)
+    }
+
+    // تعديل حد إعادة الطلب: 0 يعني "لا تنبيه" (يُحفظ كـ null)
+    if (hasAlert) {
+      const alertVal = parseInt(adjAlert)
+      productUpdate.low_stock_alert = (!alertVal || alertVal <= 0) ? null : alertVal
+    }
+
+    const { error: pErr } = await supabase
+      .from('products')
+      .update(productUpdate)
+      .eq('id', adjustProduct.id)
+    if (pErr) hasError = true
 
     setSaving(false)
-    if (mvErr || pErr) { setAdjError('حدث خطأ أثناء التعديل'); return }
+    if (hasError) { setAdjError('حدث خطأ أثناء الحفظ'); return }
 
     setAdjustProduct(null)
     router.refresh()
@@ -170,7 +196,7 @@ export default function InventoryTable({ products, currencyCode, storeId, userId
             <tbody className="divide-y divide-white/5">
               {products.map(p => {
                 const badge = stockBadge(p.stock_available, p.low_stock_alert)
-                const value = (p.stock_quantity ?? 0) * (p.cost_price ?? p.price ?? 0)
+                const value = (p.stock_quantity ?? 0) * (p.cost_price ?? 0)
                 return (
                   <tr key={p.id} className="hover:bg-white/3 transition-colors">
                     <td className="px-4 py-3">
@@ -311,6 +337,34 @@ export default function InventoryTable({ products, currencyCode, storeId, userId
                 />
               </div>
 
+              {/* حد إعادة الطلب */}
+              <div className="rounded-xl border border-white/5 bg-white/3 p-4">
+                <label className="mb-1 block text-sm font-medium text-slate-300">
+                  ⚙️ حد إعادة الطلب
+                </label>
+                <p className="mb-2 text-xs text-slate-500">
+                  عند وصول الكمية المتاحة لهذا العدد يظهر تنبيه أصفر — اكتب 0 لتعطيل التنبيه
+                </p>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number" min="0" step="1"
+                    value={adjAlert}
+                    onChange={e => setAdjAlert(e.target.value)}
+                    placeholder={adjustProduct?.low_stock_alert != null ? String(adjustProduct.low_stock_alert) : 'غير محدد'}
+                    dir="ltr"
+                    className="w-32 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none focus:border-sky-500/50"
+                  />
+                  {adjustProduct?.low_stock_alert != null && adjustProduct.low_stock_alert > 0 && (
+                    <span className="text-xs text-yellow-400">
+                      الحالي: {adjustProduct.low_stock_alert} قطعة
+                    </span>
+                  )}
+                  {(adjustProduct?.low_stock_alert == null || adjustProduct.low_stock_alert === 0) && (
+                    <span className="text-xs text-slate-500">لا يوجد حد مضبوط</span>
+                  )}
+                </div>
+              </div>
+
               {adjError && <p className="text-sm text-red-400">{adjError}</p>}
 
               <div className="flex gap-3 pt-1">
@@ -320,7 +374,7 @@ export default function InventoryTable({ products, currencyCode, storeId, userId
                 </button>
                 <button type="submit" disabled={saving}
                   className="flex-1 rounded-xl bg-sky-600 py-2.5 text-sm font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
-                  {saving ? 'جاري الحفظ...' : 'تأكيد التعديل'}
+                  {saving ? 'جاري الحفظ...' : adjQty ? 'تأكيد التعديل' : 'حفظ الإعدادات'}
                 </button>
               </div>
             </form>

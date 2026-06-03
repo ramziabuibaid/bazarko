@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { getStoreForUser } from '@/lib/supabase/getStore'
 import { redirect, notFound } from 'next/navigation'
 import InvoiceView from '@/components/dashboard/accounting/InvoiceView'
 
@@ -11,10 +12,13 @@ export default async function InvoiceDetailPage({ params }: Props) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  const storeId = await getStoreForUser(supabase, user!.id)
+  if (!storeId) redirect('/onboarding')
+
   const { data: store } = await supabase
     .from('stores')
     .select('id, currency_code, name, phone')
-    .eq('owner_id', user.id)
+    .eq('id', storeId)
     .single()
   if (!store) redirect('/onboarding')
 
