@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { generateSlug } from '@/lib/utils/slug'
 
@@ -354,6 +355,16 @@ function CategoryRow({
         <span className={`rounded-full px-2 py-0.5 text-xs ${cat.is_active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
           {cat.is_active ? 'نشط' : 'مخفي'}
         </span>
+        <Link
+          href={`/dashboard/products/new?category_id=${cat.id}`}
+          className="rounded-lg p-1.5 text-slate-400 hover:bg-sky-500/10 hover:text-sky-400 transition-colors"
+          title={`إضافة منتج في "${cat.name}"`}
+        >
+          <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+            <line x1="7.5" y1="2" x2="7.5" y2="13" />
+            <line x1="2" y1="7.5" x2="13" y2="7.5" />
+          </svg>
+        </Link>
         <button onClick={onToggle} className="rounded-lg p-1.5 text-slate-400 hover:bg-white/5 hover:text-white transition-colors" title="تفعيل/إخفاء">
           {cat.is_active ? '👁️' : '🙈'}
         </button>

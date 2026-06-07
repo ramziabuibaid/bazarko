@@ -8,6 +8,7 @@ import { uploadProductImage, deleteProductImage } from '@/lib/supabase/storage'
 
 interface Category { id: string; name: string }
 
+
 interface ProductData {
   id?: string
   name: string
@@ -55,6 +56,12 @@ export default function ProductForm({ storeId, currencyCode, categories, initial
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
 
+  // إدارة الفئات بشكل محلي للسماح بالإضافة الفورية
+  const [cats, setCats] = useState<Category[]>(categories)
+  const [addingCat, setAddingCat] = useState(false)
+  const [newCatName, setNewCatName] = useState('')
+  const [addingCatLoading, setAddingCatLoading] = useState(false)
+
   function set(field: keyof ProductData, value: string | boolean | string[]) {
     setForm(f => ({ ...f, [field]: value }))
     setError('')
@@ -66,6 +73,29 @@ export default function ProductForm({ storeId, currencyCode, categories, initial
       name,
       slug: isEditing ? f.slug : generateSlug(name),
     }))
+  }
+
+  async function handleAddCategory() {
+    const trimmed = newCatName.trim()
+    if (!trimmed) return
+    setAddingCatLoading(true)
+    setError('')
+    const supabase = createClient()
+    const slug = generateSlug(trimmed) || `cat-${Date.now()}`
+    const { data, error: err } = await supabase
+      .from('categories')
+      .insert({ store_id: storeId, name: trimmed, slug, is_active: true })
+      .select('id, name')
+      .single()
+    setAddingCatLoading(false)
+    if (err || !data) {
+      setError(err?.message.includes('duplicate') ? 'توجد فئة بنفس الاسم' : (err?.message ?? 'فشل إضافة الفئة'))
+      return
+    }
+    setCats(c => [...c, data])
+    set('category_id', data.id)
+    setAddingCat(false)
+    setNewCatName('')
   }
 
   async function handleImageUpload(files: FileList | null) {
@@ -201,10 +231,73 @@ export default function ProductForm({ storeId, currencyCode, categories, initial
 
           <div>
             <Label>الفئة</Label>
-            <select value={form.category_id} onChange={e => set('category_id', e.target.value)} className={input()}>
-              <option value="">— بدون فئة —</option>
-              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+
+            {/* اختيار الفئة أو إضافة جديدة */}
+            {cats.length > 0 ? (
+              <div className="flex items-stretch gap-2">
+                <select
+                  value={form.category_id}
+                  onChange={e => set('category_id', e.target.value)}
+                  className={`${input()} flex-1`}
+                >
+                  <option value="">— بدون فئة —</option>
+                  {cats.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setAddingCat(v => !v)}
+                  title="إضافة فئة جديدة"
+                  className={`flex shrink-0 items-center justify-center rounded-xl border px-3 text-lg transition-colors ${
+                    addingCat
+                      ? 'border-sky-500/40 bg-sky-500/10 text-sky-400'
+                      : 'border-white/10 bg-slate-800 text-slate-400 hover:border-sky-500/40 hover:text-sky-400'
+                  }`}
+                >
+                  +
+                </button>
+              </div>
+            ) : !addingCat ? (
+              <button
+                type="button"
+                onClick={() => setAddingCat(true)}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-sky-500/30 bg-sky-500/5 px-4 py-3 text-sm text-sky-400 transition-colors hover:border-sky-500/50 hover:bg-sky-500/10"
+              >
+                <span className="text-base leading-none">+</span>
+                إضافة فئة جديدة
+              </button>
+            ) : null}
+
+            {/* نموذج الإضافة السريعة */}
+            {addingCat && (
+              <div className="mt-2 flex gap-2">
+                <input
+                  autoFocus
+                  value={newCatName}
+                  onChange={e => setNewCatName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.preventDefault(); handleAddCategory() }
+                    if (e.key === 'Escape') { setAddingCat(false); setNewCatName('') }
+                  }}
+                  placeholder="اسم الفئة الجديدة"
+                  className={`${input()} flex-1`}
+                />
+                <button
+                  type="button"
+                  onClick={handleAddCategory}
+                  disabled={addingCatLoading || !newCatName.trim()}
+                  className="shrink-0 rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-50"
+                >
+                  {addingCatLoading ? '...' : 'إضافة'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAddingCat(false); setNewCatName('') }}
+                  className="shrink-0 rounded-xl border border-white/10 px-3 py-2.5 text-sm text-slate-400 hover:text-white"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </Section>
@@ -368,18 +461,18 @@ export default function ProductForm({ storeId, currencyCode, categories, initial
       )}
 
       {/* ── أزرار الحفظ ── */}
-      <div className="flex justify-end gap-3 pb-8">
+      <div className="flex flex-col-reverse gap-2 pb-8 sm:flex-row sm:justify-end sm:gap-3">
         <button
           type="button"
           onClick={() => router.back()}
-          className="rounded-xl border border-white/10 px-6 py-2.5 text-sm text-slate-400 hover:text-white"
+          className="w-full rounded-xl border border-white/10 px-6 py-3 text-sm text-slate-400 hover:text-white sm:w-auto sm:py-2.5"
         >
           إلغاء
         </button>
         <button
           type="submit"
           disabled={saving}
-          className="rounded-xl bg-sky-500 px-8 py-2.5 text-sm font-semibold text-slate-950 hover:bg-sky-400 disabled:opacity-50"
+          className="w-full rounded-xl bg-sky-500 px-8 py-3 text-sm font-semibold text-slate-950 hover:bg-sky-400 disabled:opacity-50 sm:w-auto sm:py-2.5"
         >
           {saving ? 'جاري الحفظ...' : isEditing ? 'حفظ التغييرات' : 'إضافة المنتج'}
         </button>
@@ -392,7 +485,7 @@ export default function ProductForm({ storeId, currencyCode, categories, initial
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-white/5 bg-slate-900 p-5">
+    <div className="rounded-xl border border-white/5 bg-slate-900 p-4 sm:p-5">
       <h2 className="mb-4 text-sm font-medium text-slate-400 uppercase tracking-wide">{title}</h2>
       {children}
     </div>
