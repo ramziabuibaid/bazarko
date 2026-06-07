@@ -48,7 +48,10 @@ export default function DeliveryManager({
   const supabase = createClient()
 
   const [deliveryEnabled, setDeliveryEnabled] = useState(initialDeliveryEnabled)
-  const [freeThreshold, setFreeThreshold]     = useState(initialFreeThreshold != null ? String(initialFreeThreshold) : '')
+  // treat 0 same as null — empty means "no free shipping threshold"
+  const [freeThreshold, setFreeThreshold]     = useState(
+    initialFreeThreshold != null && initialFreeThreshold > 0 ? String(initialFreeThreshold) : ''
+  )
   const [zones, setZones]                     = useState<Zone[]>(initialZones)
 
   const [showModal, setShowModal]   = useState(false)
@@ -57,6 +60,7 @@ export default function DeliveryManager({
   const [form, setForm]             = useState(EMPTY_FORM)
   const [saving, setSaving]         = useState(false)
   const [savingSettings, setSavingSettings] = useState(false)
+  const [savedOk, setSavedOk]       = useState(false)
   const [error, setError]           = useState('')
 
   // ── إعدادات المتجر ─────────────────────────────────────────
@@ -69,9 +73,12 @@ export default function DeliveryManager({
   async function saveSettings(e: React.FormEvent) {
     e.preventDefault()
     setSavingSettings(true)
-    const threshold = freeThreshold.trim() ? parseFloat(freeThreshold) : null
+    const parsed    = parseFloat(freeThreshold)
+    const threshold = freeThreshold.trim() && parsed > 0 ? parsed : null
     await supabase.from('stores').update({ free_delivery_threshold: threshold }).eq('id', storeId)
     setSavingSettings(false)
+    setSavedOk(true)
+    setTimeout(() => setSavedOk(false), 3000)
     router.refresh()
   }
 
@@ -171,28 +178,32 @@ export default function DeliveryManager({
           {/* حد الشحن المجاني */}
           <form onSubmit={saveSettings} className="flex items-end gap-3 border-t border-white/5 pt-4">
             <div className="flex-1">
-              <label className="mb-1.5 block text-sm font-medium text-slate-300">
+              <label className="mb-1 block text-sm font-medium text-slate-300">
                 حد الشحن المجاني
-                <span className="mr-1.5 text-xs font-normal text-slate-500">اتركه فارغاً لتعطيل الشحن المجاني</span>
               </label>
+              <p className="mb-2 text-xs text-slate-500">
+                أدخل الحد الأدنى لقيمة الطلب للحصول على شحن مجاني — اتركه فارغاً لتعطيل هذه الميزة
+              </p>
               <div className="flex items-center gap-2">
                 <input
                   type="number"
-                  min="0"
+                  min="1"
                   step="0.01"
                   value={freeThreshold}
                   onChange={e => setFreeThreshold(e.target.value)}
-                  placeholder="0"
+                  placeholder="مثلاً: 100"
                   dir="ltr"
-                  className="w-40 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white outline-none focus:border-sky-500/50"
+                  className="w-40 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-sky-500/50"
                 />
                 <span className="text-sm text-slate-400">{currencyCode}</span>
               </div>
-              {freeThreshold && parseFloat(freeThreshold) > 0 && (
+              {freeThreshold && parseFloat(freeThreshold) > 0 ? (
                 <p className="mt-1.5 text-xs text-emerald-400">
-                  الطلبيات فوق {parseFloat(freeThreshold).toLocaleString('ar')} {currencyCode} — الشحن مجاني
+                  ✓ الطلبيات فوق {parseFloat(freeThreshold).toLocaleString('ar')} {currencyCode} تحصل على شحن مجاني
                 </p>
-              )}
+              ) : freeThreshold === '' ? (
+                <p className="mt-1.5 text-xs text-slate-500">الشحن المجاني معطّل حالياً</p>
+              ) : null}
             </div>
             <button
               type="submit"
@@ -259,7 +270,7 @@ export default function DeliveryManager({
                       {zone.cost === 0 ? (
                         <span className="text-sm font-semibold text-emerald-400">مجاني</span>
                       ) : (
-                        <span className="text-sm font-semibold text-white" dir="ltr">
+                        <span className="whitespace-nowrap text-sm font-semibold text-white" dir="ltr">
                           {zone.cost.toLocaleString('ar')} {currencyCode}
                         </span>
                       )}
@@ -399,6 +410,18 @@ export default function DeliveryManager({
           </div>
         </div>
       )}
+
+      {/* Toast نجاح الحفظ */}
+      <div
+        className={`fixed bottom-6 left-1/2 z-50 -translate-x-1/2 flex items-center gap-2.5 rounded-xl border border-emerald-500/30 bg-slate-900 px-5 py-3 text-sm font-medium text-emerald-400 shadow-xl shadow-black/40 transition-all duration-300 ${
+          savedOk ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3 pointer-events-none'
+        }`}
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="2 8 6 12 14 4" />
+        </svg>
+        تم حفظ إعدادات التوصيل بنجاح
+      </div>
 
       {/* نافذة تأكيد الحذف */}
       {deleteId && (

@@ -5,7 +5,13 @@ import Link from 'next/link'
 import OrdersTable from '@/components/dashboard/orders/OrdersTable'
 
 interface Props {
-  searchParams: { status?: string; q?: string; page?: string }
+  searchParams: {
+    status?: string
+    q?: string
+    page?: string
+    dateFrom?: string
+    dateTo?: string
+  }
 }
 
 export default async function OrdersPage({ searchParams }: Props) {
@@ -24,14 +30,17 @@ export default async function OrdersPage({ searchParams }: Props) {
 
   if (!store) redirect('/onboarding')
 
-  const page = Math.max(1, parseInt(searchParams.page ?? '1'))
+  const page     = Math.max(1, parseInt(searchParams.page ?? '1'))
   const pageSize = 20
-  const from = (page - 1) * pageSize
-  const to = from + pageSize - 1
+  const from     = (page - 1) * pageSize
+  const to       = from + pageSize - 1
 
   let query = supabase
     .from('orders')
-    .select('id, order_number, status, payment_method, payment_status, total_amount, shipping_city, customer_notes, created_at, customer_name, customer_phone', { count: 'exact' })
+    .select(
+      'id, order_number, status, payment_method, payment_status, total_amount, shipping_city, customer_notes, created_at, customer_name, customer_phone',
+      { count: 'exact' }
+    )
     .eq('store_id', store.id)
     .order('created_at', { ascending: false })
     .range(from, to)
@@ -41,24 +50,33 @@ export default async function OrdersPage({ searchParams }: Props) {
   }
 
   if (searchParams.q) {
-    query = query.or(`order_number.ilike.%${searchParams.q}%,customer_name.ilike.%${searchParams.q}%,customer_phone.ilike.%${searchParams.q}%`)
+    query = query.or(
+      `order_number.ilike.%${searchParams.q}%,customer_name.ilike.%${searchParams.q}%,customer_phone.ilike.%${searchParams.q}%`
+    )
+  }
+
+  if (searchParams.dateFrom) {
+    query = query.gte('created_at', searchParams.dateFrom)
+  }
+
+  if (searchParams.dateTo) {
+    query = query.lte('created_at', searchParams.dateTo + 'T23:59:59.999')
   }
 
   const { data: orders, count } = await query
 
-  // إحصاء كل حالة
-  const { data: statusCounts } = await supabase
+  const { data: statusRows } = await supabase
     .from('orders')
     .select('status')
     .eq('store_id', store.id)
 
-  const counts: Record<string, number> = {}
-  for (const row of statusCounts ?? []) {
-    counts[row.status] = (counts[row.status] ?? 0) + 1
+  const statusCounts: Record<string, number> = {}
+  for (const row of statusRows ?? []) {
+    statusCounts[row.status] = (statusCounts[row.status] ?? 0) + 1
   }
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-white">الطلبيات</h1>
@@ -66,7 +84,7 @@ export default async function OrdersPage({ searchParams }: Props) {
         </div>
         <Link
           href="/dashboard/orders/new"
-          className="rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-500"
+          className="rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-500 transition-colors"
         >
           + طلبية جديدة
         </Link>
@@ -77,10 +95,12 @@ export default async function OrdersPage({ searchParams }: Props) {
         total={count ?? 0}
         page={page}
         pageSize={pageSize}
-        statusCounts={counts}
+        statusCounts={statusCounts}
         currencyCode={store.currency_code}
         activeStatus={searchParams.status ?? 'all'}
         searchQuery={searchParams.q ?? ''}
+        dateFrom={searchParams.dateFrom ?? ''}
+        dateTo={searchParams.dateTo ?? ''}
       />
     </div>
   )

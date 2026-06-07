@@ -35,7 +35,11 @@ export default async function InvoicesPage({ searchParams }: Props) {
     .eq('store_id', store.id)
     .order('created_at', { ascending: false })
 
-  if (searchParams.status) query = query.eq('status', searchParams.status)
+  if (searchParams.status === 'unpaid') {
+    query = query.not('status', 'in', '(paid,cancelled)')
+  } else if (searchParams.status) {
+    query = query.eq('status', searchParams.status)
+  }
 
   const { data: invoices } = await query
 
@@ -56,10 +60,13 @@ export default async function InvoicesPage({ searchParams }: Props) {
 
   const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
 
+  const totalUnpaid = allInv.filter((i: InvRow) => i.status !== 'paid' && i.status !== 'cancelled').length
+
   const STATUS_TABS = [
-    { key: '', label: 'الكل', count: totalAll },
-    { key: 'draft', label: 'مسودة', count: totalDraft },
-    { key: 'paid', label: 'مدفوعة', count: totalPaid },
+    { key: '',       label: 'الكل',         count: totalAll },
+    { key: 'unpaid', label: 'غير مدفوعة',   count: totalUnpaid },
+    { key: 'draft',  label: 'مسودة',         count: totalDraft },
+    { key: 'paid',   label: 'مدفوعة',        count: totalPaid },
   ]
 
   return (
@@ -116,7 +123,8 @@ export default async function InvoicesPage({ searchParams }: Props) {
       {(!invoices || invoices.length === 0) ? (
         <div className="rounded-2xl border border-white/5 bg-white/3 py-16 text-center">
           <p className="text-4xl">📋</p>
-          <p className="mt-3 text-slate-400">لا توجد فواتير</p>
+          <p className="mt-3 text-slate-300 font-medium">لا توجد فواتير حتى الآن</p>
+          <p className="mt-1 text-sm text-slate-500">ابدأ بإنشاء أول فاتورة لزبائنك</p>
           <Link href="/dashboard/accounting/invoices/new"
             className="mt-4 inline-block rounded-xl bg-sky-600 px-5 py-2 text-sm font-medium text-white hover:bg-sky-500">
             إنشاء أول فاتورة

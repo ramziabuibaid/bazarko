@@ -98,13 +98,8 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
 
   async function toggleActive(cat: Category) {
     const supabase = createClient()
-    await supabase
-      .from('categories')
-      .update({ is_active: !cat.is_active })
-      .eq('id', cat.id)
-    setCategories(cats => cats.map(c =>
-      c.id === cat.id ? { ...c, is_active: !c.is_active } : c
-    ))
+    await supabase.from('categories').update({ is_active: !cat.is_active }).eq('id', cat.id)
+    setCategories(cats => cats.map(c => c.id === cat.id ? { ...c, is_active: !c.is_active } : c))
   }
 
   async function confirmDelete(id: string) {
@@ -123,9 +118,11 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
     router.refresh()
   }
 
-  const rootCategories = categories.filter(c => !c.parent_id)
-  const getChildren = (id: string) => categories.filter(c => c.parent_id === id)
-  const parentOptions = categories.filter(c => !c.parent_id && c.id !== editing?.id)
+  const rootCategories   = categories.filter(c => !c.parent_id)
+  const getChildren      = (id: string) => categories.filter(c => c.parent_id === id)
+  const parentOptions    = categories.filter(c => !c.parent_id && c.id !== editing?.id)
+  const activeCount      = categories.filter(c => c.is_active).length
+  const hiddenCount      = categories.length - activeCount
 
   const q = searchQuery.trim().toLowerCase()
   const filteredRoots = rootCategories.filter(cat =>
@@ -142,23 +139,59 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
 
   return (
     <>
-      {/* شريط البحث والإضافة */}
+      {/* ── شريط البحث والإضافة ── */}
       <div className="mb-4 flex gap-2">
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={e => setSearchQuery(e.target.value)}
-          placeholder="ابحث في الفئات..."
-          className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-relaxed text-white placeholder-slate-500 outline-none focus:border-sky-500/50"
-        />
+        <div className="relative flex-1">
+          <svg
+            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"
+            width="16" height="16" viewBox="0 0 16 16"
+            fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"
+          >
+            <circle cx="6.5" cy="6.5" r="5" />
+            <line x1="10.5" y1="10.5" x2="14.5" y2="14.5" />
+          </svg>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="ابحث في الفئات..."
+            className="w-full rounded-xl border border-white/10 bg-white/5 py-3 pl-4 pr-10 text-sm leading-relaxed text-white placeholder-slate-500 outline-none focus:border-sky-500/50"
+          />
+        </div>
         <button
           onClick={openAdd}
-          className="shrink-0 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm font-medium text-sky-400 hover:bg-sky-500/20 transition-colors"
+          className="shrink-0 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm font-medium text-sky-400 transition-colors hover:bg-sky-500/20"
         >
           + فئة جديدة
         </button>
       </div>
 
+      {/* ── إحصائيات ── */}
+      {categories.length > 0 && (
+        <div className="mb-4 flex items-center gap-4 rounded-xl border border-white/5 bg-slate-900 px-4 py-3 text-xs">
+          <span className="text-slate-400">
+            <span className="font-semibold text-white">{categories.length}</span> فئة
+          </span>
+          <span className="text-slate-600">·</span>
+          <span className="text-emerald-400">
+            <span className="font-semibold">{activeCount}</span> نشط
+          </span>
+          {hiddenCount > 0 && (
+            <>
+              <span className="text-slate-600">·</span>
+              <span className="text-slate-400">
+                <span className="font-semibold">{hiddenCount}</span> مخفي
+              </span>
+            </>
+          )}
+          <span className="text-slate-600">·</span>
+          <span className="text-slate-400">
+            <span className="font-semibold">{rootCategories.length}</span> رئيسية
+          </span>
+        </div>
+      )}
+
+      {/* ── القائمة ── */}
       {categories.length === 0 ? (
         <div className="rounded-xl border border-dashed border-white/10 p-12 text-center">
           <p className="text-slate-400">لا توجد فئات بعد</p>
@@ -196,7 +229,14 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
         </div>
       )}
 
-      {/* Modal إضافة/تعديل */}
+      {/* ── نصيحة أسفل القائمة ── */}
+      {categories.length > 0 && (
+        <p className="mt-6 text-center text-xs text-slate-600">
+          اضغط ✏️ لتعديل الفئة · اضغط + لإضافة منتج مباشرة في الفئة · يمكنك إنشاء فئات فرعية داخل كل فئة رئيسية
+        </p>
+      )}
+
+      {/* ── Modal إضافة/تعديل ── */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
           <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-6">
@@ -274,7 +314,7 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
         </div>
       )}
 
-      {/* نافذة تأكيد الحذف */}
+      {/* ── نافذة تأكيد الحذف ── */}
       {deleteId && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
@@ -314,14 +354,14 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
             <div className="flex gap-3">
               <button
                 onClick={() => setDeleteId(null)}
-                className="flex-1 rounded-xl border border-white/10 py-2.5 text-sm text-slate-400 hover:text-white transition-colors"
+                className="flex-1 rounded-xl border border-white/10 py-2.5 text-sm text-slate-400 transition-colors hover:text-white"
               >
                 إلغاء
               </button>
               <button
                 onClick={() => confirmDelete(deleteId)}
                 disabled={loading}
-                className="flex-1 rounded-xl border border-red-500/40 bg-red-500/15 py-2.5 text-sm font-semibold text-red-400 hover:bg-red-500 hover:text-white hover:border-red-500 disabled:opacity-50 transition-all"
+                className="flex-1 rounded-xl border border-red-500/40 bg-red-500/15 py-2.5 text-sm font-semibold text-red-400 transition-all hover:border-red-500 hover:bg-red-500 hover:text-white disabled:opacity-50"
               >
                 {loading ? 'جاري الحذف...' : 'تأكيد الحذف'}
               </button>
@@ -343,21 +383,26 @@ function CategoryRow({
   onDelete: () => void
 }) {
   return (
-    <div className={`flex items-center justify-between rounded-xl border border-white/5 bg-slate-900 px-4 py-3 ${isChild ? 'bg-slate-800/50' : ''}`}>
-      <div className="flex items-center gap-3">
-        {isChild && <span className="text-slate-600">↳</span>}
-        <div>
+    <div className={`group flex items-center justify-between rounded-xl border border-white/5 px-4 py-3 ${isChild ? 'bg-slate-800/50' : 'bg-slate-900'}`}>
+      <div className="flex min-w-0 items-center gap-3">
+        {isChild && <span className="shrink-0 text-slate-600">↳</span>}
+        <div className="min-w-0">
           <span className="font-medium text-white">{cat.name}</span>
-          <span className="mr-2 text-xs text-slate-500" dir="ltr">{cat.slug}</span>
+          <span
+            className="mr-2 text-[10px] text-slate-600 opacity-0 transition-opacity group-hover:opacity-100"
+            dir="ltr"
+          >
+            /{cat.slug}
+          </span>
         </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <span className={`rounded-full px-2 py-0.5 text-xs ${cat.is_active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
           {cat.is_active ? 'نشط' : 'مخفي'}
         </span>
         <Link
           href={`/dashboard/products/new?category_id=${cat.id}`}
-          className="rounded-lg p-1.5 text-slate-400 hover:bg-sky-500/10 hover:text-sky-400 transition-colors"
+          className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-sky-500/10 hover:text-sky-400"
           title={`إضافة منتج في "${cat.name}"`}
         >
           <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
@@ -365,15 +410,15 @@ function CategoryRow({
             <line x1="2" y1="7.5" x2="13" y2="7.5" />
           </svg>
         </Link>
-        <button onClick={onToggle} className="rounded-lg p-1.5 text-slate-400 hover:bg-white/5 hover:text-white transition-colors" title="تفعيل/إخفاء">
+        <button onClick={onToggle} className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white/5 hover:text-white" title="تفعيل/إخفاء">
           {cat.is_active ? '👁️' : '🙈'}
         </button>
-        <button onClick={onEdit} className="rounded-lg p-1.5 text-slate-400 hover:bg-white/5 hover:text-white transition-colors" title="تعديل">
+        <button onClick={onEdit} className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white/5 hover:text-white" title="تعديل">
           ✏️
         </button>
         <button
           onClick={onDelete}
-          className="rounded-lg border border-red-500/25 bg-red-500/8 px-2.5 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/20 hover:border-red-500/50 transition-colors"
+          className="rounded-lg border border-red-500/25 bg-red-500/8 px-2.5 py-1.5 text-xs font-medium text-red-400 transition-colors hover:border-red-500/50 hover:bg-red-500/20"
           title="حذف"
         >
           حذف

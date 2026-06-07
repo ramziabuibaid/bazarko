@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { getStoreForUser } from '@/lib/supabase/getStore'
 import Link from 'next/link'
+import DashboardRefresh from '@/components/dashboard/DashboardRefresh'
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   pending:    { label: 'معلق',         color: 'bg-yellow-500/15 text-yellow-400' },
@@ -86,20 +87,23 @@ export default async function DashboardPage() {
   const maxProductQty = topProducts[0]?.[1] ?? 1
 
   // Core metrics
-  const totalRevenue  = (revenueRes.data ?? []).reduce((s: number, o: { total_amount: number | null }) => s + (o.total_amount ?? 0), 0)
-  const todayRevenue  = (todayRevenueRes.data ?? []).reduce((s: number, o: { total_amount: number | null }) => s + (o.total_amount ?? 0), 0)
-  const todayOrders   = todayOrdersRes.count ?? 0
+  const totalRevenue    = (revenueRes.data ?? []).reduce((s: number, o: { total_amount: number | null }) => s + (o.total_amount ?? 0), 0)
+  const todayRevenue    = (todayRevenueRes.data ?? []).reduce((s: number, o: { total_amount: number | null }) => s + (o.total_amount ?? 0), 0)
+  const todayOrders     = todayOrdersRes.count ?? 0
+  const ordersTotal     = ordersRes.count ?? 0
+  const productsCount   = productsRes.count ?? 0
   const processingCount = processingRes.count ?? 0
-  const isActive      = store.is_active !== false
+  const isActive        = store.is_active !== false
+  const isNewStore      = ordersTotal === 0 && productsCount === 0
 
   // Weekly growth
   type WeekOrder = { created_at: string; total_amount: number | null; payment_status: string }
-  const twoWeeksData  = (twoWeeksOrdersRes.data ?? []) as WeekOrder[]
+  const twoWeeksData   = (twoWeeksOrdersRes.data ?? []) as WeekOrder[]
   const thisWeekOrders = twoWeeksData.filter(o => o.created_at >= sevenDaysAgoStr)
   const lastWeekOrders = twoWeeksData.filter(o => o.created_at < sevenDaysAgoStr)
-  const thisWeekRev   = thisWeekOrders.filter(o => o.payment_status === 'paid').reduce((s, o) => s + (o.total_amount ?? 0), 0)
-  const lastWeekRev   = lastWeekOrders.filter(o => o.payment_status === 'paid').reduce((s, o) => s + (o.total_amount ?? 0), 0)
-  const growth        = lastWeekRev === 0 ? null : Math.round(((thisWeekRev - lastWeekRev) / lastWeekRev) * 100)
+  const thisWeekRev    = thisWeekOrders.filter(o => o.payment_status === 'paid').reduce((s, o) => s + (o.total_amount ?? 0), 0)
+  const lastWeekRev    = lastWeekOrders.filter(o => o.payment_status === 'paid').reduce((s, o) => s + (o.total_amount ?? 0), 0)
+  const growth         = lastWeekRev === 0 ? null : Math.round(((thisWeekRev - lastWeekRev) / lastWeekRev) * 100)
 
   // 7-day chart — 6 days ago through today
   const chartDays = Array.from({ length: 7 }, (_, i) => {
@@ -131,35 +135,75 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-6 p-6">
 
-      {/* Header */}
-      <div>
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-semibold text-white">نظرة عامة</h1>
-          <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${
-            isActive
-              ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-400'
-              : 'border-red-500/25 bg-red-500/10 text-red-400'
-          }`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${isActive ? 'animate-pulse bg-emerald-400' : 'bg-red-400'}`} />
-            {isActive ? 'المتجر نشط' : 'المتجر متوقف'}
-          </span>
-        </div>
-        <p className="mt-1.5 text-sm text-slate-400">
-          {now.toLocaleDateString('ar', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-        </p>
-        {!isActive && store.suspended_at && (
-          <p className="mt-2 text-xs text-red-400/80">
-            متوقف منذ {new Date(store.suspended_at).toLocaleDateString('ar')}
+      {/* ── Header ── */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-semibold text-white">نظرة عامة</h1>
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${
+              isActive
+                ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-400'
+                : 'border-red-500/25 bg-red-500/10 text-red-400'
+            }`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${isActive ? 'animate-pulse bg-emerald-400' : 'bg-red-400'}`} />
+              {isActive ? 'المتجر نشط' : 'المتجر متوقف'}
+            </span>
+          </div>
+          <p className="mt-1.5 text-sm text-slate-400">
+            {now.toLocaleDateString('ar', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
           </p>
-        )}
+          {!isActive && store.suspended_at && (
+            <p className="mt-2 text-xs text-red-400/80">
+              متوقف منذ {new Date(store.suspended_at).toLocaleDateString('ar')}
+            </p>
+          )}
+        </div>
+        <DashboardRefresh loadedAt={now.toISOString()} />
       </div>
 
-      {/* KPI Cards */}
+      {/* ── رسالة ترحيب للمتاجر الجديدة ── */}
+      {isNewStore && (
+        <div className="rounded-2xl border border-sky-500/20 bg-gradient-to-l from-sky-500/5 to-transparent p-5">
+          <div className="flex items-start gap-4">
+            <div className="mt-0.5 text-2xl leading-none">🎉</div>
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold text-white">مرحباً بك في Bazarko!</p>
+              <p className="mt-1 text-sm text-slate-400">
+                متجرك جاهز — ابدأ بإضافة منتجاتك أو إنشاء أول طلبية مباشرةً.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Link
+                  href="/dashboard/products/new"
+                  className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 transition-colors hover:bg-sky-400"
+                >
+                  إضافة أول منتج
+                </Link>
+                <Link
+                  href="/dashboard/orders/new"
+                  className="rounded-xl border border-white/10 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-700 hover:text-white"
+                >
+                  إنشاء أول طلبية
+                </Link>
+                <Link
+                  href="/dashboard/customers"
+                  className="rounded-xl border border-white/10 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-700 hover:text-white"
+                >
+                  إضافة زبون
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── KPI Cards ── */}
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
           <p className="text-xs font-medium text-slate-400">طلبيات اليوم</p>
           <p className="mt-2 text-3xl font-bold text-sky-400">{todayOrders}</p>
-          <p className="mt-1 text-xs text-slate-500">من {ordersRes.count ?? 0} إجمالاً</p>
+          <p className="mt-1 text-xs text-slate-400">
+            {isNewStore ? 'أنشئ أول طلبية الآن' : `من ${ordersTotal} إجمالاً`}
+          </p>
         </div>
 
         <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
@@ -168,7 +212,9 @@ export default async function DashboardPage() {
             {fmt(todayRevenue)}
             <span className="mr-1 text-sm font-normal text-slate-400">{cc}</span>
           </p>
-          <p className="mt-1 text-xs text-slate-500">من الطلبيات المدفوعة</p>
+          <p className="mt-1 text-xs text-slate-400">
+            {isNewStore ? 'ستظهر بعد أول إيصال' : 'من الطلبيات المدفوعة'}
+          </p>
         </div>
 
         <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
@@ -176,7 +222,7 @@ export default async function DashboardPage() {
           <p className={`mt-2 text-3xl font-bold ${processingCount > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
             {processingCount}
           </p>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-slate-400">
             {processingCount === 0 ? 'لا طلبيات معلقة' : 'طلبية تحتاج متابعة'}
           </p>
         </div>
@@ -188,13 +234,13 @@ export default async function DashboardPage() {
           }`}>
             {growth === null ? '—' : `${growth >= 0 ? '+' : ''}${growth}%`}
           </p>
-          <p className="mt-1 text-xs text-slate-500">
-            {growth === null ? 'لا بيانات للمقارنة' : 'مقارنةً بالأسبوع الماضي'}
+          <p className="mt-1 text-xs text-slate-400">
+            {growth === null ? 'لا بيانات للمقارنة بعد' : 'مقارنةً بالأسبوع الماضي'}
           </p>
         </div>
       </div>
 
-      {/* Sales Chart + Recent Orders */}
+      {/* ── Sales Chart + Recent Orders ── */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
 
         {/* 7-Day Sales Chart */}
@@ -224,7 +270,7 @@ export default async function DashboardPage() {
               <span className="inline-block h-2.5 w-2.5 rounded-sm bg-sky-500/50" />
               إيرادات مدفوعة
             </span>
-            <span className="text-slate-500">المجموع: {fmt(thisWeekRev)} {cc}</span>
+            <span className="text-slate-400">المجموع: {fmt(thisWeekRev)} {cc}</span>
           </div>
         </div>
 
@@ -237,8 +283,14 @@ export default async function DashboardPage() {
             </Link>
           </div>
           {recentOrders.length === 0 ? (
-            <div className="flex h-32 items-center justify-center">
-              <p className="text-sm text-slate-500">لا طلبيات بعد</p>
+            <div className="flex h-32 flex-col items-center justify-center gap-3 text-center">
+              <p className="text-sm text-slate-400">لا طلبيات بعد</p>
+              <Link
+                href="/dashboard/orders/new"
+                className="text-xs text-sky-400 hover:underline"
+              >
+                إنشاء أول طلبية ←
+              </Link>
             </div>
           ) : (
             <div className="space-y-2.5">
@@ -270,7 +322,7 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* Top Products + Total Stats */}
+      {/* ── Top Products + Total Stats ── */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
 
         {/* Top Products */}
@@ -280,8 +332,18 @@ export default async function DashboardPage() {
             <span className="text-xs text-slate-500">آخر 30 يوم</span>
           </div>
           {topProducts.length === 0 ? (
-            <div className="flex h-32 items-center justify-center">
-              <p className="text-sm text-slate-500">لا بيانات مبيعات بعد</p>
+            <div className="flex h-32 flex-col items-center justify-center gap-3 text-center">
+              <p className="text-sm text-slate-400">
+                {isNewStore ? 'أضف منتجاتك لتبدأ البيع' : 'لا بيانات مبيعات بعد'}
+              </p>
+              {isNewStore && (
+                <Link
+                  href="/dashboard/products/new"
+                  className="text-xs text-sky-400 hover:underline"
+                >
+                  إضافة منتج جديد ←
+                </Link>
+              )}
             </div>
           ) : (
             <div className="space-y-4">
@@ -308,10 +370,10 @@ export default async function DashboardPage() {
           <h2 className="mb-5 text-sm font-semibold text-white">الإحصائيات الإجمالية</h2>
           <div className="grid grid-cols-2 gap-4">
             {([
-              { label: 'إجمالي الطلبيات',  value: ordersRes.count ?? 0,    icon: '📦', color: 'text-sky-400',    suffix: '' },
-              { label: 'الزبائن',           value: customersRes.count ?? 0,  icon: '👥', color: 'text-violet-400', suffix: '' },
-              { label: 'المنتجات النشطة',   value: productsRes.count ?? 0,   icon: '🛍️', color: 'text-emerald-400', suffix: '' },
-              { label: 'إجمالي الإيرادات', value: fmt(totalRevenue),        icon: '💰', color: 'text-amber-400',  suffix: cc },
+              { label: 'إجمالي الطلبيات',  value: ordersTotal,              icon: '📦', color: 'text-sky-400',     suffix: '' },
+              { label: 'الزبائن',           value: customersRes.count ?? 0,  icon: '👥', color: 'text-violet-400',  suffix: '' },
+              { label: 'المنتجات النشطة',   value: productsCount,            icon: '🛍️', color: 'text-emerald-400', suffix: '' },
+              { label: 'إجمالي الإيرادات', value: fmt(totalRevenue),        icon: '💰', color: 'text-amber-400',   suffix: cc },
             ] as const).map(stat => (
               <div key={stat.label} className="rounded-xl bg-slate-800/50 p-4">
                 <span className="text-xl">{stat.icon}</span>
@@ -326,14 +388,14 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* Quick Actions */}
+      {/* ── Quick Actions ── */}
       <section>
         <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-slate-500">إجراءات سريعة</h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
             { href: '/dashboard/orders/new',          label: 'طلبية جديدة', icon: '➕', desc: 'POS أو ذمة' },
             { href: '/dashboard/products/new',         label: 'منتج جديد',   icon: '📝', desc: 'أضف منتجاً للمتجر' },
-            { href: '/dashboard/customers',            label: 'زبون جديد',   icon: '👤', desc: 'أضف زبوناً' },
+            { href: '/dashboard/customers',            label: 'زبون جديد',   icon: '👤', desc: 'أضف زبوناً للقائمة' },
             { href: '/dashboard/accounting/receipts',  label: 'سند قبض',     icon: '💵', desc: 'استلام دفعة' },
           ].map(action => (
             <a

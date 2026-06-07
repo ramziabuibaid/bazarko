@@ -28,8 +28,8 @@ export default async function DeliveryPage() {
   return (
     <div className="p-6">
       <div className="mb-6">
-        <h1 className="text-xl font-semibold text-white">إدارة التوصيل</h1>
-        <p className="mt-1 text-sm text-slate-400">حدّد مناطق التوصيل وأسعارها لمتجرك</p>
+        <h1 className="text-xl font-semibold text-white">إدارة مناطق وأسعار التوصيل</h1>
+        <p className="mt-1 text-sm text-slate-400">حدّد المناطق التي توصل إليها وسعر كل منطقة وشروط الشحن المجاني</p>
       </div>
 
       <DeliveryManager
