@@ -15,7 +15,7 @@ export default async function RepairJobPage({ params }: Props) {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, currency_code')
+    .select('id, currency_code, name, subdomain, country_code, phone, whatsapp')
     .eq('id', storeId)
     .single()
   if (!store) redirect('/onboarding')
@@ -49,6 +49,11 @@ export default async function RepairJobPage({ params }: Props) {
         history={history ?? []}
         currencyCode={store.currency_code}
         userId={user.id}
+        storeName={store.name}
+        storeSubdomain={store.subdomain}
+        storeCountryCode={store.country_code}
+        storePhone={store.phone ?? null}
+        storeWhatsapp={store.whatsapp ?? null}
       />
     </div>
   )

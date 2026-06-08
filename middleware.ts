@@ -92,7 +92,7 @@ export async function middleware(request: NextRequest) {
     try {
       const res = await fetch(
         `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/stores` +
-        `?subdomain=eq.${encodeURIComponent(subdomain)}&is_active=eq.true&select=country_code&limit=1`,
+        `?subdomain=eq.${encodeURIComponent(subdomain)}&status=eq.active&select=country_code&limit=1`,
         {
           headers: {
             apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,

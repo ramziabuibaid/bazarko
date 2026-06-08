@@ -1,11 +1,18 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { uploadRepairPhoto } from '@/lib/supabase/storage'
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface RepairPhoto {
+  stage: string
+  url: string
+  taken_at: string
+}
 
 interface RepairJob {
   id: string; job_number: string; store_id: string
@@ -18,6 +25,7 @@ interface RepairJob {
   received_at: string; estimated_done: string | null; delivered_at: string | null
   assigned_to: string | null; invoice_id: string | null
   internal_notes: string | null; created_at: string
+  photos: RepairPhoto[] | null
 }
 
 interface Part {
@@ -40,6 +48,11 @@ interface Props {
   history: HistoryEntry[]
   currencyCode: string
   userId: string
+  storeName: string
+  storeSubdomain: string
+  storeCountryCode: string
+  storePhone: string | null
+  storeWhatsapp: string | null
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -73,6 +86,20 @@ const DEVICE_ICONS: Record<string, string> = {
   printer: '🖨️', camera: '📷', appliance: '🔌', other: '🔧',
 }
 
+const PHOTO_STAGES = [
+  { value: 'received',   label: 'عند الاستلام' },
+  { value: 'diagnosing', label: 'عند التشخيص' },
+  { value: 'in_repair',  label: 'أثناء الإصلاح' },
+  { value: 'ready',      label: 'عند الجاهزية' },
+  { value: 'delivered',  label: 'عند التسليم' },
+]
+
+const PHOTO_STAGE_LABEL: Record<string, string> = Object.fromEntries(
+  PHOTO_STAGES.map(s => [s.value, s.label])
+)
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 function useDebounce<T extends (...args: Parameters<T>) => void>(fn: T, ms: number) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   return useCallback((...args: Parameters<T>) => {
@@ -81,39 +108,65 @@ function useDebounce<T extends (...args: Parameters<T>) => void>(fn: T, ms: numb
   }, [fn, ms])
 }
 
+function buildNotificationMsg(job: { customer_name: string; brand: string | null; model: string | null; device_type: string; job_number: string; status: string }, trackingUrl: string): string {
+  const device = [job.brand, job.model].filter(Boolean).join(' ') || job.device_type
+  const statusLabel = STATUS_META[job.status]?.label ?? job.status
+  const lines = [
+    `مرحباً ${job.customer_name} 👋`,
+    `جهازك "${device}" — ${job.job_number}`,
+    `الحالة: ${statusLabel}`,
+  ]
+  if (job.status === 'ready')         lines.push('✅ جهازك جاهز للاستلام!')
+  else if (job.status === 'waiting_parts') lines.push('⏳ بانتظار وصول قطع الغيار.')
+  lines.push(`\nتابع جهازك: ${trackingUrl}`)
+  return lines.join('\n')
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function RepairJobDetail({ job, parts: initialParts, history, currencyCode, userId }: Props) {
-  const router  = useRouter()
+export default function RepairJobDetail({
+  job, parts: initialParts, history, currencyCode, userId,
+  storeName, storeSubdomain, storeCountryCode,
+}: Props) {
+  const router   = useRouter()
   const supabase = createClient()
 
   const [status,   setStatus]   = useState(job.status)
   const [priority, setPriority] = useState(job.priority)
 
-  // Editable work fields
-  const [diagnosis,      setDiagnosis]      = useState(job.diagnosis ?? '')
-  const [workDone,       setWorkDone]       = useState(job.work_done ?? '')
-  const [internalNotes,  setInternalNotes]  = useState(job.internal_notes ?? '')
-  const [assignedTo,     setAssignedTo]     = useState(job.assigned_to ?? '')
-  const [estimatedCost,  setEstimatedCost]  = useState(String(job.estimated_cost ?? ''))
-  const [finalCost,      setFinalCost]      = useState(String(job.final_cost))
-  const [depositPaid,    setDepositPaid]    = useState(String(job.deposit_paid))
-  const [estimatedDone,  setEstimatedDone]  = useState(job.estimated_done ?? '')
+  const [diagnosis,     setDiagnosis]     = useState(job.diagnosis ?? '')
+  const [workDone,      setWorkDone]      = useState(job.work_done ?? '')
+  const [internalNotes, setInternalNotes] = useState(job.internal_notes ?? '')
+  const [assignedTo,    setAssignedTo]    = useState(job.assigned_to ?? '')
+  const [estimatedCost, setEstimatedCost] = useState(String(job.estimated_cost ?? ''))
+  const [finalCost,     setFinalCost]     = useState(String(job.final_cost))
+  const [depositPaid,   setDepositPaid]   = useState(String(job.deposit_paid))
+  const [estimatedDone, setEstimatedDone] = useState(job.estimated_done ?? '')
 
-  // Parts
-  const [parts,         setParts]         = useState<Part[]>(initialParts)
-  const [partSearch,    setPartSearch]    = useState('')
-  const [partResults,   setPartResults]   = useState<Product[]>([])
-  const [newPartName,   setNewPartName]   = useState('')
-  const [newPartQty,    setNewPartQty]    = useState('1')
-  const [newPartCost,   setNewPartCost]   = useState('')
+  const [parts,       setParts]       = useState<Part[]>(initialParts)
+  const [partSearch,  setPartSearch]  = useState('')
+  const [partResults, setPartResults] = useState<Product[]>([])
+  const [newPartName, setNewPartName] = useState('')
+  const [newPartQty,  setNewPartQty]  = useState('1')
+  const [newPartCost, setNewPartCost] = useState('')
 
-  const [saving,     setSaving]     = useState(false)
-  const [advancing,  setAdvancing]  = useState(false)
+  const [photos,         setPhotos]         = useState<RepairPhoto[]>(job.photos ?? [])
+  const [photoStage,     setPhotoStage]     = useState('received')
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+
+  const [smsCopied, setSmsCopied] = useState(false)
+  const [saving,    setSaving]    = useState(false)
+  const [advancing, setAdvancing] = useState(false)
   const [savingPart, setSavingPart] = useState(false)
 
-  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
+  const [trackingUrl, setTrackingUrl] = useState('')
+  useEffect(() => {
+    setTrackingUrl(
+      `${window.location.origin}/store/${storeCountryCode}/${storeSubdomain}/repair/${job.job_number}`
+    )
+  }, [storeCountryCode, storeSubdomain, job.job_number])
 
+  const fmt          = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
   const nextStatus   = STATUS_FLOW[status]
   const sm           = STATUS_META[status] ?? STATUS_META.received
   const partsTotal   = parts.reduce((s, p) => s + p.total, 0)
@@ -121,23 +174,25 @@ export default function RepairJobDetail({ job, parts: initialParts, history, cur
   const depositNum   = parseFloat(depositPaid) || 0
   const balance      = finalCostNum - depositNum
 
-  // ── Search parts from products ──────────────────────────────────────────────
+  const qrUrl = trackingUrl
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(trackingUrl)}`
+    : ''
+
+  const cleanPhone      = (job.customer_phone ?? '').replace(/\D/g, '')
+  const notificationMsg = buildNotificationMsg({ ...job, status }, trackingUrl)
+
+  // ── Search parts ────────────────────────────────────────────────────────────
   const searchParts = useDebounce(async (q: string) => {
     if (!q.trim()) { setPartResults([]); return }
     const { data } = await supabase
-      .from('products')
-      .select('id, name, sku, price')
-      .eq('store_id', job.store_id)
-      .ilike('name', `%${q}%`)
-      .limit(6)
+      .from('products').select('id, name, sku, price')
+      .eq('store_id', job.store_id).ilike('name', `%${q}%`).limit(6)
     setPartResults((data as Product[] | null) ?? [])
   }, 250)
 
   function fillPartFromProduct(p: Product) {
-    setNewPartName(p.name)
-    setNewPartCost(String(p.price))
-    setPartSearch('')
-    setPartResults([])
+    setNewPartName(p.name); setNewPartCost(String(p.price))
+    setPartSearch(''); setPartResults([])
   }
 
   // ── Save work fields ────────────────────────────────────────────────────────
@@ -163,12 +218,8 @@ export default function RepairJobDetail({ job, parts: initialParts, history, cur
   async function advanceStatus() {
     if (!nextStatus) return
     setAdvancing(true)
-    const updates: Record<string, string | null> = {
-      status:     nextStatus,
-      updated_at: new Date().toISOString(),
-    }
+    const updates: Record<string, string | null> = { status: nextStatus, updated_at: new Date().toISOString() }
     if (nextStatus === 'delivered') updates.delivered_at = new Date().toISOString().slice(0, 10)
-
     await supabase.from('repair_jobs').update(updates).eq('id', job.id)
     await supabase.from('repair_job_history').insert({
       job_id: job.id, from_status: status, to_status: nextStatus,
@@ -204,7 +255,7 @@ export default function RepairJobDetail({ job, parts: initialParts, history, cur
     router.refresh()
   }
 
-  // ── Add part ────────────────────────────────────────────────────────────────
+  // ── Parts ───────────────────────────────────────────────────────────────────
   async function addPart() {
     if (!newPartName.trim()) return
     const qty  = parseFloat(newPartQty) || 1
@@ -223,12 +274,35 @@ export default function RepairJobDetail({ job, parts: initialParts, history, cur
     setParts(prev => prev.filter(p => p.id !== partId))
   }
 
-  // ── Create invoice ───────────────────────────────────────────────────────────
+  // ── Photos ──────────────────────────────────────────────────────────────────
+  async function handlePhotoCapture(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingPhoto(true)
+    try {
+      const url     = await uploadRepairPhoto(job.store_id, job.id, file)
+      const newPhoto: RepairPhoto = { stage: photoStage, url, taken_at: new Date().toISOString() }
+      const updated = [...photos, newPhoto]
+      await supabase.from('repair_jobs').update({ photos: updated as unknown[] }).eq('id', job.id)
+      setPhotos(updated)
+    } catch { /* silent */ }
+    setUploadingPhoto(false)
+    e.target.value = ''
+  }
+
+  // ── Notifications ───────────────────────────────────────────────────────────
+  async function copySmsText() {
+    await navigator.clipboard.writeText(notificationMsg)
+    setSmsCopied(true)
+    setTimeout(() => setSmsCopied(false), 2000)
+  }
+
+  // ── Create invoice ──────────────────────────────────────────────────────────
   function goCreateInvoice() {
     router.push(`/dashboard/accounting/invoices/new?from_repair=${job.id}`)
   }
 
-  // ── Timeline steps ───────────────────────────────────────────────────────────
+  // ── Progress steps ──────────────────────────────────────────────────────────
   const STEPS = ['received', 'diagnosing', 'in_repair', 'ready', 'delivered']
   const currentStep = STEPS.indexOf(status === 'waiting_parts' ? 'in_repair' : status)
 
@@ -253,7 +327,7 @@ export default function RepairJobDetail({ job, parts: initialParts, history, cur
               className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-2 text-sm text-sky-300 hover:bg-sky-500/20">
               📋 الفاتورة
             </Link>
-          ) : status === 'ready' || status === 'delivered' ? (
+          ) : (status === 'ready' || status === 'delivered') ? (
             <button onClick={goCreateInvoice}
               className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-300 hover:bg-emerald-500/20">
               📋 إنشاء فاتورة
@@ -324,7 +398,7 @@ export default function RepairJobDetail({ job, parts: initialParts, history, cur
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
 
-        {/* ── العمود الأيسر: معلومات الجهاز والزبون ── */}
+        {/* ── العمود الأيسر ── */}
         <div className="space-y-5 lg:col-span-1">
 
           {/* معلومات الجهاز */}
@@ -346,16 +420,53 @@ export default function RepairJobDetail({ job, parts: initialParts, history, cur
             )}
           </div>
 
-          {/* معلومات الزبون */}
-          <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
+          {/* الزبون + QR + إشعارات */}
+          <div className="rounded-2xl border border-white/5 bg-slate-900 p-5 print:hidden">
             <h2 className="mb-3 text-sm font-semibold text-white">الزبون</h2>
             <p className="font-medium text-white">{job.customer_name}</p>
             {job.customer_phone && (
-              <a href={`https://wa.me/${job.customer_phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer"
+              <a href={`https://wa.me/${cleanPhone}`} target="_blank" rel="noopener noreferrer"
                 className="mt-1 flex items-center gap-1.5 text-sm text-green-400 hover:text-green-300" dir="ltr">
                 <span>💬</span> {job.customer_phone}
               </a>
             )}
+
+            {/* QR + إشعارات */}
+            <div className="mt-4 pt-4 border-t border-white/5">
+              <p className="mb-3 text-xs text-slate-500">رابط التتبع وإشعارات الزبون</p>
+              <div className="flex gap-3 items-start">
+                {qrUrl ? (
+                  <a href={trackingUrl} target="_blank" rel="noopener noreferrer" title="فتح صفحة التتبع" className="shrink-0">
+                    <div className="rounded-xl border border-white/10 p-1.5 bg-white">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={qrUrl} alt="QR تتبع الجهاز" width={88} height={88} />
+                    </div>
+                  </a>
+                ) : (
+                  <div className="shrink-0 h-[104px] w-[104px] rounded-xl border border-white/5 bg-white/3 flex items-center justify-center">
+                    <span className="text-xs text-slate-600">QR</span>
+                  </div>
+                )}
+                <div className="flex-1 space-y-1.5 min-w-0">
+                  {cleanPhone && (
+                    <a href={`https://wa.me/${cleanPhone}?text=${encodeURIComponent(notificationMsg)}`}
+                      target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 px-3 py-2 text-xs text-green-300 hover:bg-green-500/20 transition-colors">
+                      💬 إرسال عبر واتساب
+                    </a>
+                  )}
+                  <a href={`https://t.me/share/url?url=${encodeURIComponent(trackingUrl)}&text=${encodeURIComponent(notificationMsg)}`}
+                    target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-2 rounded-lg border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-xs text-blue-300 hover:bg-blue-500/20 transition-colors">
+                    ✈️ مشاركة عبر تيليغرام
+                  </a>
+                  <button onClick={copySmsText}
+                    className="flex w-full items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-400 hover:bg-white/10 transition-colors">
+                    {smsCopied ? '✓ تم النسخ' : '📋 نسخ رسالة SMS'}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* وصف العطل */}
@@ -364,38 +475,50 @@ export default function RepairJobDetail({ job, parts: initialParts, history, cur
             <p className="text-sm text-slate-300 leading-relaxed">{job.problem_desc}</p>
           </div>
 
-          {/* سجل الحالات */}
+          {/* سجل التحديثات — timestamps بارزة */}
           <div className="rounded-2xl border border-white/5 bg-slate-900 p-5 print:hidden">
             <h2 className="mb-4 text-sm font-semibold text-white">سجل التحديثات</h2>
-            <div className="space-y-3">
-              {history.map((h, i) => {
-                const meta = STATUS_META[h.to_status]
-                return (
-                  <div key={h.id} className="flex gap-3">
-                    <div className="flex flex-col items-center">
-                      <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs ${meta?.cls ?? 'bg-white/5 text-white'}`}>
-                        {meta?.icon ?? '•'}
+            {history.length === 0 ? (
+              <p className="text-xs text-slate-600 text-center py-2">لا يوجد سجل بعد</p>
+            ) : (
+              <div className="space-y-0">
+                {history.map((h, i) => {
+                  const meta    = STATUS_META[h.to_status]
+                  const date    = new Date(h.changed_at)
+                  const timeStr = date.toLocaleTimeString('ar', { hour: '2-digit', minute: '2-digit', hour12: false })
+                  const dateStr = date.toLocaleDateString('ar', { month: 'short', day: 'numeric' })
+                  return (
+                    <div key={h.id} className="flex gap-3">
+                      {/* Timestamp column */}
+                      <div className="flex w-14 shrink-0 flex-col items-end">
+                        <span className="font-mono text-sm font-bold text-sky-400 leading-tight" dir="ltr">{timeStr}</span>
+                        <span className="text-[10px] text-slate-600">{dateStr}</span>
+                        {i < history.length - 1 && (
+                          <div className="my-1 flex-1 w-px bg-white/5 self-center min-h-[16px]" />
+                        )}
                       </div>
-                      {i < history.length - 1 && <div className="mt-1 h-full w-px bg-white/5" />}
+                      {/* Content */}
+                      <div className="flex items-start gap-2 pb-4 flex-1">
+                        <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs ${meta?.cls ?? 'bg-white/5 text-white'}`}>
+                          {meta?.icon ?? '•'}
+                        </div>
+                        <div>
+                          <p className="text-xs font-medium text-slate-300">{meta?.label ?? h.to_status}</p>
+                          {h.note && <p className="text-xs text-slate-500 mt-0.5">{h.note}</p>}
+                        </div>
+                      </div>
                     </div>
-                    <div className="pb-3">
-                      <p className="text-xs font-medium text-slate-300">{meta?.label ?? h.to_status}</p>
-                      {h.note && <p className="text-xs text-slate-500">{h.note}</p>}
-                      <p className="text-xs text-slate-600 mt-0.5">
-                        {new Date(h.changed_at).toLocaleString('ar', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* ── العمود الأيمن: العمل والمالية ── */}
+        {/* ── العمود الأيمن ── */}
         <div className="space-y-5 lg:col-span-2">
 
-          {/* تشخيص وعمل */}
+          {/* التشخيص والعمل */}
           <div className="rounded-2xl border border-white/5 bg-slate-900 p-5 print:hidden">
             <h2 className="mb-4 text-sm font-semibold text-white">التشخيص والعمل المنجز</h2>
             <div className="space-y-3">
@@ -415,13 +538,22 @@ export default function RepairJobDetail({ job, parts: initialParts, history, cur
                 <div>
                   <label className="mb-1 block text-xs text-slate-400">الفني المسؤول</label>
                   <input value={assignedTo} onChange={e => setAssignedTo(e.target.value)}
-                    placeholder="اسم الفني" className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white outline-none focus:border-sky-500/50" />
+                    placeholder="اسم الفني"
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white outline-none focus:border-sky-500/50" />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-slate-400">الموعد المتوقع</label>
                   <input type="date" value={estimatedDone} onChange={e => setEstimatedDone(e.target.value)}
                     className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white outline-none focus:border-sky-500/50" />
                 </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-slate-400">أولوية</label>
+                <select value={priority} onChange={e => setPriority(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white outline-none focus:border-sky-500/50">
+                  <option value="normal">عادي</option>
+                  <option value="urgent">عاجل</option>
+                </select>
               </div>
               <div>
                 <label className="mb-1 block text-xs text-slate-400">ملاحظات داخلية</label>
@@ -435,7 +567,6 @@ export default function RepairJobDetail({ job, parts: initialParts, history, cur
           {/* قطع الغيار */}
           <div className="rounded-2xl border border-white/5 bg-slate-900 p-5 print:hidden">
             <h2 className="mb-4 text-sm font-semibold text-white">قطع الغيار المستخدمة</h2>
-
             {parts.length > 0 && (
               <div className="mb-4 overflow-hidden rounded-xl border border-white/5">
                 <table className="w-full text-sm">
@@ -467,8 +598,6 @@ export default function RepairJobDetail({ job, parts: initialParts, history, cur
                 </table>
               </div>
             )}
-
-            {/* إضافة قطعة */}
             <div className="space-y-2">
               <div className="relative">
                 <input value={partSearch} onChange={e => { setPartSearch(e.target.value); searchParts(e.target.value) }}
@@ -488,18 +617,56 @@ export default function RepairJobDetail({ job, parts: initialParts, history, cur
               </div>
               <div className="flex gap-2">
                 <input value={newPartName} onChange={e => setNewPartName(e.target.value)}
-                  placeholder="اسم القطعة *" className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-sky-500/50" />
+                  placeholder="اسم القطعة *"
+                  className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-sky-500/50" />
                 <input type="number" min="1" step="1" value={newPartQty} onChange={e => setNewPartQty(e.target.value)}
-                  placeholder="كمية" dir="ltr" className="w-16 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-sky-500/50" />
+                  placeholder="كمية" dir="ltr"
+                  className="w-16 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-sky-500/50" />
                 <input type="number" min="0" step="0.01" value={newPartCost} onChange={e => setNewPartCost(e.target.value)}
-                  placeholder="سعر" dir="ltr" className="w-24 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-sky-500/50" />
+                  placeholder="سعر" dir="ltr"
+                  className="w-24 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-sky-500/50" />
                 <button type="button" onClick={addPart} disabled={savingPart || !newPartName.trim()}
                   className="rounded-xl bg-white/10 px-3 py-2 text-sm text-white hover:bg-white/15 disabled:opacity-40">+</button>
               </div>
             </div>
           </div>
 
-          {/* المالية */}
+          {/* صور الجهاز */}
+          <div className="rounded-2xl border border-white/5 bg-slate-900 p-5 print:hidden">
+            <h2 className="mb-4 text-sm font-semibold text-white">صور الجهاز</h2>
+            {photos.length > 0 && (
+              <div className="mb-4 grid grid-cols-3 gap-2">
+                {photos.map((photo, i) => (
+                  <div key={i} className="relative aspect-square overflow-hidden rounded-xl border border-white/10">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={photo.url} alt={PHOTO_STAGE_LABEL[photo.stage] ?? photo.stage}
+                      className="h-full w-full object-cover" />
+                    <div className="absolute inset-x-0 bottom-0 bg-black/60 px-2 py-1">
+                      <p className="text-[10px] text-white leading-tight">{PHOTO_STAGE_LABEL[photo.stage] ?? photo.stage}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {photos.length === 0 && (
+              <p className="mb-4 text-center text-sm text-slate-600 py-2">لا يوجد صور بعد</p>
+            )}
+            <div className="flex items-center gap-2">
+              <select value={photoStage} onChange={e => setPhotoStage(e.target.value)}
+                className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-sky-500/50">
+                {PHOTO_STAGES.map(s => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+              <label className={`flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white transition-colors hover:bg-white/10 ${uploadingPhoto ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                {uploadingPhoto ? '⏳ جاري الرفع...' : '📷 التقاط صورة'}
+                <input type="file" accept="image/*" capture="environment" className="hidden"
+                  onChange={handlePhotoCapture} disabled={uploadingPhoto} />
+              </label>
+            </div>
+          </div>
+
+          {/* الملخص المالي */}
           <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
             <h2 className="mb-4 text-sm font-semibold text-white">الملخص المالي</h2>
             <div className="space-y-3 print:hidden">
@@ -521,8 +688,6 @@ export default function RepairJobDetail({ job, parts: initialParts, history, cur
                 </div>
               </div>
             </div>
-
-            {/* ملخص للطباعة والعرض */}
             <div className="mt-4 space-y-2 border-t border-white/5 pt-4">
               {partsTotal > 0 && (
                 <div className="flex justify-between text-sm">
@@ -543,7 +708,7 @@ export default function RepairJobDetail({ job, parts: initialParts, history, cur
                 </div>
               )}
               {finalCostNum > 0 && (
-                <div className={`flex justify-between text-sm font-semibold pt-2 border-t border-white/5 ${balance > 0 ? 'text-yellow-400' : 'text-emerald-400'}`}>
+                <div className={`flex justify-between border-t border-white/5 pt-2 text-sm font-semibold ${balance > 0 ? 'text-yellow-400' : 'text-emerald-400'}`}>
                   <span>{balance > 0 ? 'المبلغ المتبقي' : 'مكتمل الدفع'}</span>
                   <span dir="ltr">{fmt(Math.max(0, balance))} {currencyCode}</span>
                 </div>
@@ -566,7 +731,7 @@ export default function RepairJobDetail({ job, parts: initialParts, history, cur
         <div className="border-2 border-black p-6 rounded">
           <div className="flex justify-between items-start mb-4">
             <div>
-              <h1 className="text-2xl font-bold">وصل استلام جهاز</h1>
+              <h1 className="text-2xl font-bold">{storeName} — وصل استلام جهاز</h1>
               <p className="text-lg font-mono mt-1">{job.job_number}</p>
             </div>
             <div className="text-left text-sm">

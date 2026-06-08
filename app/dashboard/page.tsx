@@ -26,7 +26,7 @@ export default async function DashboardPage() {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, currency_code, is_active, suspended_at')
+    .select('id, currency_code, is_active, suspended_at, logo_url, phone, whatsapp, subdomain, country_code')
     .eq('id', storeId)
     .single()
   if (!store) redirect('/onboarding')
@@ -72,19 +72,47 @@ export default async function DashboardPage() {
 
   // Top products — sequential query using paid order IDs
   const paidOrderIds = (paidOrderIdsRes.data ?? []).map((o: { id: string }) => o.id)
-  let orderItemsData: { product_name: string; quantity: number }[] = []
+  let orderItemsData: { product_id: string | null; product_name: string; quantity: number }[] = []
   if (paidOrderIds.length > 0) {
-    const { data } = await supabase.from('order_items').select('product_name, quantity').in('order_id', paidOrderIds)
+    const { data } = await supabase
+      .from('order_items')
+      .select('product_id, product_name, quantity')
+      .in('order_id', paidOrderIds)
     orderItemsData = data ?? []
   }
 
-  // Aggregate top products
-  const productMap = new Map<string, number>()
+  // Aggregate by product_id (fallback to product_name to avoid duplicates)
+  const productMap = new Map<string, { name: string; qty: number; productId: string | null }>()
   for (const item of orderItemsData) {
-    productMap.set(item.product_name, (productMap.get(item.product_name) ?? 0) + item.quantity)
+    const key = item.product_id ?? item.product_name
+    const existing = productMap.get(key)
+    if (existing) {
+      existing.qty += item.quantity
+    } else {
+      productMap.set(key, { name: item.product_name, qty: item.quantity, productId: item.product_id ?? null })
+    }
   }
-  const topProducts = [...productMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
-  const maxProductQty = topProducts[0]?.[1] ?? 1
+  const topProductsSorted = [...productMap.values()].sort((a, b) => b.qty - a.qty).slice(0, 5)
+  const totalQtySold   = [...productMap.values()].reduce((sum, p) => sum + p.qty, 0)
+
+  // Fetch thumbnails for top products
+  const topProductIds = topProductsSorted.filter(p => p.productId).map(p => p.productId!)
+  const thumbnailMap  = new Map<string, string | null>()
+  if (topProductIds.length > 0) {
+    const { data: prodData } = await supabase
+      .from('products')
+      .select('id, thumbnail_url')
+      .in('id', topProductIds)
+    for (const p of (prodData ?? [])) thumbnailMap.set(p.id, p.thumbnail_url)
+  }
+
+  const topProducts = topProductsSorted.map(p => ({
+    name:      p.name,
+    qty:       p.qty,
+    thumbnail: p.productId ? (thumbnailMap.get(p.productId) ?? null) : null,
+    pct:       totalQtySold > 0 ? Math.round((p.qty / totalQtySold) * 100) : 0,
+  }))
+  const maxProductQty = topProducts[0]?.qty ?? 1
 
   // Core metrics
   const totalRevenue    = (revenueRes.data ?? []).reduce((s: number, o: { total_amount: number | null }) => s + (o.total_amount ?? 0), 0)
@@ -95,6 +123,33 @@ export default async function DashboardPage() {
   const processingCount = processingRes.count ?? 0
   const isActive        = store.is_active !== false
   const isNewStore      = ordersTotal === 0 && productsCount === 0
+
+  // خطوات البدء — تختفي عند اكتمال الثلاثة
+  const setupSteps = [
+    {
+      id: 'product',
+      label: 'أضف أول منتج',
+      desc: 'اجعل متجرك جاهزاً للبيع',
+      href: '/dashboard/products/new',
+      done: productsCount > 0,
+    },
+    {
+      id: 'contact',
+      label: 'أكمل بيانات التواصل',
+      desc: 'هاتف أو واتساب للزبائن',
+      href: '/dashboard/settings',
+      done: !!(store.phone || store.whatsapp),
+    },
+    {
+      id: 'order',
+      label: 'أنشئ أول طلبية',
+      desc: 'POS أو عبر المتجر الإلكتروني',
+      href: '/dashboard/orders/new',
+      done: ordersTotal > 0,
+    },
+  ]
+  const setupDone  = setupSteps.filter(s => s.done).length
+  const showSetup  = setupDone < setupSteps.length
 
   // Weekly growth
   type WeekOrder = { created_at: string; total_amount: number | null; payment_status: string }
@@ -161,37 +216,69 @@ export default async function DashboardPage() {
         <DashboardRefresh loadedAt={now.toISOString()} />
       </div>
 
-      {/* ── رسالة ترحيب للمتاجر الجديدة ── */}
-      {isNewStore && (
+      {/* ── خطوات البدء السريع ── */}
+      {showSetup && (
         <div className="rounded-2xl border border-sky-500/20 bg-gradient-to-l from-sky-500/5 to-transparent p-5">
-          <div className="flex items-start gap-4">
-            <div className="mt-0.5 text-2xl leading-none">🎉</div>
-            <div className="min-w-0 flex-1">
-              <p className="font-semibold text-white">مرحباً بك في Bazarko!</p>
-              <p className="mt-1 text-sm text-slate-400">
-                متجرك جاهز — ابدأ بإضافة منتجاتك أو إنشاء أول طلبية مباشرةً.
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <div>
+              <p className="font-semibold text-white">
+                {setupDone === 0 ? '🎉 مرحباً بك في Bazarko!' : '🚀 أكمل إعداد متجرك'}
               </p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Link
-                  href="/dashboard/products/new"
-                  className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 transition-colors hover:bg-sky-400"
-                >
-                  إضافة أول منتج
-                </Link>
-                <Link
-                  href="/dashboard/orders/new"
-                  className="rounded-xl border border-white/10 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-700 hover:text-white"
-                >
-                  إنشاء أول طلبية
-                </Link>
-                <Link
-                  href="/dashboard/customers"
-                  className="rounded-xl border border-white/10 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-700 hover:text-white"
-                >
-                  إضافة زبون
-                </Link>
+              <p className="mt-0.5 text-sm text-slate-400">
+                {setupDone} / {setupSteps.length} خطوات مكتملة
+              </p>
+            </div>
+            {/* شريط التقدم */}
+            <div className="hidden sm:block w-32">
+              <div className="h-1.5 w-full rounded-full bg-slate-700">
+                <div
+                  className="h-1.5 rounded-full bg-sky-500 transition-all"
+                  style={{ width: `${(setupDone / setupSteps.length) * 100}%` }}
+                />
               </div>
             </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            {setupSteps.map(step => (
+              <Link
+                key={step.id}
+                href={step.href}
+                className={`flex items-start gap-3 rounded-xl border p-4 transition-colors ${
+                  step.done
+                    ? 'border-emerald-500/20 bg-emerald-500/5 opacity-60'
+                    : 'border-white/10 bg-slate-800/60 hover:border-sky-500/30 hover:bg-slate-800'
+                }`}
+              >
+                <span className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                  step.done ? 'bg-emerald-500 text-white' : 'border border-white/20 text-slate-400'
+                }`}>
+                  {step.done ? '✓' : ''}
+                </span>
+                <div className="min-w-0">
+                  <p className={`text-sm font-medium ${step.done ? 'text-emerald-400 line-through decoration-emerald-500/40' : 'text-white'}`}>
+                    {step.label}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-500">{step.desc}</p>
+                </div>
+              </Link>
+            ))}
+          </div>
+
+          {/* شارك رابط المتجر */}
+          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-white/5 pt-4">
+            <span className="text-xs text-slate-500">رابط متجرك:</span>
+            <span className="text-xs text-sky-400 font-mono" dir="ltr">
+              {store.subdomain}.{process.env.NEXT_PUBLIC_DOMAIN ?? 'bazarko.app'}
+            </span>
+            <a
+              href={`https://${store.subdomain}.${process.env.NEXT_PUBLIC_DOMAIN ?? 'bazarko.app'}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mr-auto rounded-lg bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10 transition-colors"
+            >
+              👁️ معاينة المتجر
+            </a>
           </div>
         </div>
       )}
@@ -337,27 +424,40 @@ export default async function DashboardPage() {
                 {isNewStore ? 'أضف منتجاتك لتبدأ البيع' : 'لا بيانات مبيعات بعد'}
               </p>
               {isNewStore && (
-                <Link
-                  href="/dashboard/products/new"
-                  className="text-xs text-sky-400 hover:underline"
-                >
+                <Link href="/dashboard/products/new" className="text-xs text-sky-400 hover:underline">
                   إضافة منتج جديد ←
                 </Link>
               )}
             </div>
           ) : (
-            <div className="space-y-4">
-              {topProducts.map(([name, qty], i) => (
-                <div key={name}>
-                  <div className="mb-1.5 flex items-center justify-between gap-3 text-sm">
-                    <span className="min-w-0 flex-1 truncate text-slate-300">{i + 1}. {name}</span>
-                    <span className="shrink-0 text-xs text-slate-400">{qty} قطعة</span>
+            <div className="space-y-3">
+              {topProducts.map((p, i) => (
+                <div key={p.name} className="flex items-center gap-3">
+                  {/* صورة مصغّرة */}
+                  <div className="h-9 w-9 flex-shrink-0 overflow-hidden rounded-lg bg-slate-800">
+                    {p.thumbnail ? (
+                      <img src={p.thumbnail} alt={p.name} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-xs text-slate-600">
+                        {i + 1}
+                      </div>
+                    )}
                   </div>
-                  <div className="h-1.5 w-full rounded-full bg-slate-800">
-                    <div
-                      className="h-1.5 rounded-full bg-violet-500/60"
-                      style={{ width: `${(qty / maxProductQty) * 100}%` }}
-                    />
+
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate text-sm text-slate-300">{p.name}</span>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="text-xs font-semibold text-violet-400">{p.pct}%</span>
+                        <span className="text-xs text-slate-500">{p.qty} قطعة</span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-slate-800">
+                      <div
+                        className="h-1.5 rounded-full bg-violet-500/60"
+                        style={{ width: `${(p.qty / maxProductQty) * 100}%` }}
+                      />
+                    </div>
                   </div>
                 </div>
               ))}

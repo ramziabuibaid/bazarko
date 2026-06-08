@@ -10,7 +10,6 @@ interface Store {
   country_code: string
   plan: string
   modules: Record<string, boolean>
-  full_subdomain: string
 }
 
 export default function DashboardShell({
@@ -21,6 +20,7 @@ export default function DashboardShell({
   children: React.ReactNode
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const storeUrl = `${store.subdomain}.${process.env.NEXT_PUBLIC_DOMAIN ?? 'bazarko.app'}`
 
   useEffect(() => {
     if (window.innerWidth < 1024) setSidebarOpen(false)
@@ -64,13 +64,13 @@ export default function DashboardShell({
 
           {/* رابط المتجر على الديسكتوب */}
           <a
-            href={`https://${store.full_subdomain}`}
+            href={`https://${storeUrl}`}
             target="_blank"
             rel="noopener noreferrer"
             className="hidden lg:flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-500 hover:bg-white/5 hover:text-sky-400 transition-colors"
             dir="ltr"
           >
-            {store.full_subdomain}
+            {storeUrl}
             <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M1.5 9.5L9.5 1.5M9.5 1.5H4M9.5 1.5V7" />
             </svg>

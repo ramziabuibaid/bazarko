@@ -81,7 +81,9 @@ export default function RepairKanban({ jobs, currencyCode }: Props) {
             <div key={col.status} className={`flex items-center gap-2 rounded-xl border ${clr.border} bg-white/3 px-4 py-2`}>
               <span className="text-base">{col.icon}</span>
               <span className="text-sm text-slate-300">{col.label}</span>
-              <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${clr.badge}`}>{count}</span>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${clr.badge}`}>
+                {count}{jobs.length > 0 ? ` (${Math.round(count / jobs.length * 100)}%)` : ''}
+              </span>
             </div>
           )
         })}

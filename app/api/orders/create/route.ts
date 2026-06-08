@@ -151,6 +151,48 @@ export async function POST(req: NextRequest) {
     ])
   }
 
+  // ── Auto-create/link customer for POS orders ──────────────────────────────
+  // الطلبيات الكاشير تُخزّن اسم الزبون في orders مباشرةً لكن لا تُنشئ سجلاً في customers.
+  // هنا نُنشئ الزبون تلقائياً (أو نربطه إذا كان موجوداً بنفس الهاتف) لضمان تطابق الإحصائيات.
+  if (mode === 'pos' && resolvedName.trim() && resolvedPhone.trim()) {
+    const normalizedPhone = resolvedPhone.replace(/\s+/g, '')
+
+    const { data: existingCustomer } = await supabase
+      .from('customers')
+      .select('id, total_orders')
+      .eq('store_id', store.id)
+      .eq('phone', normalizedPhone)
+      .maybeSingle()
+
+    if (existingCustomer) {
+      await Promise.all([
+        supabase.from('customers').update({
+          total_orders: (existingCustomer.total_orders ?? 0) + 1,
+          last_order_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq('id', existingCustomer.id),
+        supabase.from('orders').update({ customer_id: existingCustomer.id }).eq('id', order.id),
+      ])
+    } else {
+      const { data: newCustomer } = await supabase
+        .from('customers')
+        .insert({
+          store_id: store.id,
+          name: resolvedName.trim(),
+          phone: normalizedPhone,
+          email: resolvedEmail || null,
+          total_orders: 1,
+          last_order_at: new Date().toISOString(),
+        })
+        .select('id')
+        .single()
+
+      if (newCustomer) {
+        await supabase.from('orders').update({ customer_id: newCustomer.id }).eq('id', order.id)
+      }
+    }
+  }
+
   // إرسال الإيميل
   if (resolvedEmail) {
     const domain = process.env.NEXT_PUBLIC_DOMAIN ?? 'bazarko.app'

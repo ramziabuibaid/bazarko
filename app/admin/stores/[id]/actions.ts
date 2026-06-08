@@ -16,6 +16,7 @@ export async function suspendStore(storeId: string, reason: string) {
   const supabase = createAdminClient()
   await supabase.from('stores').update({
     is_active: false,
+    status: 'suspended',
     suspended_at: new Date().toISOString(),
     suspended_reason: reason || 'بدون سبب',
   }).eq('id', storeId)
@@ -29,6 +30,7 @@ export async function activateStore(storeId: string) {
   const supabase = createAdminClient()
   await supabase.from('stores').update({
     is_active: true,
+    status: 'active',
     suspended_at: null,
     suspended_reason: null,
   }).eq('id', storeId)

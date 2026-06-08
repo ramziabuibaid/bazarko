@@ -306,7 +306,7 @@ export default function ProductForm({ storeId, currencyCode, categories, initial
       <Section title="التسعير">
         <div className="grid gap-4 sm:grid-cols-3">
           <div>
-            <Label>السعر <Required /></Label>
+            <Label>السعر بعد الخصم <Required /></Label>
             <div className="relative">
               <input
                 type="number" min="0" step="0.01"
@@ -518,13 +518,18 @@ function Toggle({
         <p className="text-sm text-white">{label}</p>
         <p className="text-xs text-slate-500">{description}</p>
       </div>
-      <button
-        type="button"
-        onClick={() => onChange(!checked)}
-        className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${checked ? 'bg-sky-500' : 'bg-slate-700'}`}
-      >
-        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-5' : 'translate-x-0.5'}`} />
-      </button>
+      <div className="flex flex-shrink-0 items-center gap-2">
+        <span className={`text-xs font-medium transition-colors ${checked ? 'text-sky-400' : 'text-slate-500'}`}>
+          {checked ? 'مفعّل' : 'معطّل'}
+        </span>
+        <button
+          type="button"
+          onClick={() => onChange(!checked)}
+          className={`relative h-6 w-11 rounded-full transition-colors ${checked ? 'bg-sky-500' : 'bg-slate-700'}`}
+        >
+          <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-5' : 'translate-x-0.5'}`} />
+        </button>
+      </div>
     </label>
   )
 }
