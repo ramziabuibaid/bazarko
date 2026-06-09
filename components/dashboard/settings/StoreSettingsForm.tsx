@@ -49,6 +49,18 @@ const DIAL_CODES = [
   { code: '964', flag: '🇮🇶', label: 'العراق (+964)' },
 ]
 
+const SECONDARY_CURRENCIES = [
+  { code: 'USD', name: 'دولار أمريكي' },
+  { code: 'EUR', name: 'يورو' },
+  { code: 'JOD', name: 'دينار أردني' },
+  { code: 'SAR', name: 'ريال سعودي' },
+  { code: 'AED', name: 'درهم إماراتي' },
+  { code: 'TRY', name: 'ليرة تركية' },
+  { code: 'ILS', name: 'شيكل إسرائيلي' },
+  { code: 'SYP', name: 'ليرة سورية' },
+  { code: 'EGP', name: 'جنيه مصري' },
+]
+
 const SOCIAL_PLATFORMS = [
   { key: 'instagram', label: 'Instagram', icon: '📷', placeholder: 'https://instagram.com/your_store' },
   { key: 'facebook',  label: 'Facebook',  icon: '👥', placeholder: 'https://facebook.com/your_store' },
@@ -78,6 +90,8 @@ interface Store {
   telegram: string | null
   business_hours: BusinessHours | null
   is_verified: boolean
+  secondary_currency_code: string | null
+  exchange_rate: number | null
 }
 
 interface Props {
@@ -115,6 +129,8 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
 
   const [dialCode, setDialCode] = useState(defaultDialCode(store.country_code))
   const [hours, setHours] = useState<BusinessHours>(store.business_hours ?? DEFAULT_HOURS)
+  const [secondaryCurrency, setSecondaryCurrency] = useState(store.secondary_currency_code ?? '')
+  const [exchangeRate, setExchangeRate] = useState(store.exchange_rate ? String(store.exchange_rate) : '')
 
   const [logoUrl, setLogoUrl] = useState<string | null>(store.logo_url)
   const [coverUrl, setCoverUrl] = useState<string | null>(store.cover_url)
@@ -192,8 +208,10 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
         facebook:       form.facebook.trim() || null,
         tiktok:         form.tiktok.trim() || null,
         telegram:       form.telegram.trim() || null,
-        business_hours: hours,
-        updated_at:     new Date().toISOString(),
+        business_hours:          hours,
+        secondary_currency_code: secondaryCurrency || null,
+        exchange_rate:           exchangeRate ? parseFloat(exchangeRate) : null,
+        updated_at:              new Date().toISOString(),
       })
       .eq('id', store.id)
 
@@ -494,6 +512,74 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
             )
           })}
         </div>
+      </div>
+
+      {/* ── العملة الثانوية ──────────────────────────────────── */}
+      <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h2 className="font-semibold text-white">العملة الثانوية</h2>
+            <p className="mt-0.5 text-xs text-slate-500">عرض سعر المنتج بعملتين في المتجر</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSecondaryCurrency(v => v ? '' : 'USD')}
+            className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
+              secondaryCurrency ? 'bg-sky-600' : 'bg-slate-700'
+            }`}
+          >
+            <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+              secondaryCurrency ? 'translate-x-5' : 'translate-x-0.5'
+            }`} />
+          </button>
+        </div>
+
+        {secondaryCurrency && (
+          <div className="space-y-4">
+            <div>
+              <label className="mb-1.5 block text-sm text-slate-400">العملة الثانوية</label>
+              <select
+                value={secondaryCurrency}
+                onChange={e => setSecondaryCurrency(e.target.value)}
+                className={inputClass}
+              >
+                {SECONDARY_CURRENCIES
+                  .filter(c => c.code !== store.currency_code)
+                  .map(c => (
+                    <option key={c.code} value={c.code} className="bg-slate-800">
+                      {c.code} — {c.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm text-slate-400">
+                سعر الصرف — 1 {store.currency_code} يساوي كم {secondaryCurrency}؟
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="0.0001"
+                value={exchangeRate}
+                onChange={e => setExchangeRate(e.target.value)}
+                placeholder="مثال: 0.27"
+                dir="ltr"
+                className={inputClass}
+              />
+              <p className="mt-1 text-xs text-slate-600">
+                حدّث هذه القيمة يومياً من إعدادات المتجر حسب سعر الصرف الحالي
+              </p>
+            </div>
+            {exchangeRate && (
+              <div className="rounded-xl bg-sky-500/5 border border-sky-500/10 px-4 py-3 text-sm text-sky-400">
+                مثال: منتج بسعر 100 {store.currency_code} سيظهر بـ{' '}
+                <span className="font-semibold">
+                  {(100 * parseFloat(exchangeRate || '0')).toLocaleString('ar')} {secondaryCurrency}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── معلومات الحساب (للقراءة فقط) ───────────────────── */}

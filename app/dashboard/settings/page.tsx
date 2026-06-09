@@ -18,7 +18,8 @@ export default async function SettingsPage() {
       phone, whatsapp, email, city, address,
       subdomain, country_code, currency_code,
       instagram, facebook, tiktok, telegram,
-      business_hours, is_verified
+      business_hours, is_verified,
+      secondary_currency_code, exchange_rate
     `)
     .eq('id', storeId)
     .single()

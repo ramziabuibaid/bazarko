@@ -20,9 +20,11 @@ interface Props {
   storeId: string
   country: string
   subdomain: string
+  secondaryCurrencyCode?: string | null
+  exchangeRate?: number | null
 }
 
-export default function ProductCard({ product, currencyCode, storeId, country, subdomain }: Props) {
+export default function ProductCard({ product, currencyCode, storeId, country, subdomain, secondaryCurrencyCode, exchangeRate }: Props) {
   const addItem = useCart(s => s.addItem)
   const items = useCart(s => s.items)
   const updateQty = useCart(s => s.updateQty)
@@ -33,6 +35,10 @@ export default function ProductCard({ product, currencyCode, storeId, country, s
 
   const discount = product.compare_price
     ? Math.round((1 - product.price / product.compare_price) * 100)
+    : null
+
+  const secondaryPrice = exchangeRate && secondaryCurrencyCode
+    ? Math.round(product.price * exchangeRate)
     : null
 
   function handleAdd(e: React.MouseEvent) {
@@ -81,14 +87,21 @@ export default function ProductCard({ product, currencyCode, storeId, country, s
       <div className="flex flex-1 flex-col p-3">
         <p className="line-clamp-2 text-sm font-medium text-gray-900">{product.name}</p>
 
-        <div className="mt-2 flex items-center gap-2">
-          <span className="font-semibold text-gray-900">
-            {product.price.toLocaleString('ar')} {currencyCode}
-          </span>
-          {product.compare_price && (
-            <span className="text-xs text-gray-400 line-through">
-              {product.compare_price.toLocaleString('ar')}
+        <div className="mt-2">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-gray-900">
+              {product.price.toLocaleString('ar')} {currencyCode}
             </span>
+            {product.compare_price && (
+              <span className="text-xs text-gray-400 line-through">
+                {product.compare_price.toLocaleString('ar')}
+              </span>
+            )}
+          </div>
+          {secondaryPrice !== null && (
+            <p className="mt-0.5 text-xs text-gray-400">
+              ≈ {secondaryPrice.toLocaleString('ar')} {secondaryCurrencyCode}
+            </p>
           )}
         </div>
 

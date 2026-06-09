@@ -42,7 +42,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, name, description, logo_url, cover_url, phone, whatsapp, city, currency_code, country_code')
+    .select('id, name, description, logo_url, cover_url, phone, whatsapp, city, currency_code, country_code, secondary_currency_code, exchange_rate')
     .eq('subdomain', params.subdomain)
     .eq('country_code', params.country.toUpperCase())
     .eq('status', 'active')
@@ -103,6 +103,8 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
                   storeId={store.id}
                   country={params.country}
                   subdomain={params.subdomain}
+                  secondaryCurrencyCode={store.secondary_currency_code}
+                  exchangeRate={store.exchange_rate}
                 />
               ))}
             </div>
@@ -159,6 +161,8 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
                   storeId={store.id}
                   country={params.country}
                   subdomain={params.subdomain}
+                  secondaryCurrencyCode={store.secondary_currency_code}
+                  exchangeRate={store.exchange_rate}
                 />
               ))}
             </div>

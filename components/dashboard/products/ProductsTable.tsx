@@ -72,19 +72,29 @@ export default function ProductsTable({ products: initial, categories, storeId, 
     <>
       {/* ── Filters ── */}
       <div className="mb-4 space-y-2">
-        <div className="flex flex-wrap gap-2">
+        {/* سطر البحث + الزر */}
+        <div className="flex gap-2">
           <input
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && applyFilters()}
             placeholder="بحث باسم المنتج..."
-            className="min-w-[160px] flex-1 rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-right text-sm text-white placeholder-slate-500 outline-none focus:border-sky-500"
+            className="flex-1 rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-right text-sm text-white placeholder-slate-500 outline-none focus:border-sky-500"
           />
+          <button
+            onClick={applyFilters}
+            className="shrink-0 rounded-xl bg-slate-700 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-slate-600"
+          >
+            بحث
+          </button>
+        </div>
+        {/* سطر الفلاتر */}
+        <div className="flex gap-2">
           <select
             value={category}
             onChange={e => { setCategory(e.target.value); setTimeout(applyFilters, 0) }}
-            className="rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-sm text-white outline-none focus:border-sky-500"
+            className="flex-1 rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-right text-sm text-white outline-none focus:border-sky-500"
           >
             <option value="">كل الفئات</option>
             {categories.map(c => (
@@ -94,7 +104,7 @@ export default function ProductsTable({ products: initial, categories, storeId, 
           <select
             value={status}
             onChange={e => { setStatus(e.target.value); setTimeout(applyFilters, 0) }}
-            className="rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-sm text-white outline-none focus:border-sky-500"
+            className="flex-1 rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-right text-sm text-white outline-none focus:border-sky-500"
           >
             <option value="">كل الحالات</option>
             <option value="active">نشط</option>
@@ -103,12 +113,6 @@ export default function ProductsTable({ products: initial, categories, storeId, 
             <option value="out_of_stock">نفد المخزون</option>
           </select>
         </div>
-        <button
-          onClick={applyFilters}
-          className="w-full rounded-xl bg-slate-700 py-2.5 text-sm font-medium text-white transition-colors hover:bg-slate-600"
-        >
-          بحث
-        </button>
       </div>
 
       {/* ── Table ── */}

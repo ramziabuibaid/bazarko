@@ -12,7 +12,7 @@ export default async function ProductPage({ params }: Props) {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, name, logo_url, phone, whatsapp, currency_code')
+    .select('id, name, logo_url, phone, whatsapp, currency_code, secondary_currency_code, exchange_rate')
     .eq('subdomain', params.subdomain)
     .eq('country_code', params.country.toUpperCase())
     .eq('status', 'active')
@@ -22,7 +22,7 @@ export default async function ProductPage({ params }: Props) {
 
   const { data: product } = await supabase
     .from('products')
-    .select('id, name, description, price, compare_price, images, thumbnail_url, stock_available, track_stock, sku, categories(name)')
+    .select('id, name, description, price, compare_price, images, thumbnail_url, stock_available, track_stock, sku, video_url, categories(name)')
     .eq('store_id', store.id)
     .eq('slug', params.slug)
     .eq('is_active', true)
@@ -40,6 +40,21 @@ export default async function ProductPage({ params }: Props) {
     : product.thumbnail_url
       ? [product.thumbnail_url]
       : []
+
+  const secondaryPrice = store.exchange_rate && store.secondary_currency_code
+    ? Math.round(product.price * store.exchange_rate)
+    : null
+
+  const videoUrl: string | null = (product as unknown as { video_url?: string | null }).video_url ?? null
+  function getYouTubeId(url: string): string | null {
+    const m = url.match(/(?:v=|youtu\.be\/)([^&\n?#]+)/)
+    return m ? m[1] : null
+  }
+  const youtubeId = videoUrl && (videoUrl.includes('youtube.com') || videoUrl.includes('youtu.be'))
+    ? getYouTubeId(videoUrl)
+    : null
+  const isTikTok = videoUrl?.includes('tiktok.com')
+  const isInstagram = videoUrl?.includes('instagram.com')
 
   return (
     <div className="min-h-screen bg-white" dir="rtl">
@@ -76,19 +91,26 @@ export default async function ProductPage({ params }: Props) {
             )}
             <h1 className="text-2xl font-bold text-gray-900">{product.name}</h1>
 
-            <div className="mt-4 flex items-center gap-3">
-              <span className="text-2xl font-bold text-gray-900">
-                {product.price.toLocaleString('ar')} {store.currency_code}
-              </span>
-              {product.compare_price && (
-                <span className="text-lg text-gray-400 line-through">
-                  {product.compare_price.toLocaleString('ar')}
+            <div className="mt-4">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl font-bold text-gray-900">
+                  {product.price.toLocaleString('ar')} {store.currency_code}
                 </span>
-              )}
-              {discount && (
-                <span className="rounded-full bg-red-100 px-2 py-0.5 text-sm font-bold text-red-600">
-                  وفّر {discount}%
-                </span>
+                {product.compare_price && (
+                  <span className="text-lg text-gray-400 line-through">
+                    {product.compare_price.toLocaleString('ar')}
+                  </span>
+                )}
+                {discount && (
+                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-sm font-bold text-red-600">
+                    وفّر {discount}%
+                  </span>
+                )}
+              </div>
+              {secondaryPrice !== null && (
+                <p className="mt-1 text-base text-gray-500">
+                  ≈ {secondaryPrice.toLocaleString('ar')} {store.secondary_currency_code}
+                </p>
               )}
             </div>
 
@@ -130,6 +152,40 @@ export default async function ProductPage({ params }: Props) {
             )}
           </div>
         </div>
+
+        {/* فيديو المنتج */}
+        {videoUrl && (
+          <div className="mt-8">
+            <h2 className="mb-3 text-lg font-semibold text-gray-900">فيديو المنتج</h2>
+            {youtubeId ? (
+              <div className="overflow-hidden rounded-2xl bg-gray-50" style={{ aspectRatio: '16/9' }}>
+                <iframe
+                  src={`https://www.youtube.com/embed/${youtubeId}`}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  className="h-full w-full"
+                />
+              </div>
+            ) : (
+              <a
+                href={videoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 rounded-2xl border border-gray-100 bg-gray-50 px-5 py-4 text-gray-700 hover:bg-gray-100 transition-colors"
+              >
+                <span className="text-2xl">
+                  {isTikTok ? '🎵' : isInstagram ? '📷' : '▶️'}
+                </span>
+                <div>
+                  <p className="font-medium">
+                    {isTikTok ? 'شاهد على TikTok' : isInstagram ? 'شاهد على Instagram' : 'شاهد الفيديو'}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5" dir="ltr">{videoUrl}</p>
+                </div>
+              </a>
+            )}
+          </div>
+        )}
       </main>
     </div>
   )

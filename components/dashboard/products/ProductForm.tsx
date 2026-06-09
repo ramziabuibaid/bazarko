@@ -28,6 +28,7 @@ interface ProductData {
   is_featured: boolean
   images: string[]
   tags: string
+  video_url: string
 }
 
 interface Props {
@@ -43,7 +44,7 @@ const EMPTY: ProductData = {
   stock_quantity: '0', low_stock_alert: '5',
   track_stock: true, allow_backorder: false,
   is_active: true, is_featured: false,
-  images: [], tags: '',
+  images: [], tags: '', video_url: '',
 }
 
 export default function ProductForm({ storeId, currencyCode, categories, initialData }: Props) {
@@ -73,6 +74,16 @@ export default function ProductForm({ storeId, currencyCode, categories, initial
       name,
       slug: isEditing ? f.slug : generateSlug(name),
     }))
+  }
+
+  function handleGenerateSku() {
+    const catName = cats.find(c => c.id === form.category_id)?.name
+    const catCode = catName
+      ? generateSlug(catName).replace(/-/g, '').slice(0, 4).toUpperCase()
+      : 'PRD'
+    const nameCode = generateSlug(form.name).replace(/-/g, '').slice(0, 6).toUpperCase()
+    const num = Math.floor(Math.random() * 900 + 100)
+    set('sku', `${catCode}-${nameCode || 'ITEM'}-${num}`)
   }
 
   async function handleAddCategory() {
@@ -159,6 +170,7 @@ export default function ProductForm({ storeId, currencyCode, categories, initial
       images: form.images,
       thumbnail_url: form.images[0] ?? null,
       tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : [],
+      video_url: form.video_url.trim() || null,
     }
 
     if (isEditing) {
@@ -209,8 +221,20 @@ export default function ProductForm({ storeId, currencyCode, categories, initial
 
           <div>
             <Label>رمز SKU</Label>
-            <input value={form.sku} onChange={e => set('sku', e.target.value)}
-              placeholder="SHIRT-WHT-M" dir="ltr" className={input()} />
+            <div className="flex gap-2">
+              <input value={form.sku} onChange={e => set('sku', e.target.value)}
+                placeholder="SHIRT-WHT-M" dir="ltr" className={`${input()} flex-1`} />
+              <button
+                type="button"
+                onClick={handleGenerateSku}
+                disabled={!form.name.trim()}
+                title="توليد رمز SKU تلقائياً"
+                className="shrink-0 rounded-xl border border-white/10 bg-slate-800 px-3 py-2.5 text-xs text-sky-400 transition-colors hover:border-sky-500/40 hover:bg-sky-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                توليد
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">أو اضغط "توليد" لإنشاء رمز تلقائي من اسم المنتج والفئة</p>
           </div>
 
           <div>
@@ -427,6 +451,22 @@ export default function ProductForm({ storeId, currencyCode, categories, initial
           </button>
         </div>
         <p className="mt-2 text-xs text-slate-500">الصورة الأولى ستكون الصورة الرئيسية — حد 5MB للصورة الواحدة</p>
+      </Section>
+
+      {/* ── فيديو المنتج ── */}
+      <Section title="فيديو المنتج (اختياري)">
+        <Label>رابط الفيديو</Label>
+        <input
+          value={form.video_url}
+          onChange={e => set('video_url', e.target.value)}
+          placeholder="https://www.tiktok.com/... أو YouTube أو Instagram Reels"
+          dir="ltr"
+          type="url"
+          className={input()}
+        />
+        <p className="mt-1.5 text-xs text-slate-500">
+          الملابس والعطور تزداد مبيعاتها بشكل كبير مع الفيديو — أضف رابط TikTok أو YouTube أو Instagram
+        </p>
       </Section>
 
       {/* ── الوسوم والحالة ── */}
