@@ -48,7 +48,7 @@ export default async function MovementsPage({ searchParams }: Props) {
     <div className="p-6">
       <div className="mb-6 flex items-center gap-3">
         <Link href="/dashboard/inventory" className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-slate-400 hover:text-white">
-          ← المخزون
+          المخزون →
         </Link>
         <h1 className="text-xl font-semibold text-white">سجل حركات المخزون</h1>
       </div>

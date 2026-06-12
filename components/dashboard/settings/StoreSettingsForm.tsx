@@ -4,6 +4,7 @@ import { useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { uploadStoreImage } from '@/lib/supabase/storage'
 import { useRouter } from 'next/navigation'
+import { HEADER_THEMES } from '@/components/store/headerThemes'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -70,6 +71,15 @@ const SOCIAL_PLATFORMS = [
 
 // ─── Store interface ──────────────────────────────────────────────────────────
 
+interface FooterSettings {
+  tagline: string
+  show_contact: boolean
+  show_social: boolean
+  show_hours: boolean
+  show_powered_by: boolean
+  copyright: string
+}
+
 interface Store {
   id: string
   name: string
@@ -92,6 +102,8 @@ interface Store {
   is_verified: boolean
   secondary_currency_code: string | null
   exchange_rate: number | null
+  header_theme: string | null
+  footer_settings: FooterSettings | null
 }
 
 interface Props {
@@ -129,12 +141,48 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
 
   const [dialCode, setDialCode] = useState(defaultDialCode(store.country_code))
   const [hours, setHours] = useState<BusinessHours>(store.business_hours ?? DEFAULT_HOURS)
+  const [headerTheme, setHeaderTheme] = useState(store.header_theme ?? 'classic')
   const [secondaryCurrency, setSecondaryCurrency] = useState(store.secondary_currency_code ?? '')
   const [exchangeRate, setExchangeRate] = useState(store.exchange_rate ? String(store.exchange_rate) : '')
+
+  const defaultFooter: FooterSettings = {
+    tagline: '', show_contact: true, show_social: true,
+    show_hours: true, show_powered_by: true, copyright: '',
+  }
+  const [footer, setFooter] = useState<FooterSettings>({ ...defaultFooter, ...store.footer_settings })
+
+  function updateFooter(field: keyof FooterSettings, value: string | boolean) {
+    setFooter(f => ({ ...f, [field]: value }))
+    setSuccess(false)
+  }
 
   const [logoUrl, setLogoUrl] = useState<string | null>(store.logo_url)
   const [coverUrl, setCoverUrl] = useState<string | null>(store.cover_url)
   const [uploadingLogo, setUploadingLogo] = useState(false)
+
+  // ─── درجة جودة المتجر (تُحسب من الـ state الحالي) ───────────────────────
+  const qualityCriteria = [
+    { key: 'logo',    label: 'الشعار',              done: !!logoUrl,                                    pts: 15 },
+    { key: 'cover',   label: 'صورة الغلاف',          done: !!coverUrl,                                   pts: 10 },
+    { key: 'desc',    label: 'وصف المتجر',           done: form.description.trim().length > 10,          pts: 15 },
+    { key: 'phone',   label: 'رقم الهاتف',           done: form.phone.trim().length > 0,                 pts: 10 },
+    { key: 'whatsapp',label: 'واتساب',               done: form.whatsapp.trim().length > 0,              pts: 10 },
+    { key: 'hours',   label: 'ساعات العمل',          done: Object.values(hours).some(d => d.open),       pts: 15 },
+    { key: 'social',  label: 'وسائل التواصل',        done: !!(form.instagram || form.facebook || form.tiktok || form.telegram), pts: 15 },
+    { key: 'email',   label: 'البريد الإلكتروني',    done: form.email.trim().length > 0,                 pts: 5  },
+    { key: 'city',    label: 'المدينة / العنوان',    done: form.city.trim().length > 0,                  pts: 5  },
+  ]
+  const qualityScore = qualityCriteria.reduce((s, c) => s + (c.done ? c.pts : 0), 0)
+  const qualityLabel =
+    qualityScore >= 90 ? { text: 'ممتاز 🌟',    color: 'text-emerald-400' } :
+    qualityScore >= 75 ? { text: 'جيد جداً',     color: 'text-sky-400'     } :
+    qualityScore >= 50 ? { text: 'جيد',          color: 'text-amber-400'   } :
+                         { text: 'يحتاج تحسين',  color: 'text-red-400'     }
+  const barColor =
+    qualityScore >= 90 ? 'bg-emerald-500' :
+    qualityScore >= 75 ? 'bg-sky-500'     :
+    qualityScore >= 50 ? 'bg-amber-500'   :
+                         'bg-red-500'
   const [uploadingCover, setUploadingCover] = useState(false)
 
   const logoRef = useRef<HTMLInputElement>(null)
@@ -209,8 +257,10 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
         tiktok:         form.tiktok.trim() || null,
         telegram:       form.telegram.trim() || null,
         business_hours:          hours,
+        header_theme:            headerTheme,
         secondary_currency_code: secondaryCurrency || null,
         exchange_rate:           exchangeRate ? parseFloat(exchangeRate) : null,
+        footer_settings:         footer,
         updated_at:              new Date().toISOString(),
       })
       .eq('id', store.id)
@@ -229,6 +279,52 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
 
   return (
     <form onSubmit={handleSave} className="space-y-6">
+
+      {/* ── درجة جودة المتجر ────────────────────────────────── */}
+      <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="font-semibold text-white">درجة جودة المتجر</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              أكمل بيانات متجرك لزيادة الثقة لدى الزبائن
+            </p>
+          </div>
+          <div className="text-left shrink-0">
+            <span className={`text-3xl font-bold tabular-nums ${barColor.replace('bg-', 'text-')}`}>
+              {qualityScore}
+            </span>
+            <span className="text-lg text-slate-500">/100</span>
+            <p className={`mt-0.5 text-xs font-medium ${qualityLabel.color}`}>{qualityLabel.text}</p>
+          </div>
+        </div>
+
+        {/* شريط التقدم */}
+        <div className="mt-4 h-2.5 w-full overflow-hidden rounded-full bg-white/5">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+            style={{ width: `${qualityScore}%` }}
+          />
+        </div>
+
+        {/* قائمة المعايير */}
+        <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+          {qualityCriteria.map(c => (
+            <div key={c.key} className="flex items-center gap-2">
+              <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                c.done
+                  ? 'bg-emerald-500/15 text-emerald-400'
+                  : 'bg-white/5 text-slate-600'
+              }`}>
+                {c.done ? '✓' : '✗'}
+              </span>
+              <span className={`text-xs ${c.done ? 'text-slate-300' : 'text-slate-600'}`}>
+                {c.label}
+                {!c.done && <span className="mr-1 text-slate-700">+{c.pts}</span>}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
 
       {/* ── صور المتجر ──────────────────────────────────────── */}
       <div className="rounded-2xl border border-white/5 bg-slate-900 overflow-hidden">
@@ -275,6 +371,47 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
         </div>
         <div className="px-5 pt-14 pb-5">
           <p className="text-xs text-slate-500">اضغط على اللوغو أو الغلاف لتغييرهما</p>
+        </div>
+      </div>
+
+      {/* ── ثيم هيدر المتجر ──────────────────────────────────── */}
+      <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
+        <h2 className="font-semibold text-white">مظهر هيدر المتجر</h2>
+        <p className="mt-0.5 mb-4 text-xs text-slate-500">
+          اختر تصميم الشريط العلوي لمتجرك — ليكون شكل متجرك فريداً ومميزاً
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {HEADER_THEMES.map(t => {
+            const selected = headerTheme === t.id
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => { setHeaderTheme(t.id); setSuccess(false) }}
+                className={`overflow-hidden rounded-xl border-2 text-right transition ${
+                  selected ? 'border-sky-500 shadow-lg shadow-sky-500/10' : 'border-white/10 hover:border-white/25'
+                }`}
+              >
+                {/* معاينة حية مصغّرة للهيدر */}
+                <div className={`relative flex items-center justify-between overflow-hidden px-3 py-2.5 ${t.header} ${t.shine ? 'animate-header-shine' : ''}`}>
+                  <div className="flex items-center gap-2">
+                    <div className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ${t.logoFallback} ${t.logoRing}`}>
+                      {form.name.trim()[0] ?? 'م'}
+                    </div>
+                    <span className={`text-sm ${t.name}`}>{form.name.trim() || 'اسم متجرك'}</span>
+                  </div>
+                  <span className={`rounded-lg px-2 py-1 text-[10px] font-medium ${t.cartBtn}`}>🛒 السلة</span>
+                </div>
+                <div className="flex items-center justify-between bg-slate-950/60 px-3 py-2">
+                  <div>
+                    <p className={`text-sm font-medium ${selected ? 'text-sky-400' : 'text-white'}`}>{t.label}</p>
+                    <p className="text-[11px] text-slate-500">{t.description}</p>
+                  </div>
+                  {selected && <span className="text-sky-400">✓</span>}
+                </div>
+              </button>
+            )
+          })}
         </div>
       </div>
 
@@ -580,6 +717,69 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
             )}
           </div>
         )}
+      </div>
+
+      {/* ── إعدادات الـ Footer ──────────────────────────────── */}
+      <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
+        <h2 className="font-semibold text-white">تخصيص الـ Footer</h2>
+        <p className="mt-0.5 mb-5 text-xs text-slate-500">
+          التذييل السفلي الذي يظهر في أسفل كل صفحات المتجر
+        </p>
+
+        {/* أقسام الـ Footer */}
+        <div className="mb-5 space-y-3">
+          {[
+            { key: 'show_contact',   label: 'معلومات التواصل',       sub: 'الهاتف والبريد والعنوان' },
+            { key: 'show_social',    label: 'أيقونات التواصل الاجتماعي', sub: 'Instagram, Facebook, TikTok...' },
+            { key: 'show_hours',     label: 'ساعات العمل',           sub: 'جدول يوميات الدوام' },
+            { key: 'show_powered_by', label: 'شارة "مدعوم من Bazarko"', sub: 'تظهر في أسفل الـ Footer' },
+          ].map(({ key, label, sub }) => (
+            <div key={key} className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-300">{label}</p>
+                <p className="text-xs text-slate-600">{sub}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => updateFooter(key as keyof FooterSettings, !footer[key as keyof FooterSettings])}
+                className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
+                  footer[key as keyof FooterSettings] ? 'bg-sky-600' : 'bg-slate-700'
+                }`}
+              >
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                  footer[key as keyof FooterSettings] ? 'translate-x-5' : 'translate-x-0.5'
+                }`} />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="space-y-4 border-t border-white/5 pt-4">
+          <div>
+            <label className="mb-1.5 block text-sm text-slate-400">نص Tagline تحت اسم المتجر</label>
+            <input
+              value={footer.tagline}
+              onChange={e => updateFooter('tagline', e.target.value)}
+              placeholder="جملة قصيرة تعبّر عن متجرك — مثال: أفضل عطور العالم بين يديك"
+              className={inputClass}
+            />
+            <p className="mt-1 text-xs text-slate-600">
+              اتركه فارغاً لاستخدام وصف المتجر الرئيسي
+            </p>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm text-slate-400">نص حقوق النشر</label>
+            <input
+              value={footer.copyright}
+              onChange={e => updateFooter('copyright', e.target.value)}
+              placeholder={`© ${new Date().getFullYear()} ${form.name || 'اسم المتجر'} — جميع الحقوق محفوظة`}
+              className={inputClass}
+            />
+            <p className="mt-1 text-xs text-slate-600">
+              اتركه فارغاً للنص التلقائي: © {new Date().getFullYear()} {form.name || 'اسم المتجر'}
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* ── معلومات الحساب (للقراءة فقط) ───────────────────── */}

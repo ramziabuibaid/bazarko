@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { getCountryByCode } from '@/lib/countries'
+import OfferCountdown from '@/components/store/OfferCountdown'
 
 interface Props { params: { country: string } }
 
@@ -42,6 +43,20 @@ export default async function MarketplaceHomePage({ params }: Props) {
         .limit(12)
     : { data: [] }
 
+  // عروض اليوم: العروض الجارية الآن عبر كل متاجر البلد
+  const nowIso = new Date().toISOString()
+  const { data: rawDeals } = storeIds.length > 0
+    ? await supabase
+        .from('offers')
+        .select('id, title, description, ends_at, store_id, stores!inner(name, subdomain, country_code), offer_items(offer_price, products(price, thumbnail_url, is_active))')
+        .in('store_id', storeIds)
+        .eq('is_active', true)
+        .lte('starts_at', nowIso)
+        .gte('ends_at', nowIso)
+        .order('ends_at')
+        .limit(6)
+    : { data: [] }
+
   const { data: allProducts } = storeIds.length > 0
     ? await supabase
         .from('products')
@@ -62,6 +77,24 @@ export default async function MarketplaceHomePage({ params }: Props) {
   const storesList   = (stores ?? []) as unknown as StoreRow[]
   const productsList = (allProducts ?? []) as unknown as ProductRow[]
   const featured     = (featuredProducts ?? []) as unknown as ProductRow[]
+
+  type DealRow = {
+    id: string; title: string; description: string | null; ends_at: string; store_id: string
+    stores: { name: string; subdomain: string; country_code: string }
+    offer_items: { offer_price: number; products: { price: number; thumbnail_url: string | null; is_active: boolean } | null }[]
+  }
+  const deals = ((rawDeals ?? []) as unknown as DealRow[]).map(d => {
+    const activeItems = d.offer_items.filter(i => i.products?.is_active)
+    return {
+      ...d,
+      itemCount: activeItems.length,
+      maxDiscount: Math.max(
+        0,
+        ...activeItems.filter(i => i.products!.price > 0).map(i => Math.round((1 - i.offer_price / i.products!.price) * 100))
+      ),
+      thumbs: activeItems.map(i => i.products!.thumbnail_url).filter(Boolean).slice(0, 3) as string[],
+    }
+  }).filter(d => d.itemCount > 0)
 
   const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
   const countryLower = params.country.toLowerCase()
@@ -106,6 +139,48 @@ export default async function MarketplaceHomePage({ params }: Props) {
           </button>
         </form>
       </div>
+
+      {/* عروض اليوم — عبر كل المتاجر */}
+      {deals.length > 0 && (
+        <section>
+          <h2 className="text-lg font-semibold text-white mb-4">🔥 عروض اليوم</h2>
+          <div className={`grid gap-4 ${deals.length > 1 ? 'md:grid-cols-2' : ''}`}>
+            {deals.map(deal => (
+              <Link
+                key={deal.id}
+                href={`/store/${deal.stores.country_code.toLowerCase()}/${deal.stores.subdomain}/offer/${deal.id}`}
+                className="group relative overflow-hidden rounded-3xl bg-gradient-to-l from-rose-600 via-red-500 to-orange-500 p-5 text-white transition hover:shadow-lg hover:shadow-rose-500/20"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-xs text-white/75">{deal.stores.name}</p>
+                    <h3 className="mt-0.5 truncate text-lg font-bold">{deal.title}</h3>
+                    <div className="mt-2 flex items-center gap-2">
+                      {deal.maxDiscount > 0 && (
+                        <span className="rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-bold backdrop-blur-sm">
+                          حتى -{deal.maxDiscount}%
+                        </span>
+                      )}
+                      <span className="text-xs text-white/80">{deal.itemCount} منتج</span>
+                      {deal.thumbs.length > 0 && (
+                        <div className="flex -space-x-2 space-x-reverse">
+                          {deal.thumbs.map((src, i) => (
+                            <img key={i} src={src} alt="" className="h-7 w-7 rounded-full border-2 border-white/60 object-cover" />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-center gap-1.5">
+                    <span className="text-[11px] text-white/80">ينتهي خلال</span>
+                    <OfferCountdown target={deal.ends_at} size="sm" onDark />
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* أبرز المنتجات (مع صور) */}
       {featured.length > 0 && (

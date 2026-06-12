@@ -4,6 +4,8 @@ import Link from 'next/link'
 import StoreHeader from '@/components/store/StoreHeader'
 import ProductCard from '@/components/store/ProductCard'
 import CategoryFilter from '@/components/store/CategoryFilter'
+import OfferCountdown from '@/components/store/OfferCountdown'
+import StoreFooter from '@/components/store/StoreFooter'
 
 interface StoreProduct {
   id: string
@@ -42,7 +44,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, name, description, logo_url, cover_url, phone, whatsapp, city, currency_code, country_code, secondary_currency_code, exchange_rate')
+    .select('id, name, description, logo_url, cover_url, phone, whatsapp, email, city, address, currency_code, country_code, secondary_currency_code, exchange_rate, header_theme, instagram, facebook, tiktok, telegram, business_hours, footer_settings')
     .eq('subdomain', params.subdomain)
     .eq('country_code', params.country.toUpperCase())
     .eq('status', 'active')
@@ -79,6 +81,38 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
   const featured = products.filter(p => p.is_featured)
   const showFeatured = featured.length > 0 && !searchParams.category && !searchParams.q
 
+  // العروض الجارية حالياً
+  const nowIso = new Date().toISOString()
+  const { data: rawOffers } = await supabase
+    .from('offers')
+    .select('id, title, description, ends_at, offer_items(offer_price, products(price, thumbnail_url, is_active))')
+    .eq('store_id', store.id)
+    .eq('is_active', true)
+    .lte('starts_at', nowIso)
+    .gte('ends_at', nowIso)
+    .order('ends_at')
+
+  const offers = ((rawOffers ?? []) as unknown as {
+    id: string
+    title: string
+    description: string | null
+    ends_at: string
+    offer_items: { offer_price: number; products: { price: number; thumbnail_url: string | null; is_active: boolean } | null }[]
+  }[]).map(o => {
+    const activeItems = o.offer_items.filter(i => i.products?.is_active)
+    return {
+      ...o,
+      itemCount: activeItems.length,
+      maxDiscount: Math.max(
+        0,
+        ...activeItems.filter(i => i.products!.price > 0).map(i => Math.round((1 - i.offer_price / i.products!.price) * 100))
+      ),
+      thumbs: activeItems.map(i => i.products!.thumbnail_url).filter(Boolean).slice(0, 3) as string[],
+    }
+  }).filter(o => o.itemCount > 0)
+
+  const showOffers = offers.length > 0 && !searchParams.category && !searchParams.q
+
   return (
     <div className="min-h-screen bg-white" dir="rtl">
       <StoreHeader store={store} country={params.country} subdomain={params.subdomain} />
@@ -89,6 +123,57 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
           <div className="mb-8 overflow-hidden rounded-2xl">
             <img src={store.cover_url} alt={store.name} className="h-48 w-full object-cover sm:h-64" />
           </div>
+        )}
+
+        {showOffers && (
+          <section className="mb-10">
+            <h2 className="mb-4 text-lg font-semibold text-gray-900">🔥 العروض الحصرية</h2>
+            <div className={`grid gap-4 ${offers.length > 1 ? 'sm:grid-cols-2' : ''}`}>
+              {offers.map(offer => (
+                <Link
+                  key={offer.id}
+                  href={`/store/${params.country}/${params.subdomain}/offer/${offer.id}`}
+                  className="group relative overflow-hidden rounded-3xl bg-gradient-to-l from-rose-600 via-red-500 to-orange-500 p-5 text-white transition hover:shadow-lg sm:p-6"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      {offer.maxDiscount > 0 && (
+                        <span className="mb-2 inline-block rounded-full bg-white/20 px-3 py-0.5 text-xs font-bold backdrop-blur-sm">
+                          خصومات حتى {offer.maxDiscount}%
+                        </span>
+                      )}
+                      <h3 className="truncate text-lg font-bold sm:text-xl">{offer.title}</h3>
+                      {offer.description && (
+                        <p className="mt-1 line-clamp-1 text-sm text-white/80">{offer.description}</p>
+                      )}
+                      <div className="mt-3 flex items-center gap-3">
+                        {offer.thumbs.length > 0 && (
+                          <div className="flex -space-x-2 space-x-reverse">
+                            {offer.thumbs.map((src, i) => (
+                              <img
+                                key={i}
+                                src={src}
+                                alt=""
+                                className="h-8 w-8 rounded-full border-2 border-white/60 object-cover"
+                              />
+                            ))}
+                          </div>
+                        )}
+                        <span className="text-xs text-white/80">{offer.itemCount} منتج</span>
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-center gap-1.5">
+                      <span className="text-[11px] font-medium text-white/80">ينتهي خلال</span>
+                      <OfferCountdown target={offer.ends_at} size="sm" onDark />
+                      <span className="mt-1 rounded-full bg-white px-4 py-1 text-xs font-bold text-rose-600 transition group-hover:bg-rose-50">
+                        تسوق العرض ←
+                      </span>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </section>
         )}
 
         {showFeatured && (
@@ -170,13 +255,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
         </section>
       </main>
 
-      <footer className="mt-16 border-t border-gray-100 py-8 text-center text-sm text-gray-400">
-        <p>{store.name}</p>
-        {store.city && <p className="mt-1">{store.city}</p>}
-        <p className="mt-3 text-xs">
-          مدعوم من <a href="https://bazarko.app" className="text-sky-500 hover:underline">Bazarko</a>
-        </p>
-      </footer>
+      <StoreFooter store={store} country={params.country} subdomain={params.subdomain} />
     </div>
   )
 }

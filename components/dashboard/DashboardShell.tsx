@@ -40,11 +40,27 @@ export default function DashboardShell({
         store={store}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        onToggle={() => setSidebarOpen(s => !s)}
       />
 
+      {/* زر إعادة فتح السايدبار على الديسكتوب عند إغلاقه */}
+      {!sidebarOpen && (
+        <button
+          onClick={() => setSidebarOpen(true)}
+          className="hidden lg:flex fixed right-3 top-3 z-40 h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-slate-900 text-slate-400 shadow-lg hover:bg-white/5 hover:text-white transition-colors"
+          aria-label="فتح القائمة"
+        >
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <line x1="3" y1="5" x2="17" y2="5" />
+            <line x1="3" y1="10" x2="17" y2="10" />
+            <line x1="3" y1="15" x2="17" y2="15" />
+          </svg>
+        </button>
+      )}
+
       <div className="flex flex-1 flex-col overflow-hidden min-w-0">
-        {/* شريط علوي ثابت */}
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-white/5 bg-slate-900 px-4">
+        {/* شريط علوي — يظهر على الموبايل فقط */}
+        <header className="lg:hidden flex h-14 shrink-0 items-center gap-3 border-b border-white/5 bg-slate-900 px-4">
           <button
             onClick={() => setSidebarOpen(s => !s)}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white/5 hover:text-white transition-colors"
@@ -56,25 +72,7 @@ export default function DashboardShell({
               <line x1="3" y1="15" x2="17" y2="15" />
             </svg>
           </button>
-
-          {/* اسم المتجر على الموبايل */}
-          <span className="lg:hidden text-sm font-semibold text-white truncate">{store.name}</span>
-
-          <div className="flex-1" />
-
-          {/* رابط المتجر على الديسكتوب */}
-          <a
-            href={`https://${storeUrl}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hidden lg:flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-slate-500 hover:bg-white/5 hover:text-sky-400 transition-colors"
-            dir="ltr"
-          >
-            {storeUrl}
-            <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M1.5 9.5L9.5 1.5M9.5 1.5H4M9.5 1.5V7" />
-            </svg>
-          </a>
+          <span className="text-sm font-semibold text-white truncate">{store.name}</span>
         </header>
 
         <main className="flex-1 overflow-y-auto">

@@ -1,7 +1,10 @@
 import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
+import Link from 'next/link'
 import AddToCartButton from '@/components/store/AddToCartButton'
 import StoreHeader from '@/components/store/StoreHeader'
+import OfferCountdown from '@/components/store/OfferCountdown'
+import StoreFooter from '@/components/store/StoreFooter'
 
 interface Props {
   params: { country: string; subdomain: string; slug: string }
@@ -12,7 +15,7 @@ export default async function ProductPage({ params }: Props) {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, name, logo_url, phone, whatsapp, currency_code, secondary_currency_code, exchange_rate')
+    .select('id, name, description, logo_url, phone, whatsapp, email, city, address, currency_code, country_code, secondary_currency_code, exchange_rate, header_theme, instagram, facebook, tiktok, telegram, business_hours, footer_settings')
     .eq('subdomain', params.subdomain)
     .eq('country_code', params.country.toUpperCase())
     .eq('status', 'active')
@@ -30,10 +33,46 @@ export default async function ProductPage({ params }: Props) {
 
   if (!product) notFound()
 
-  const outOfStock = product.track_stock && (product.stock_available ?? 0) <= 0
-  const discount = product.compare_price
-    ? Math.round((1 - product.price / product.compare_price) * 100)
+  // هل المنتج ضمن عرض جارٍ حالياً؟
+  const nowIso = new Date().toISOString()
+  const { data: rawOfferItem } = await supabase
+    .from('offer_items')
+    .select('offer_price, max_quantity, sold_quantity, offers!inner(id, title, ends_at, is_active, store_id, per_customer_limit, starts_at)')
+    .eq('product_id', product.id)
+    .eq('offers.store_id', store.id)
+    .eq('offers.is_active', true)
+    .lte('offers.starts_at', nowIso)
+    .gte('offers.ends_at', nowIso)
+    .limit(1)
+    .maybeSingle()
+
+  const offerItem = rawOfferItem as unknown as {
+    offer_price: number
+    max_quantity: number | null
+    sold_quantity: number
+    offers: { id: string; title: string; ends_at: string; per_customer_limit: number | null }
+  } | null
+
+  const offerRemaining = offerItem?.max_quantity != null
+    ? Math.max(0, offerItem.max_quantity - offerItem.sold_quantity)
     : null
+  const activeOffer = offerItem && (offerRemaining === null || offerRemaining > 0) ? offerItem : null
+
+  const effectivePrice = activeOffer ? activeOffer.offer_price : product.price
+  const effectiveCompare = activeOffer ? product.price : product.compare_price
+
+  const outOfStock = product.track_stock && (product.stock_available ?? 0) <= 0
+  const discount = effectiveCompare
+    ? Math.round((1 - effectivePrice / effectiveCompare) * 100)
+    : null
+
+  // الحد الأقصى للسلة: المخزون × كمية العرض المتبقية × حد الزبون
+  const cartMax = [
+    product.track_stock ? (product.stock_available ?? 0) : null,
+    activeOffer ? offerRemaining : null,
+    activeOffer?.offers.per_customer_limit ?? null,
+  ].filter((n): n is number => n !== null)
+  const maxQty = cartMax.length ? Math.min(...cartMax) : null
 
   const images: string[] = product.images?.length
     ? product.images
@@ -42,7 +81,7 @@ export default async function ProductPage({ params }: Props) {
       : []
 
   const secondaryPrice = store.exchange_rate && store.secondary_currency_code
-    ? Math.round(product.price * store.exchange_rate)
+    ? Math.round(effectivePrice * store.exchange_rate)
     : null
 
   const videoUrl: string | null = (product as unknown as { video_url?: string | null }).video_url ?? null
@@ -91,14 +130,35 @@ export default async function ProductPage({ params }: Props) {
             )}
             <h1 className="text-2xl font-bold text-gray-900">{product.name}</h1>
 
+            {activeOffer && (
+              <Link
+                href={`/store/${params.country}/${params.subdomain}/offer/${activeOffer.offers.id}`}
+                className="mt-4 block rounded-2xl bg-gradient-to-l from-rose-600 via-red-500 to-orange-500 p-4 text-white transition hover:shadow-md"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-medium text-white/80">🔥 هذا المنتج ضمن عرض</p>
+                    <p className="mt-0.5 font-bold">{activeOffer.offers.title}</p>
+                    {offerRemaining !== null && offerRemaining <= 5 && (
+                      <p className="mt-0.5 text-xs font-semibold">⚡ بقي {offerRemaining} فقط بسعر العرض!</p>
+                    )}
+                  </div>
+                  <div className="flex flex-col items-center gap-1">
+                    <span className="text-[10px] text-white/80">ينتهي خلال</span>
+                    <OfferCountdown target={activeOffer.offers.ends_at} size="sm" onDark />
+                  </div>
+                </div>
+              </Link>
+            )}
+
             <div className="mt-4">
               <div className="flex items-center gap-3">
-                <span className="text-2xl font-bold text-gray-900">
-                  {product.price.toLocaleString('ar')} {store.currency_code}
+                <span className={`text-2xl font-bold ${activeOffer ? 'text-red-600' : 'text-gray-900'}`}>
+                  {effectivePrice.toLocaleString('ar')} {store.currency_code}
                 </span>
-                {product.compare_price && (
+                {effectiveCompare && (
                   <span className="text-lg text-gray-400 line-through">
-                    {product.compare_price.toLocaleString('ar')}
+                    {effectiveCompare.toLocaleString('ar')}
                   </span>
                 )}
                 {discount && (
@@ -124,15 +184,22 @@ export default async function ProductPage({ params }: Props) {
                   نفد المخزون
                 </div>
               ) : (
-                <AddToCartButton
-                  productId={product.id}
-                  name={product.name}
-                  price={product.price}
-                  thumbnail={product.thumbnail_url}
-                  maxQty={product.track_stock ? (product.stock_available ?? null) : null}
-                  country={params.country}
-                  subdomain={params.subdomain}
-                />
+                <>
+                  <AddToCartButton
+                    productId={product.id}
+                    name={product.name}
+                    price={effectivePrice}
+                    thumbnail={product.thumbnail_url}
+                    maxQty={maxQty}
+                    country={params.country}
+                    subdomain={params.subdomain}
+                  />
+                  {activeOffer?.offers.per_customer_limit != null && (
+                    <p className="mt-2 text-center text-xs text-gray-400">
+                      الحد الأقصى {activeOffer.offers.per_customer_limit} لكل زبون خلال العرض
+                    </p>
+                  )}
+                </>
               )}
             </div>
 
@@ -187,6 +254,7 @@ export default async function ProductPage({ params }: Props) {
           </div>
         )}
       </main>
+      <StoreFooter store={store} country={params.country} subdomain={params.subdomain} />
     </div>
   )
 }

@@ -27,6 +27,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: '/dashboard/products', label: 'المنتجات', icon: '🛍️' },
       { href: '/dashboard/categories', label: 'الفئات', icon: '📂' },
+      { href: '/dashboard/offers', label: 'العروض الحصرية', icon: '🏷️' },
       { href: '/dashboard/orders', label: 'الطلبيات', icon: '📦' },
       { href: '/dashboard/delivery', label: 'التوصيل', icon: '🚚' },
     ],
@@ -70,15 +71,19 @@ function NavContent({
   pathname,
   onNavClick,
   onClose,
+  onToggle,
   onSignOut,
   showClose,
+  showToggle,
 }: {
   store: Store
   pathname: string
   onNavClick?: () => void
   onClose: () => void
+  onToggle?: () => void
   onSignOut: () => void
   showClose?: boolean
+  showToggle?: boolean
 }) {
   const storeUrl = `${store.subdomain}.${process.env.NEXT_PUBLIC_DOMAIN ?? 'bazarko.app'}`
 
@@ -105,6 +110,7 @@ function NavContent({
           </a>
         </div>
 
+        {/* زر الإغلاق على الموبايل */}
         {showClose && (
           <button
             onClick={onClose}
@@ -113,6 +119,20 @@ function NavContent({
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <path d="M3 3l10 10M13 3L3 13" />
+            </svg>
+          </button>
+        )}
+
+        {/* زر الطي على الديسكتوب */}
+        {showToggle && (
+          <button
+            onClick={onToggle}
+            className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-white/5 hover:text-white transition-colors"
+            aria-label="طي القائمة"
+            title="طي القائمة الجانبية"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M10 3l-5 5 5 5" />
             </svg>
           </button>
         )}
@@ -181,10 +201,12 @@ export default function Sidebar({
   store,
   isOpen,
   onClose,
+  onToggle,
 }: {
   store: Store
   isOpen: boolean
   onClose: () => void
+  onToggle?: () => void
 }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -195,14 +217,14 @@ export default function Sidebar({
     router.push('/login')
   }
 
-  const sharedProps = { store, pathname, onClose, onSignOut: signOut }
+  const sharedProps = { store, pathname, onClose, onToggle, onSignOut: signOut }
 
   return (
     <>
       {/* ديسكتوب: جزء من الـ layout العادي — يظهر/يختفي حسب الحالة */}
       {isOpen && (
         <aside className="hidden lg:flex w-64 shrink-0 flex-col border-l border-white/5 bg-slate-900">
-          <NavContent {...sharedProps} showClose={false} />
+          <NavContent {...sharedProps} showClose={false} showToggle />
         </aside>
       )}
 

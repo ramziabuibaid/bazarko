@@ -30,7 +30,7 @@ export default async function OrderTrackingPage({ params }: Props) {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, name, logo_url, phone, whatsapp, currency_code')
+    .select('id, name, logo_url, phone, whatsapp, currency_code, header_theme')
     .eq('subdomain', params.subdomain)
     .eq('country_code', params.country.toUpperCase())
     .eq('status', 'active')

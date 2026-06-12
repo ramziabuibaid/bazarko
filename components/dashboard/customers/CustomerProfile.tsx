@@ -35,6 +35,7 @@ interface Customer {
   city: string | null
   address: string | null
   notes: string | null
+  social_url: string | null
   balance: number
   credit_limit: number
   total_orders: number
@@ -85,6 +86,7 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
     notes: customer.notes ?? '',
     customer_type: customer.customer_type,
     credit_limit: String(customer.credit_limit ?? 0),
+    social_url: customer.social_url ?? '',
   })
   const [saving, setSavingEdit] = useState(false)
 
@@ -136,6 +138,7 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
       notes: editForm.notes.trim() || null,
       customer_type: editForm.customer_type,
       credit_limit: parseFloat(editForm.credit_limit) || 0,
+      social_url: editForm.social_url.trim() || null,
       updated_at: new Date().toISOString(),
     }).eq('id', customer.id)
     setSavingEdit(false)
@@ -174,17 +177,26 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
 
           <div className="mt-4 space-y-2 border-t border-white/5 pt-4 text-sm">
             {customer.phone && (
-              <a href={`tel:${customer.phone}`} className="flex items-center gap-2 text-slate-300 hover:text-white" dir="ltr">
-                <span className="text-slate-500">📞</span> {customer.phone}
-              </a>
+              <div className="flex items-center gap-2">
+                <a
+                  href={`tel:${customer.phone}`}
+                  className="flex flex-1 items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-slate-300 hover:bg-white/10 hover:text-white transition-colors"
+                  dir="ltr"
+                >
+                  <span>📞</span> {customer.phone}
+                </a>
+                <a
+                  href={`https://wa.me/${customer.phone.replace(/\D/g, '')}`}
+                  target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-3 py-2 text-emerald-400 hover:bg-emerald-500/25 transition-colors"
+                >
+                  <span>💬</span> واتساب
+                </a>
+              </div>
             )}
-            {customer.phone && (
-              <a
-                href={`https://wa.me/${customer.phone.replace(/\D/g, '')}`}
-                target="_blank" rel="noopener noreferrer"
-                className="flex items-center gap-2 text-emerald-400 hover:underline"
-              >
-                <span>📱</span> واتساب
+            {customer.phone_alt && (
+              <a href={`tel:${customer.phone_alt}`} className="flex items-center gap-2 text-slate-400 hover:text-white" dir="ltr">
+                <span className="text-slate-500">📞</span> {customer.phone_alt}
               </a>
             )}
             {customer.email && (
@@ -196,6 +208,19 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
               <p className="flex items-center gap-2 text-slate-300">
                 <span className="text-slate-500">📍</span> {customer.city}
               </p>
+            )}
+            {customer.social_url && (
+              <a
+                href={customer.social_url}
+                target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-2 text-sky-400 hover:underline"
+                dir="ltr"
+              >
+                <span>🔗</span>
+                <span className="truncate">
+                  {customer.social_url.includes('instagram') ? 'إنستغرام' : customer.social_url.includes('facebook') ? 'فيسبوك' : 'حساب التواصل'}
+                </span>
+              </a>
             )}
           </div>
 
@@ -477,6 +502,12 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
                     <option value="wholesale">جملة</option>
                     <option value="vip">VIP</option>
                   </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="mb-1 block text-xs text-slate-400">إنستغرام / فيسبوك</label>
+                  <input value={editForm.social_url} onChange={e => setEditForm(f => ({ ...f, social_url: e.target.value }))}
+                    dir="ltr" type="url" placeholder="https://instagram.com/username"
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-sky-500/50" />
                 </div>
                 <div className="col-span-2">
                   <label className="mb-1 block text-xs text-slate-400">ملاحظات</label>

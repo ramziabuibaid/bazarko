@@ -46,7 +46,7 @@ export default function CustomersTable({ customers, currencyCode, storeId, activ
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
     name: '', phone: '', email: '', city: '', address: '',
-    customer_type: 'retail', notes: '', credit_limit: '0',
+    customer_type: 'retail', notes: '', credit_limit: '0', social_url: '',
   })
 
   function buildUrl(params: Record<string, string>) {
@@ -83,11 +83,12 @@ export default function CustomersTable({ customers, currencyCode, storeId, activ
       customer_type: form.customer_type,
       notes: form.notes.trim() || null,
       credit_limit: parseFloat(form.credit_limit) || 0,
+      social_url: form.social_url.trim() || null,
     })
     setSaving(false)
     if (!error) {
       setShowAdd(false)
-      setForm({ name: '', phone: '', email: '', city: '', address: '', customer_type: 'retail', notes: '', credit_limit: '0' })
+      setForm({ name: '', phone: '', email: '', city: '', address: '', customer_type: 'retail', notes: '', credit_limit: '0', social_url: '' })
       router.refresh()
     }
   }
@@ -232,13 +233,14 @@ export default function CustomersTable({ customers, currencyCode, storeId, activ
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs text-slate-400">الهاتف</label>
+                  <label className="mb-1 block text-xs text-slate-400">الهاتف *</label>
                   <input
                     value={form.phone}
                     onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
                     placeholder="0591234567"
                     dir="ltr"
                     type="tel"
+                    required
                     className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-sky-500/50"
                   />
                 </div>
@@ -283,6 +285,17 @@ export default function CustomersTable({ customers, currencyCode, storeId, activ
                     min="0"
                     dir="ltr"
                     className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white outline-none focus:border-sky-500/50"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="mb-1 block text-xs text-slate-400">إنستغرام / فيسبوك</label>
+                  <input
+                    value={form.social_url}
+                    onChange={e => setForm(f => ({ ...f, social_url: e.target.value }))}
+                    placeholder="https://instagram.com/username"
+                    dir="ltr"
+                    type="url"
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-sky-500/50"
                   />
                 </div>
                 <div className="col-span-2">

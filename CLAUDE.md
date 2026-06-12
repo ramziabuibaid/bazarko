@@ -64,6 +64,13 @@ app/
 │   │   ├── new/page.tsx                       ← POS + ذمة (NewOrderForm)
 │   │   └── [id]/page.tsx                      ← تفاصيل + زر "إنشاء فاتورة"
 │   │
+│   ├── offers/
+│   │   ├── page.tsx                           ← قائمة العروض + إحصائيات (جارٍ/مجدول/منتهي)
+│   │   ├── new/page.tsx                       ← إنشاء عرض + بوابة الخطط (free = عرض واحد)
+│   │   └── [id]/
+│   │       ├── page.tsx                       ← تعديل + تحليلات (مشاهدات/مبيعات/إيراد) + مشاركة
+│   │       └── actions.ts                     ← sendOfferToCustomers (إيميل لكل الزبائن)
+│   │
 │   ├── accounting/
 │   │   ├── page.tsx                           ← نظرة مالية عامة
 │   │   ├── invoices/
@@ -110,11 +117,12 @@ app/
 │   └── stores/page.tsx                        ← دليل المتاجر الكامل + عدد المنتجات لكل متجر
 │
 └── store/[country]/[subdomain]/
-    ├── page.tsx                               ← Storefront
+    ├── page.tsx                               ← Storefront (+ قسم العروض الحصرية)
     ├── product/[slug]/page.tsx
     ├── cart/page.tsx
     ├── checkout/page.tsx
     ├── order/[id]/page.tsx                    ← تتبع الطلبية (بدون auth)
+    ├── offer/[id]/page.tsx                    ← صفحة العرض الحصري (بدون auth) + عداد تنازلي
     └── repair/[job_number]/page.tsx           ← تتبع الصيانة (بدون auth)
 
 components/
@@ -131,14 +139,19 @@ components/
 │   │   ├── InvoiceView.tsx                    ← يعرض رابط الطلبية المرتبطة
 │   │   ├── VouchersTable.tsx
 │   │   └── ReportsPeriodFilter.tsx            ← client component لفلتر التاريخ
+│   ├── offers/
+│   │   ├── OfferForm.tsx                      ← إنشاء/تعديل عرض: فترة + منتجات + أسعار + خصم جماعي + فئات + كميات
+│   │   └── OfferShareActions.tsx              ← إرسال إيميل للزبائن + مشاركة واتساب + نسخ رابط
 │   └── maintenance/
 │       ├── RepairIntakeForm.tsx               ← نموذج استلام الجهاز
 │       ├── RepairKanban.tsx                   ← لوحة Kanban بـ 5 أعمدة
 │       └── RepairJobDetail.tsx                ← إدارة الطلب الكامل
 └── store/
-    ├── StoreHeader.tsx
+    ├── StoreHeader.tsx                        ← يطبّق ثيم الهيدر المختار (header_theme)
+    ├── headerThemes.ts                        ← 6 ثيمات هيدر (classes كاملة ليلتقطها Tailwind)
     ├── ProductCard.tsx
     ├── CategoryFilter.tsx
+    ├── OfferCountdown.tsx                     ← عداد تنازلي client (sm/lg، onDark)
     └── AddToCartButton.tsx
 
 lib/
@@ -146,6 +159,7 @@ lib/
 ├── supabase/storage.ts                        ← uploadProductImage / deleteProductImage
 ├── store/cart.ts                              ← Zustand persist، key: bazarko-cart
 ├── email/order-email.ts                       ← sendOrderEmail() بـ Resend
+├── email/offer-email.ts                       ← sendOfferEmail() — قالب عرض حصري بجدول الأسعار
 └── utils/slug.ts                              ← Arabic → Latin transliteration
 
 db/
@@ -155,8 +169,16 @@ db/
     ├── 002_orders_customer_fields.sql         ✅ مطبّق
     ├── 003_customer_email.sql                 ✅ مطبّق
     ├── 004_invoices_vouchers.sql              ✅ مطبّق
-    ├── 005_repair_jobs.sql                    ⚠️ يجب تطبيقه في Supabase SQL Editor
-    └── 006_admin_panel.sql                    ⚠️ يجب تطبيقه في Supabase SQL Editor
+    ├── 005_repair_jobs.sql                    ✅ مطبّق
+    ├── 006_admin_panel.sql                    ✅ مطبّق
+    ├── 007_public_store_access.sql            ✅ مطبّق
+    ├── 008_delivery_zones.sql                 ✅ مطبّق
+    ├── 009_store_social_hours.sql             ✅ مطبّق
+    ├── 010_repair_photos.sql                  ✅ مطبّق
+    ├── 011_video_and_secondary_currency.sql   ✅ مطبّق
+    ├── 012_offers.sql                         ⚠️ يجب تطبيقه في Supabase SQL Editor
+    ├── 013_offers_extras.sql                  ⚠️ يجب تطبيقه في Supabase SQL Editor (بعد 012)
+    └── 014_header_theme.sql                   ⚠️ يجب تطبيقه في Supabase SQL Editor
 ```
 
 ---
@@ -182,8 +204,12 @@ handle_new_store()  -- SECURITY DEFINER: ينشئ store_member (owner) + حسا�
 002 — customer_name + customer_phone في orders                                      ✅
 003 — customer_email في orders                                                      ✅
 004 — invoices + invoice_items + vouchers + RLS                                     ✅
-005 — repair_jobs + repair_job_parts + repair_job_history + RLS                    ⚠️ طبّقه
-006 — is_admin في profiles + is_active/plan/suspended في stores + is_platform_admin() ⚠️ طبّقه
+005 — repair_jobs + repair_job_parts + repair_job_history + RLS                    ✅
+006 — is_admin في profiles + is_active/plan/suspended في stores + is_platform_admin() ✅
+007-011 — public read + delivery_zones + social/hours + repair photos + video/عملة ثانية ✅
+012 — offers + offer_items + RLS (التاجر إدارة كاملة، الزبون قراءة فقط)            ⚠️ طبّقه
+013 — per_customer_limit/view_count + max/sold_quantity + RPC views/sales           ⚠️ طبّقه
+014 — header_theme في stores (classic/ocean/sunset/emerald/royal/midnight)          ⚠️ طبّقه
 ```
 
 ### Storage (product-images bucket — PUBLIC)
@@ -323,6 +349,41 @@ updateStorePlan(storeId, plan, expiresAt)  // تغيير الخطة + تاريخ
 
 ---
 
+## العروض الحصرية (Flash Sales)
+
+### الجداول (migrations 012 + 013)
+```sql
+offers       -- store_id, title, description, banner_url, starts_at, ends_at, is_active,
+             -- per_customer_limit (حد لكل زبون)، view_count (مشاهدات)
+offer_items  -- offer_id, product_id, offer_price, max_quantity (كمية محدودة للعرض)،
+             -- sold_quantity (UNIQUE per offer+product)
+
+-- RPC functions (SECURITY DEFINER، GRANT لـ anon):
+increment_offer_views(offer_id)               -- عداد مشاهدات من صفحة العرض العامة
+record_offer_sale(store_id, product_id, qty)  -- يزيد sold_quantity للعروض الجارية فقط
+```
+
+### RLS
+- التاجر: إدارة كاملة عبر `is_store_member`
+- الزبون: `SELECT` للعروض `is_active = true` فقط (فلترة الفترة الزمنية في الـ query)
+
+### السلوك
+- حالة العرض تُحسب في TypeScript: مجدول (قبل البداية) / جارٍ (ضمن الفترة) / منتهي / متوقف (is_active=false)
+- في صفحة العرض العامة وصفحة المنتج: أثناء السريان يُمرَّر `price = offer_price` و `compare_price = السعر الأصلي` — فتُضاف للسلة بسعر العرض تلقائياً
+- **Checkout يثبّت الأسعار من DB وقت الطلب** (سعر المنتج أو سعر العرض الجاري) — يحمي من سلة قديمة بسعر عرض انتهى، ثم يستدعي `record_offer_sale` لكل منتج عرض
+- حد السلة = min(المخزون، كمية العرض المتبقية، حد الزبون)
+- `ProductCard` يقبل prop اختياري `offerSold={sold, max}` → شريط "تم بيع X%" + "بقي N فقط"
+- `OfferCountdown`: يبدأ بعد الـ mount (hydration-safe)، يتحول أحمر نابض في آخر ساعة
+- **بوابة الخطط**: الخطة المجانية = عرض نشط واحد فقط (يُفحص في `offers/new` server-side)
+- **تحليلات** في صفحة التعديل: مشاهدات (view_count) + قطع مبيعة + إيراد العرض (order_items خلال الفترة)
+- **تسويق**: `sendOfferToCustomers` server action (إيميل لكل الزبائن عبر Resend على دفعات) + مشاركة واتساب + نسخ رابط (`OfferShareActions`)
+- `OfferForm`: فلتر فئات + "إضافة الكل" (عروض فئة كاملة) + خصم % جماعي + كمية عرض لكل منتج
+- التعديل يعيد بناء `offer_items` (delete ثم insert) **مع الحفاظ على sold_quantity**
+- الـ Marketplace: قسم "🔥 عروض اليوم" يجمع العروض الجارية عبر كل متاجر البلد
+- التواريخ: `datetime-local` محلياً → تُحفظ ISO/UTC
+
+---
+
 ## الإيميل (Resend)
 
 ```typescript
@@ -431,6 +492,24 @@ if (!store) redirect('/onboarding')
 | — بحث عبر كل المتاجر مع فلاتر السعر والمتجر | ✅ |
 | — دليل المتاجر الكامل مع عدد المنتجات | ✅ |
 | — Layout ثابت مع شريط بحث في كل الصفحات | ✅ |
+| **العروض الحصرية (Flash Sales)** | ✅ |
+| — إنشاء/تعديل عرض: فترة + منتجات + سعر عرض لكل منتج + خصم % جماعي | ✅ |
+| — قائمة العروض مع حالات (جارٍ/مجدول/منتهي/متوقف) | ✅ |
+| — قسم العروض في رئيسية المتجر (بانر متدرج + عداد) | ✅ |
+| — صفحة عرض عامة للزبون + عداد تنازلي + شراء بسعر العرض | ✅ |
+| — سعر العرض وبانره في صفحة المنتج نفسها | ✅ |
+| — كمية محدودة للعرض + شريط "تم بيع X%" + "بقي N فقط" | ✅ |
+| — حد أقصى لكل زبون | ✅ |
+| — تثبيت الأسعار من DB وقت الطلب + تسجيل مبيعات العرض | ✅ |
+| — إرسال العرض بالإيميل لكل الزبائن + مشاركة واتساب + نسخ رابط | ✅ |
+| — تحليلات العرض (مشاهدات/قطع مبيعة/إيراد) | ✅ |
+| — عروض فئة كاملة (فلتر فئات + إضافة الكل) | ✅ |
+| — بوابة الخطط: عرض نشط واحد للخطة المجانية | ✅ |
+| — قسم "عروض اليوم" في الـ Marketplace | ✅ |
+| — عداد أحمر نابض في آخر ساعة | ✅ |
+| **ثيمات هيدر المتجر (6 تصاميم متحركة)** | ✅ |
+| — اسم المتجر بتدرج لوني متحرك + لمعان يمر فوق الهيدر | ✅ |
+| — اختيار الثيم من الإعدادات مع معاينة حية مصغّرة | ✅ |
 
 ## ما لم يُبنَ بعد
 

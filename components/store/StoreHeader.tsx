@@ -2,6 +2,7 @@
 
 import { useCart } from '@/lib/store/cart'
 import Link from 'next/link'
+import { getHeaderTheme } from './headerThemes'
 
 interface Store {
   id: string
@@ -10,6 +11,7 @@ interface Store {
   phone: string | null
   whatsapp: string | null
   currency_code: string
+  header_theme?: string | null
 }
 
 interface Props {
@@ -20,19 +22,28 @@ interface Props {
 
 export default function StoreHeader({ store, country, subdomain }: Props) {
   const count = useCart(s => s.count())
+  const theme = getHeaderTheme(store.header_theme)
 
   return (
-    <header className="sticky top-0 z-40 border-b border-gray-100 bg-white/95 backdrop-blur">
+    <header
+      className={`sticky top-0 z-40 overflow-hidden ${theme.header} ${
+        theme.shine ? 'relative animate-header-shine' : ''
+      }`}
+    >
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        <Link href={`/store/${country}/${subdomain}`} className="flex items-center gap-2">
+        <Link href={`/store/${country}/${subdomain}`} className="flex items-center gap-2.5">
           {store.logo_url ? (
-            <img src={store.logo_url} alt={store.name} className="h-9 w-9 rounded-full object-cover" />
+            <img
+              src={store.logo_url}
+              alt={store.name}
+              className={`h-9 w-9 rounded-full object-cover ${theme.logoRing}`}
+            />
           ) : (
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-900 text-base font-bold text-white">
+            <div className={`flex h-9 w-9 items-center justify-center rounded-full text-base font-bold ${theme.logoFallback} ${theme.logoRing}`}>
               {store.name[0]}
             </div>
           )}
-          <span className="font-semibold text-gray-900">{store.name}</span>
+          <span className={`text-lg ${theme.name}`}>{store.name}</span>
         </Link>
 
         <div className="flex items-center gap-3">
@@ -41,7 +52,7 @@ export default function StoreHeader({ store, country, subdomain }: Props) {
               href={`https://wa.me/${store.whatsapp.replace(/\D/g, '')}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="hidden items-center gap-1.5 rounded-xl bg-green-50 px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-100 sm:flex"
+              className={`hidden items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-medium transition sm:flex ${theme.whatsappBtn}`}
             >
               <WhatsAppIcon />
               واتساب
@@ -50,11 +61,11 @@ export default function StoreHeader({ store, country, subdomain }: Props) {
 
           <Link
             href={`/store/${country}/${subdomain}/cart`}
-            className="relative flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white"
+            className={`relative flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition ${theme.cartBtn}`}
           >
             🛒 السلة
             {count > 0 && (
-              <span className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-sky-500 text-[11px] font-bold text-white">
+              <span className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[11px] font-bold text-white shadow">
                 {count}
               </span>
             )}

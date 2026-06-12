@@ -45,11 +45,11 @@ export default async function InventoryPage({ searchParams }: Props) {
   // إحصائيات
   const { data: all } = await supabase
     .from('products')
-    .select('stock_quantity, stock_available, low_stock_alert, cost_price, track_stock')
+    .select('stock_quantity, stock_available, low_stock_alert, cost_price, price, track_stock')
     .eq('store_id', store.id)
     .eq('is_active', true)
 
-  type StockRow = { stock_quantity: number; stock_available: number; low_stock_alert: number | null; cost_price: number | null; track_stock: boolean }
+  type StockRow = { stock_quantity: number; stock_available: number; low_stock_alert: number | null; cost_price: number | null; price: number; track_stock: boolean }
   const tracked = (all ?? [] as StockRow[]).filter((p: StockRow) => p.track_stock)
   const outOfStock  = tracked.filter((p: StockRow) => (p.stock_available ?? 0) <= 0).length
   const lowStock    = tracked.filter((p: StockRow) =>
@@ -58,7 +58,8 @@ export default async function InventoryPage({ searchParams }: Props) {
     p.low_stock_alert > 0 &&
     (p.stock_available ?? 0) <= p.low_stock_alert
   ).length
-  const totalValue  = tracked.reduce((s: number, p: StockRow) => s + (p.stock_quantity ?? 0) * (p.cost_price ?? 0), 0)
+  const totalValue    = tracked.reduce((s: number, p: StockRow) => s + (p.stock_quantity ?? 0) * (p.cost_price ?? 0), 0)
+  const expectedProfit = tracked.reduce((s: number, p: StockRow) => s + (p.stock_quantity ?? 0) * ((p.price ?? 0) - (p.cost_price ?? 0)), 0)
 
   return (
     <div className="p-6">
@@ -88,12 +89,13 @@ export default async function InventoryPage({ searchParams }: Props) {
       </div>
 
       {/* بطاقات */}
-      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         {[
           { label: 'منتجات مُتتبَّعة', value: tracked.length,  icon: '📦', color: 'text-white' },
           { label: 'نفد المخزون',      value: outOfStock,       icon: '🔴', color: 'text-red-400' },
           { label: 'قارب النفاد',      value: lowStock,         icon: '🟡', color: 'text-yellow-400' },
           { label: 'قيمة المخزون',     value: `${totalValue.toLocaleString('ar')} ${store.currency_code}`, icon: '💰', color: 'text-emerald-400' },
+          { label: 'الأرباح المتوقعة', value: `${expectedProfit.toLocaleString('ar')} ${store.currency_code}`, icon: '📈', color: expectedProfit >= 0 ? 'text-sky-400' : 'text-red-400' },
         ].map(c => (
           <div key={c.label} className="rounded-2xl border border-white/5 bg-slate-900 p-4">
             <p className="text-xs text-slate-400">{c.icon} {c.label}</p>

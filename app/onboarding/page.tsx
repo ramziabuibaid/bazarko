@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
@@ -34,6 +34,24 @@ export default function OnboardingPage() {
     store_name: '',
     subdomain: '',
   })
+
+  // حماية: من لديه متجر بالفعل لا يجب أن يُنشئ متجراً ثانياً بالخطأ
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase
+        .from('store_members')
+        .select('store_id')
+        .eq('profile_id', user.id)
+        .eq('is_active', true)
+        .limit(1)
+        .maybeSingle()
+        .then(({ data }: { data: { store_id: string } | null }) => {
+          if (data) router.replace('/dashboard')
+        })
+    })
+  }, [router])
 
   function selectCountry(country: typeof COUNTRIES[0]) {
     setForm(f => ({

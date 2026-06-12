@@ -53,6 +53,47 @@ export default function InventoryTable({ products, currencyCode, storeId, userId
   const [saving, setSaving]             = useState(false)
   const [adjError, setAdjError]         = useState('')
 
+  // تعديل inline
+  const [inlineEdits, setInlineEdits]   = useState<Record<string, string>>({})
+  const [savingInline, setSavingInline] = useState<Record<string, boolean>>({})
+
+  function startInline(p: Product) {
+    setInlineEdits(prev => ({ ...prev, [p.id]: String(p.stock_quantity) }))
+  }
+
+  function cancelInline(id: string) {
+    setInlineEdits(prev => { const n = { ...prev }; delete n[id]; return n })
+  }
+
+  async function saveInline(p: Product) {
+    const newQty = parseInt(inlineEdits[p.id] ?? '')
+    if (isNaN(newQty) || newQty < 0) return
+    if (newQty === p.stock_quantity) { cancelInline(p.id); return }
+
+    setSavingInline(prev => ({ ...prev, [p.id]: true }))
+    const supabase = createClient()
+    const diff = newQty - p.stock_quantity
+
+    await supabase.from('stock_movements').insert({
+      store_id: storeId,
+      product_id: p.id,
+      type: 'adjustment',
+      quantity: diff,
+      quantity_before: p.stock_quantity,
+      quantity_after: newQty,
+      notes: 'تعديل مباشر من جدول المخزون',
+      created_by: userId,
+    })
+    await supabase.from('products').update({
+      stock_quantity: newQty,
+      updated_at: new Date().toISOString(),
+    }).eq('id', p.id)
+
+    setSavingInline(prev => { const n = { ...prev }; delete n[p.id]; return n })
+    cancelInline(p.id)
+    router.refresh()
+  }
+
   function handleSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const q = (e.currentTarget.elements.namedItem('q') as HTMLInputElement).value
@@ -217,7 +258,40 @@ export default function InventoryTable({ products, currencyCode, storeId, userId
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-400" dir="ltr">{p.sku ?? '—'}</td>
                     <td className="px-4 py-3 text-center">
-                      <span className="text-sm font-semibold text-white">{p.stock_quantity}</span>
+                      {inlineEdits[p.id] !== undefined ? (
+                        <div className="flex items-center justify-center gap-1">
+                          <input
+                            type="number" min="0" step="1"
+                            value={inlineEdits[p.id]}
+                            onChange={e => setInlineEdits(prev => ({ ...prev, [p.id]: e.target.value }))}
+                            onKeyDown={e => { if (e.key === 'Enter') saveInline(p); if (e.key === 'Escape') cancelInline(p.id) }}
+                            autoFocus
+                            className="w-16 rounded-lg border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-center text-sm text-white outline-none"
+                          />
+                          <button
+                            onClick={() => saveInline(p)}
+                            disabled={savingInline[p.id]}
+                            className="rounded-md bg-emerald-600/80 px-1.5 py-1 text-xs text-white hover:bg-emerald-500 disabled:opacity-50"
+                          >
+                            {savingInline[p.id] ? '…' : '✓'}
+                          </button>
+                          <button
+                            onClick={() => cancelInline(p.id)}
+                            className="rounded-md bg-white/5 px-1.5 py-1 text-xs text-slate-400 hover:bg-white/10"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => startInline(p)}
+                          className="group inline-flex items-center gap-1.5 rounded-lg px-2 py-1 hover:bg-sky-500/10 transition-colors"
+                          title="انقر لتعديل الكمية"
+                        >
+                          <span className="text-sm font-semibold text-white group-hover:text-sky-400">{p.stock_quantity}</span>
+                          <span className="text-xs text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity">✏️</span>
+                        </button>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-center">
                       <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badge.cls}`}>

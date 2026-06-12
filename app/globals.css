@@ -23,6 +23,33 @@ a {
   @apply text-sky-300 hover:text-sky-200;
 }
 
+/* ── أنيميشن هيدر المتجر ───────────────────────────── */
+@keyframes gradient-x {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+
+.animate-gradient-x {
+  background-size: 200% 200%;
+  animation: gradient-x 6s ease infinite;
+}
+
+/* لمعان يمر فوق العنصر (للهيدرات الملونة) */
+@keyframes header-shine {
+  0%   { transform: translateX(-100%) skewX(-12deg); }
+  60%, 100% { transform: translateX(250%) skewX(-12deg); }
+}
+
+.animate-header-shine::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18), transparent);
+  animation: header-shine 5s ease-in-out infinite;
+  pointer-events: none;
+}
+
 @media print {
   body { background: white !important; color: black !important; }
   nav, aside, header, button, .no-print, .print\:hidden { display: none !important; }

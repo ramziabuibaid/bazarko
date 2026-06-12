@@ -22,9 +22,10 @@ interface Props {
   subdomain: string
   secondaryCurrencyCode?: string | null
   exchangeRate?: number | null
+  offerSold?: { sold: number; max: number } | null  // مخزون العرض: شريط "تم بيع X%"
 }
 
-export default function ProductCard({ product, currencyCode, storeId, country, subdomain, secondaryCurrencyCode, exchangeRate }: Props) {
+export default function ProductCard({ product, currencyCode, storeId, country, subdomain, secondaryCurrencyCode, exchangeRate, offerSold }: Props) {
   const addItem = useCart(s => s.addItem)
   const items = useCart(s => s.items)
   const updateQty = useCart(s => s.updateQty)
@@ -104,6 +105,28 @@ export default function ProductCard({ product, currencyCode, storeId, country, s
             </p>
           )}
         </div>
+
+        {offerSold && offerSold.max > 0 && (() => {
+          const pct = Math.min(100, Math.round((offerSold.sold / offerSold.max) * 100))
+          const remaining = Math.max(0, offerSold.max - offerSold.sold)
+          return (
+            <div className="mt-2">
+              <div className="h-1.5 overflow-hidden rounded-full bg-gray-100">
+                <div
+                  className={`h-full rounded-full ${pct >= 80 ? 'bg-red-500' : 'bg-orange-400'}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <p className={`mt-1 text-[11px] ${remaining <= 5 ? 'font-semibold text-red-600' : 'text-gray-500'}`}>
+                {remaining <= 0
+                  ? 'نفدت كمية العرض'
+                  : remaining <= 5
+                    ? `🔥 بقي ${remaining} فقط!`
+                    : `تم بيع ${pct}% من كمية العرض`}
+              </p>
+            </div>
+          )
+        })()}
 
         <button
           onClick={handleAdd}

@@ -19,7 +19,8 @@ export default async function SettingsPage() {
       subdomain, country_code, currency_code,
       instagram, facebook, tiktok, telegram,
       business_hours, is_verified,
-      secondary_currency_code, exchange_rate
+      secondary_currency_code, exchange_rate,
+      header_theme, footer_settings
     `)
     .eq('id', storeId)
     .single()
