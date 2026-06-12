@@ -3,6 +3,7 @@
 import { useCart } from '@/lib/store/cart'
 import Link from 'next/link'
 import { getHeaderTheme } from './headerThemes'
+import { ThemeToggle } from './StoreTheme'
 
 interface Store {
   id: string
@@ -46,7 +47,9 @@ export default function StoreHeader({ store, country, subdomain }: Props) {
           <span className={`text-lg ${theme.name}`}>{store.name}</span>
         </Link>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <ThemeToggle className={theme.toggleBtn} />
+
           {store.whatsapp && (
             <a
               href={`https://wa.me/${store.whatsapp.replace(/\D/g, '')}`}

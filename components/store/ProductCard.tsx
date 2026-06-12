@@ -59,10 +59,10 @@ export default function ProductCard({ product, currencyCode, storeId, country, s
   return (
     <Link
       href={`/store/${country}/${subdomain}/product/${product.slug}`}
-      className="group flex flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white transition hover:shadow-md"
+      className="group flex flex-col overflow-hidden rounded-2xl border border-gray-100 bg-white transition hover:shadow-md dark:border-gray-800 dark:bg-gray-900 dark:hover:border-gray-700"
     >
       {/* الصورة */}
-      <div className="relative aspect-square overflow-hidden bg-gray-50">
+      <div className="relative aspect-square overflow-hidden bg-gray-50 dark:bg-gray-800">
         {product.thumbnail_url ? (
           <img
             src={product.thumbnail_url}
@@ -70,7 +70,7 @@ export default function ProductCard({ product, currencyCode, storeId, country, s
             className="h-full w-full object-cover transition group-hover:scale-105"
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-4xl text-gray-300">🛍️</div>
+          <div className="flex h-full items-center justify-center text-4xl text-gray-300 dark:text-gray-600">🛍️</div>
         )}
         {discount && (
           <span className="absolute right-2 top-2 rounded-full bg-red-500 px-2 py-0.5 text-xs font-bold text-white">
@@ -78,29 +78,29 @@ export default function ProductCard({ product, currencyCode, storeId, country, s
           </span>
         )}
         {outOfStock && (
-          <div className="absolute inset-0 flex items-center justify-center bg-white/80">
-            <span className="text-sm font-medium text-gray-500">نفد المخزون</span>
+          <div className="absolute inset-0 flex items-center justify-center bg-white/80 dark:bg-gray-900/80">
+            <span className="text-sm font-medium text-gray-500 dark:text-gray-400">نفد المخزون</span>
           </div>
         )}
       </div>
 
       {/* المعلومات */}
       <div className="flex flex-1 flex-col p-3">
-        <p className="line-clamp-2 text-sm font-medium text-gray-900">{product.name}</p>
+        <p className="line-clamp-2 text-sm font-medium text-gray-900 dark:text-gray-100">{product.name}</p>
 
         <div className="mt-2">
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-gray-900">
+            <span className="font-semibold text-gray-900 dark:text-white">
               {product.price.toLocaleString('ar')} {currencyCode}
             </span>
             {product.compare_price && (
-              <span className="text-xs text-gray-400 line-through">
+              <span className="text-xs text-gray-400 line-through dark:text-gray-500">
                 {product.compare_price.toLocaleString('ar')}
               </span>
             )}
           </div>
           {secondaryPrice !== null && (
-            <p className="mt-0.5 text-xs text-gray-400">
+            <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
               ≈ {secondaryPrice.toLocaleString('ar')} {secondaryCurrencyCode}
             </p>
           )}
@@ -111,13 +111,13 @@ export default function ProductCard({ product, currencyCode, storeId, country, s
           const remaining = Math.max(0, offerSold.max - offerSold.sold)
           return (
             <div className="mt-2">
-              <div className="h-1.5 overflow-hidden rounded-full bg-gray-100">
+              <div className="h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
                 <div
                   className={`h-full rounded-full ${pct >= 80 ? 'bg-red-500' : 'bg-orange-400'}`}
                   style={{ width: `${pct}%` }}
                 />
               </div>
-              <p className={`mt-1 text-[11px] ${remaining <= 5 ? 'font-semibold text-red-600' : 'text-gray-500'}`}>
+              <p className={`mt-1 text-[11px] ${remaining <= 5 ? 'font-semibold text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
                 {remaining <= 0
                   ? 'نفدت كمية العرض'
                   : remaining <= 5
@@ -133,12 +133,12 @@ export default function ProductCard({ product, currencyCode, storeId, country, s
           disabled={outOfStock}
           className={`mt-3 w-full rounded-xl py-2 text-sm font-medium transition ${
             outOfStock
-              ? 'cursor-not-allowed bg-gray-100 text-gray-400'
+              ? 'cursor-not-allowed bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600'
               : inCart
-                ? 'bg-emerald-50 text-emerald-700'
+                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400'
                 : added
                   ? 'bg-emerald-500 text-white'
-                  : 'bg-gray-900 text-white hover:bg-gray-700'
+                  : 'bg-gray-900 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200'
           }`}
         >
           {outOfStock ? 'نفد' : inCart ? `في السلة (${inCart.quantity})` : added ? '✓ أُضيف' : 'أضف للسلة'}

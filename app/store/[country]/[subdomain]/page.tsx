@@ -114,7 +114,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
   const showOffers = offers.length > 0 && !searchParams.category && !searchParams.q
 
   return (
-    <div className="min-h-screen bg-white" dir="rtl">
+    <div className="min-h-screen bg-white transition-colors dark:bg-gray-950" dir="rtl">
       <StoreHeader store={store} country={params.country} subdomain={params.subdomain} />
 
       <main className="mx-auto max-w-6xl px-4 py-8">
@@ -127,7 +127,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
 
         {showOffers && (
           <section className="mb-10">
-            <h2 className="mb-4 text-lg font-semibold text-gray-900">🔥 العروض الحصرية</h2>
+            <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">🔥 العروض الحصرية</h2>
             <div className={`grid gap-4 ${offers.length > 1 ? 'sm:grid-cols-2' : ''}`}>
               {offers.map(offer => (
                 <Link
@@ -178,7 +178,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
 
         {showFeatured && (
           <section className="mb-10">
-            <h2 className="mb-4 text-lg font-semibold text-gray-900">منتجات مميزة</h2>
+            <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">⭐ منتجات مميزة</h2>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {featured.map(product => (
                 <ProductCard
@@ -208,15 +208,15 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
             name="q"
             defaultValue={searchParams.q}
             placeholder="ابحث عن منتج..."
-            className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-right text-sm text-gray-900 outline-none focus:border-gray-400"
+            className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-right text-sm text-gray-900 outline-none focus:border-gray-400 dark:border-gray-800 dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-gray-600"
           />
-          <button type="submit" className="rounded-xl bg-gray-900 px-5 py-2.5 text-sm font-medium text-white">
+          <button type="submit" className="rounded-xl bg-gray-900 px-5 py-2.5 text-sm font-medium text-white dark:bg-white dark:text-gray-900">
             بحث
           </button>
           {searchParams.q && (
             <Link
               href={`/store/${params.country}/${params.subdomain}`}
-              className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm text-gray-500"
+              className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400"
             >
               ✕
             </Link>
@@ -224,7 +224,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
         </form>
 
         <section className="mt-6">
-          <h2 className="mb-4 text-lg font-semibold text-gray-900">
+          <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
             {searchParams.q
               ? `نتائج البحث: "${searchParams.q}"`
               : searchParams.category
@@ -233,8 +233,8 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
           </h2>
 
           {!products?.length ? (
-            <div className="rounded-2xl bg-gray-50 p-12 text-center">
-              <p className="text-gray-500">لا توجد منتجات</p>
+            <div className="rounded-2xl bg-gray-50 p-12 text-center dark:bg-gray-900">
+              <p className="text-gray-500 dark:text-gray-400">لا توجد منتجات</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">

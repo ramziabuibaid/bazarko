@@ -18,6 +18,8 @@ export interface HeaderTheme {
   cartBtn: string
   /** زر واتساب */
   whatsappBtn: string
+  /** زر تبديل فاتح/داكن */
+  toggleBtn: string
   /** لمعان متحرك يمر فوق الهيدر */
   shine: boolean
 }
@@ -27,12 +29,13 @@ export const HEADER_THEMES: HeaderTheme[] = [
     id: 'classic',
     label: 'كلاسيكي',
     description: 'أبيض نظيف مع اسم متدرج متحرك',
-    header: 'border-b border-gray-100 bg-white/95 backdrop-blur',
-    name: 'bg-gradient-to-l from-sky-600 via-indigo-500 to-sky-600 bg-clip-text text-transparent animate-gradient-x font-bold',
-    logoRing: 'ring-2 ring-sky-100',
-    logoFallback: 'bg-gray-900 text-white',
-    cartBtn: 'bg-gray-900 text-white hover:bg-gray-700',
-    whatsappBtn: 'bg-green-50 text-green-700 hover:bg-green-100',
+    header: 'border-b border-gray-100 bg-white/95 backdrop-blur dark:border-gray-800 dark:bg-gray-950/95',
+    name: 'bg-gradient-to-l from-sky-600 via-indigo-500 to-sky-600 bg-clip-text text-transparent animate-gradient-x font-bold dark:from-sky-400 dark:via-indigo-300 dark:to-sky-400',
+    logoRing: 'ring-2 ring-sky-100 dark:ring-sky-500/30',
+    logoFallback: 'bg-gray-900 text-white dark:bg-white dark:text-gray-900',
+    cartBtn: 'bg-gray-900 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200',
+    whatsappBtn: 'bg-green-50 text-green-700 hover:bg-green-100 dark:bg-green-500/15 dark:text-green-400 dark:hover:bg-green-500/25',
+    toggleBtn: 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-amber-300 dark:hover:bg-gray-700',
     shine: false,
   },
   {
@@ -45,6 +48,7 @@ export const HEADER_THEMES: HeaderTheme[] = [
     logoFallback: 'bg-white text-sky-700',
     cartBtn: 'bg-white text-sky-700 hover:bg-sky-50',
     whatsappBtn: 'bg-white/15 text-white hover:bg-white/25 backdrop-blur-sm',
+    toggleBtn: 'bg-white/15 text-white hover:bg-white/25 backdrop-blur-sm',
     shine: true,
   },
   {
@@ -57,6 +61,7 @@ export const HEADER_THEMES: HeaderTheme[] = [
     logoFallback: 'bg-white text-rose-600',
     cartBtn: 'bg-white text-rose-600 hover:bg-rose-50',
     whatsappBtn: 'bg-white/15 text-white hover:bg-white/25 backdrop-blur-sm',
+    toggleBtn: 'bg-white/15 text-white hover:bg-white/25 backdrop-blur-sm',
     shine: true,
   },
   {
@@ -69,6 +74,7 @@ export const HEADER_THEMES: HeaderTheme[] = [
     logoFallback: 'bg-white text-emerald-700',
     cartBtn: 'bg-white text-emerald-700 hover:bg-emerald-50',
     whatsappBtn: 'bg-white/15 text-white hover:bg-white/25 backdrop-blur-sm',
+    toggleBtn: 'bg-white/15 text-white hover:bg-white/25 backdrop-blur-sm',
     shine: true,
   },
   {
@@ -81,6 +87,7 @@ export const HEADER_THEMES: HeaderTheme[] = [
     logoFallback: 'bg-amber-300 text-purple-950',
     cartBtn: 'bg-amber-300 text-purple-950 hover:bg-amber-200',
     whatsappBtn: 'bg-white/10 text-amber-200 hover:bg-white/20 backdrop-blur-sm',
+    toggleBtn: 'bg-white/10 text-amber-200 hover:bg-white/20 backdrop-blur-sm',
     shine: true,
   },
   {
@@ -93,6 +100,7 @@ export const HEADER_THEMES: HeaderTheme[] = [
     logoFallback: 'bg-sky-500 text-white',
     cartBtn: 'bg-sky-500 text-white hover:bg-sky-400',
     whatsappBtn: 'bg-white/10 text-sky-300 hover:bg-white/20 backdrop-blur-sm',
+    toggleBtn: 'bg-white/10 text-sky-300 hover:bg-white/20 backdrop-blur-sm',
     shine: true,
   },
 ]

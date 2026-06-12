@@ -80,7 +80,7 @@ export default function StoreFooter({ store, country, subdomain }: Props) {
   const activeCols = [showContact, showSocial && socials.length > 0, showHours && openDays.length > 0].filter(Boolean).length
 
   return (
-    <footer className="mt-16 border-t border-gray-900/10 bg-gray-950 text-gray-400" dir="rtl">
+    <footer className="mt-16 border-t border-gray-900/10 bg-gray-950 text-gray-400 dark:border-gray-800" dir="rtl">
       <div className="mx-auto max-w-6xl px-4 pt-12 pb-6">
 
         {/* ── القسم العلوي ── */}

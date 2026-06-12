@@ -21,7 +21,9 @@ export default function CategoryFilter({ categories, activeSlug, subdomain, coun
       <Link
         href={base}
         className={`flex-shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition ${
-          !activeSlug ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          !activeSlug
+            ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900'
+            : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
         }`}
       >
         الكل
@@ -32,8 +34,8 @@ export default function CategoryFilter({ categories, activeSlug, subdomain, coun
           href={`${base}?category=${cat.slug}`}
           className={`flex-shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition ${
             activeSlug === cat.slug
-              ? 'bg-gray-900 text-white'
-              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
           }`}
         >
           {cat.name}

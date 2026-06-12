@@ -96,24 +96,24 @@ export default async function ProductPage({ params }: Props) {
   const isInstagram = videoUrl?.includes('instagram.com')
 
   return (
-    <div className="min-h-screen bg-white" dir="rtl">
+    <div className="min-h-screen bg-white transition-colors dark:bg-gray-950" dir="rtl">
       <StoreHeader store={store} country={params.country} subdomain={params.subdomain} />
 
       <main className="mx-auto max-w-4xl px-4 py-8">
         <div className="grid gap-8 md:grid-cols-2">
           {/* الصور */}
           <div className="space-y-3">
-            <div className="overflow-hidden rounded-2xl bg-gray-50 aspect-square">
+            <div className="overflow-hidden rounded-2xl bg-gray-50 aspect-square dark:bg-gray-900">
               {images[0] ? (
                 <img src={images[0]} alt={product.name} className="h-full w-full object-cover" />
               ) : (
-                <div className="flex h-full items-center justify-center text-6xl text-gray-200">🛍️</div>
+                <div className="flex h-full items-center justify-center text-6xl text-gray-200 dark:text-gray-700">🛍️</div>
               )}
             </div>
             {images.length > 1 && (
               <div className="grid grid-cols-4 gap-2">
                 {images.slice(1).map((img, i) => (
-                  <div key={i} className="overflow-hidden rounded-xl bg-gray-50 aspect-square">
+                  <div key={i} className="overflow-hidden rounded-xl bg-gray-50 aspect-square dark:bg-gray-900">
                     <img src={img} alt="" className="h-full w-full object-cover" />
                   </div>
                 ))}
@@ -124,11 +124,11 @@ export default async function ProductPage({ params }: Props) {
           {/* التفاصيل */}
           <div>
             {(product.categories as unknown as { name: string } | null)?.name && (
-              <p className="mb-2 text-sm text-gray-400">
+              <p className="mb-2 text-sm text-gray-400 dark:text-gray-500">
                 {(product.categories as unknown as { name: string }).name}
               </p>
             )}
-            <h1 className="text-2xl font-bold text-gray-900">{product.name}</h1>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{product.name}</h1>
 
             {activeOffer && (
               <Link
@@ -153,34 +153,34 @@ export default async function ProductPage({ params }: Props) {
 
             <div className="mt-4">
               <div className="flex items-center gap-3">
-                <span className={`text-2xl font-bold ${activeOffer ? 'text-red-600' : 'text-gray-900'}`}>
+                <span className={`text-2xl font-bold ${activeOffer ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
                   {effectivePrice.toLocaleString('ar')} {store.currency_code}
                 </span>
                 {effectiveCompare && (
-                  <span className="text-lg text-gray-400 line-through">
+                  <span className="text-lg text-gray-400 line-through dark:text-gray-500">
                     {effectiveCompare.toLocaleString('ar')}
                   </span>
                 )}
                 {discount && (
-                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-sm font-bold text-red-600">
+                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-sm font-bold text-red-600 dark:bg-red-500/15 dark:text-red-400">
                     وفّر {discount}%
                   </span>
                 )}
               </div>
               {secondaryPrice !== null && (
-                <p className="mt-1 text-base text-gray-500">
+                <p className="mt-1 text-base text-gray-500 dark:text-gray-400">
                   ≈ {secondaryPrice.toLocaleString('ar')} {store.secondary_currency_code}
                 </p>
               )}
             </div>
 
             {product.description && (
-              <p className="mt-4 leading-relaxed text-gray-600">{product.description}</p>
+              <p className="mt-4 leading-relaxed text-gray-600 dark:text-gray-300">{product.description}</p>
             )}
 
             <div className="mt-6">
               {outOfStock ? (
-                <div className="rounded-xl bg-gray-100 py-3 text-center text-sm font-medium text-gray-500">
+                <div className="rounded-xl bg-gray-100 py-3 text-center text-sm font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                   نفد المخزون
                 </div>
               ) : (
@@ -195,7 +195,7 @@ export default async function ProductPage({ params }: Props) {
                     subdomain={params.subdomain}
                   />
                   {activeOffer?.offers.per_customer_limit != null && (
-                    <p className="mt-2 text-center text-xs text-gray-400">
+                    <p className="mt-2 text-center text-xs text-gray-400 dark:text-gray-500">
                       الحد الأقصى {activeOffer.offers.per_customer_limit} لكل زبون خلال العرض
                     </p>
                   )}
@@ -208,14 +208,14 @@ export default async function ProductPage({ params }: Props) {
                 href={`https://wa.me/${store.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`مرحبا، أريد الاستفسار عن: ${product.name}`)}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-green-200 py-3 text-sm font-medium text-green-700 hover:bg-green-50"
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-green-200 py-3 text-sm font-medium text-green-700 hover:bg-green-50 dark:border-green-500/25 dark:text-green-400 dark:hover:bg-green-500/10"
               >
                 <span>📱</span> استفسر عبر واتساب
               </a>
             )}
 
             {product.sku && (
-              <p className="mt-4 text-xs text-gray-400" dir="ltr">SKU: {product.sku}</p>
+              <p className="mt-4 text-xs text-gray-400 dark:text-gray-500" dir="ltr">SKU: {product.sku}</p>
             )}
           </div>
         </div>
@@ -223,9 +223,9 @@ export default async function ProductPage({ params }: Props) {
         {/* فيديو المنتج */}
         {videoUrl && (
           <div className="mt-8">
-            <h2 className="mb-3 text-lg font-semibold text-gray-900">فيديو المنتج</h2>
+            <h2 className="mb-3 text-lg font-semibold text-gray-900 dark:text-white">فيديو المنتج</h2>
             {youtubeId ? (
-              <div className="overflow-hidden rounded-2xl bg-gray-50" style={{ aspectRatio: '16/9' }}>
+              <div className="overflow-hidden rounded-2xl bg-gray-50 dark:bg-gray-900" style={{ aspectRatio: '16/9' }}>
                 <iframe
                   src={`https://www.youtube.com/embed/${youtubeId}`}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -238,7 +238,7 @@ export default async function ProductPage({ params }: Props) {
                 href={videoUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 rounded-2xl border border-gray-100 bg-gray-50 px-5 py-4 text-gray-700 hover:bg-gray-100 transition-colors"
+                className="flex items-center gap-3 rounded-2xl border border-gray-100 bg-gray-50 px-5 py-4 text-gray-700 hover:bg-gray-100 transition-colors dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
               >
                 <span className="text-2xl">
                   {isTikTok ? '🎵' : isInstagram ? '📷' : '▶️'}
@@ -247,7 +247,7 @@ export default async function ProductPage({ params }: Props) {
                   <p className="font-medium">
                     {isTikTok ? 'شاهد على TikTok' : isInstagram ? 'شاهد على Instagram' : 'شاهد الفيديو'}
                   </p>
-                  <p className="text-xs text-gray-400 mt-0.5" dir="ltr">{videoUrl}</p>
+                  <p className="text-xs text-gray-400 mt-0.5 dark:text-gray-500" dir="ltr">{videoUrl}</p>
                 </div>
               </a>
             )}
