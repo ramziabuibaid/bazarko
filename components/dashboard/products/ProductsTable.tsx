@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { uniqueSlug } from '@/lib/utils/slug'
 
 interface Product {
   id: string
@@ -14,6 +15,7 @@ interface Product {
   cost_price: number | null
   stock_quantity: number
   stock_available: number
+  status: string
   is_active: boolean
   is_featured: boolean
   thumbnail_url: string | null
@@ -22,12 +24,19 @@ interface Product {
   categories: { id: string; name: string } | null
 }
 
+const STATUS_META: Record<string, { label: string; icon: string; badgeCls: string }> = {
+  active:   { label: 'فعال',   icon: '✅', badgeCls: 'bg-emerald-500/10 text-emerald-400' },
+  draft:    { label: 'مسودة',  icon: '✏️', badgeCls: 'bg-sky-500/10 text-sky-400'         },
+  hidden:   { label: 'مخفي',   icon: '🙈', badgeCls: 'bg-amber-500/10 text-amber-400'     },
+  archived: { label: 'مؤرشف',  icon: '📦', badgeCls: 'bg-slate-700 text-slate-400'        },
+}
+
 interface Props {
   products: Product[]
   categories: { id: string; name: string }[]
   storeId: string
   currencyCode: string
-  filters: { q?: string; category?: string; status?: string }
+  filters: { q?: string; category?: string; status?: string; sort?: string }
 }
 
 export default function ProductsTable({ products: initial, categories, storeId, currencyCode, filters }: Props) {
@@ -36,21 +45,74 @@ export default function ProductsTable({ products: initial, categories, storeId, 
   const [search, setSearch]     = useState(filters.q ?? '')
   const [category, setCategory] = useState(filters.category ?? '')
   const [status, setStatus]     = useState(filters.status ?? '')
-  const [deleteId, setDeleteId] = useState<string | null>(null)
-  const [deleting, setDeleting] = useState(false)
+  const [sort, setSort]         = useState(filters.sort ?? 'newest')
+  const [deleteId, setDeleteId]   = useState<string | null>(null)
+  const [deleting, setDeleting]   = useState(false)
+  const [duplicating, setDuplicating] = useState<Record<string, boolean>>({})
 
   function applyFilters() {
     const params = new URLSearchParams()
-    if (search)   params.set('q', search)
-    if (category) params.set('category', category)
-    if (status)   params.set('status', status)
+    if (search)                params.set('q', search)
+    if (category)              params.set('category', category)
+    if (status)                params.set('status', status)
+    if (sort && sort !== 'newest') params.set('sort', sort)
     router.push(`/dashboard/products?${params.toString()}`)
   }
 
   async function toggleActive(product: Product) {
+    const next = product.status === 'active' ? 'hidden' : 'active'
     const supabase = createClient()
-    await supabase.from('products').update({ is_active: !product.is_active }).eq('id', product.id)
-    setProducts(ps => ps.map(p => p.id === product.id ? { ...p, is_active: !p.is_active } : p))
+    await supabase.from('products').update({ status: next }).eq('id', product.id)
+    setProducts(ps => ps.map(p => p.id === product.id ? { ...p, status: next, is_active: next === 'active' } : p))
+  }
+
+  async function duplicateProduct(product: Product) {
+    setDuplicating(prev => ({ ...prev, [product.id]: true }))
+    const supabase = createClient()
+
+    const { data: full } = await supabase
+      .from('products')
+      .select('description, track_stock, allow_backorder, low_stock_alert, weight, dimensions, images, tags, metadata, barcode, cost_price, compare_price, category_id, video_url, secondary_price, secondary_currency_code')
+      .eq('id', product.id)
+      .single()
+
+    const { data: copy, error } = await supabase
+      .from('products')
+      .insert({
+        store_id:       storeId,
+        name:           `نسخة - ${product.name}`,
+        slug:           uniqueSlug(product.name),
+        price:          product.price,
+        compare_price:  full?.compare_price ?? product.compare_price ?? null,
+        cost_price:     full?.cost_price ?? product.cost_price ?? null,
+        category_id:    full?.category_id ?? null,
+        description:    full?.description ?? null,
+        sku:            null,
+        barcode:        null,
+        stock_quantity: 0,
+        track_stock:    full?.track_stock ?? true,
+        allow_backorder: full?.allow_backorder ?? false,
+        low_stock_alert: full?.low_stock_alert ?? 5,
+        weight:         full?.weight ?? null,
+        dimensions:     full?.dimensions ?? null,
+        images:         full?.images ?? [],
+        thumbnail_url:  product.thumbnail_url,
+        tags:           full?.tags ?? [],
+        status:         'draft',
+        is_featured:    false,
+        metadata:       full?.metadata ?? {},
+        video_url:      full?.video_url ?? null,
+        secondary_price: full?.secondary_price ?? null,
+        secondary_currency_code: full?.secondary_currency_code ?? null,
+      })
+      .select('id')
+      .single()
+
+    setDuplicating(prev => { const n = { ...prev }; delete n[product.id]; return n })
+
+    if (!error && copy) {
+      router.push(`/dashboard/products/${copy.id}`)
+    }
   }
 
   async function confirmDelete(id: string) {
@@ -107,10 +169,23 @@ export default function ProductsTable({ products: initial, categories, storeId, 
             className="flex-1 rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-right text-sm text-white outline-none focus:border-sky-500"
           >
             <option value="">كل الحالات</option>
-            <option value="active">نشط</option>
-            <option value="inactive">مخفي</option>
-            <option value="low_stock">مخزون منخفض</option>
-            <option value="out_of_stock">نفد المخزون</option>
+            <option value="active">✅ فعال</option>
+            <option value="draft">✏️ مسودة</option>
+            <option value="hidden">🙈 مخفي</option>
+            <option value="archived">📦 مؤرشف</option>
+            <option value="low_stock">⚠️ مخزون منخفض</option>
+            <option value="out_of_stock">🔴 نفد المخزون</option>
+          </select>
+          <select
+            value={sort}
+            onChange={e => { setSort(e.target.value); setTimeout(applyFilters, 0) }}
+            className="flex-1 rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-right text-sm text-white outline-none focus:border-sky-500"
+          >
+            <option value="newest">الأحدث</option>
+            <option value="oldest">الأقدم</option>
+            <option value="price_high">الأعلى سعراً</option>
+            <option value="price_low">الأقل سعراً</option>
+            <option value="best_selling">الأكثر مبيعاً</option>
           </select>
         </div>
       </div>
@@ -198,25 +273,29 @@ export default function ProductsTable({ products: initial, categories, storeId, 
 
                   {/* الحالة */}
                   <td className="px-4 py-3">
-                    <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs ${
-                      product.is_active
-                        ? 'bg-emerald-500/10 text-emerald-400'
-                        : 'bg-slate-700 text-slate-400'
-                    }`}>
-                      {product.is_active ? 'نشط' : 'مخفي'}
-                    </span>
+                    {(() => {
+                      const m = STATUS_META[product.status] ?? STATUS_META.draft
+                      return (
+                        <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs ${m.badgeCls}`}>
+                          {m.icon} {m.label}
+                        </span>
+                      )
+                    })()}
                   </td>
 
                   {/* الإجراءات */}
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => toggleActive(product)}
-                        className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white/5 hover:text-white"
-                        title={product.is_active ? 'إخفاء' : 'تفعيل'}
-                      >
-                        {product.is_active ? '👁️' : '🙈'}
-                      </button>
+                      {/* toggle: يعمل فقط بين active ↔ hidden */}
+                      {product.status !== 'archived' && (
+                        <button
+                          onClick={() => toggleActive(product)}
+                          className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white/5 hover:text-white"
+                          title={product.status === 'active' ? 'إخفاء مؤقت' : 'تفعيل'}
+                        >
+                          {product.status === 'active' ? '👁️' : '🙈'}
+                        </button>
+                      )}
                       <Link
                         href={`/dashboard/products/${product.id}`}
                         className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white/5 hover:text-white"
@@ -224,6 +303,16 @@ export default function ProductsTable({ products: initial, categories, storeId, 
                       >
                         ✏️
                       </Link>
+                      <button
+                        onClick={() => duplicateProduct(product)}
+                        disabled={!!duplicating[product.id]}
+                        className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-violet-500/10 hover:text-violet-400 disabled:opacity-40"
+                        title="نسخ المنتج"
+                      >
+                        {duplicating[product.id] ? (
+                          <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-violet-400 border-t-transparent" />
+                        ) : '⧉'}
+                      </button>
                       <button
                         onClick={() => setDeleteId(product.id)}
                         className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-500/10 hover:text-red-400"

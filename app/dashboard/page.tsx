@@ -57,6 +57,7 @@ export default async function DashboardPage() {
     todayOrdersRes, todayRevenueRes,
     twoWeeksOrdersRes, recentOrdersRes,
     processingRes, paidOrderIdsRes,
+    newOrdersRes, lowStockRes, debtCustomersRes,
   ] = await Promise.all([
     supabase.from('orders').select('id', { count: 'exact', head: true }).eq('store_id', storeId),
     supabase.from('customers').select('id', { count: 'exact', head: true }).eq('store_id', storeId),
@@ -68,6 +69,10 @@ export default async function DashboardPage() {
     supabase.from('orders').select('id, order_number, status, payment_status, total_amount, customer_name, created_at').eq('store_id', storeId).order('created_at', { ascending: false }).limit(5),
     supabase.from('orders').select('id', { count: 'exact', head: true }).eq('store_id', storeId).in('status', ['pending', 'confirmed', 'processing', 'ready', 'shipped']),
     supabase.from('orders').select('id').eq('store_id', storeId).eq('payment_status', 'paid').gte('created_at', thirtyDaysAgoStr).order('created_at', { ascending: false }).limit(200),
+    // بطاقة الحالة السريعة
+    supabase.from('orders').select('id', { count: 'exact', head: true }).eq('store_id', storeId).eq('status', 'pending'),
+    supabase.from('products').select('id, stock_available, low_stock_alert').eq('store_id', storeId).eq('track_stock', true).eq('is_active', true),
+    supabase.from('customers').select('balance').eq('store_id', storeId).gt('balance', 0),
   ])
 
   // Top products — sequential query using paid order IDs
@@ -113,6 +118,15 @@ export default async function DashboardPage() {
     pct:       totalQtySold > 0 ? Math.round((p.qty / totalQtySold) * 100) : 0,
   }))
   const maxProductQty = topProducts[0]?.qty ?? 1
+
+  // بطاقة الحالة السريعة
+  const quickNewOrders  = newOrdersRes.count ?? 0
+  const quickDebtTotal  = (debtCustomersRes.data ?? []).reduce((s: number, c: { balance: number | null }) => s + (c.balance ?? 0), 0)
+  const quickDebtCount  = debtCustomersRes.data?.length ?? 0
+  const allTrackedProducts = lowStockRes.data ?? [] as { id: string; stock_available: number; low_stock_alert: number | null }[]
+  const quickLowStock   = (allTrackedProducts as { id: string; stock_available: number; low_stock_alert: number | null }[]).filter(p =>
+    p.stock_available <= 0 || (p.low_stock_alert != null && p.low_stock_alert > 0 && p.stock_available <= p.low_stock_alert)
+  ).length
 
   // Core metrics
   const totalRevenue    = (revenueRes.data ?? []).reduce((s: number, o: { total_amount: number | null }) => s + (o.total_amount ?? 0), 0)
@@ -216,6 +230,118 @@ export default async function DashboardPage() {
         <DashboardRefresh loadedAt={now.toISOString()} />
       </div>
 
+      {/* ── بطاقة الحالة السريعة ── */}
+      {!isNewStore && (
+        <div className="rounded-2xl border border-white/5 bg-slate-900 p-4">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400">حالة متجرك الآن</p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+
+            {/* طلبات جديدة */}
+            <Link
+              href="/dashboard/orders?status=pending"
+              className={`group flex items-center gap-3 rounded-xl border p-3.5 transition-colors ${
+                quickNewOrders > 0
+                  ? 'border-amber-500/25 bg-amber-500/8 hover:bg-amber-500/12'
+                  : 'border-white/5 bg-slate-800/50 hover:border-white/10'
+              }`}
+            >
+              <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-lg ${
+                quickNewOrders > 0 ? 'bg-amber-500/15' : 'bg-slate-700/60'
+              }`}>
+                📥
+              </span>
+              <div className="min-w-0">
+                <p className={`text-xl font-bold leading-none ${quickNewOrders > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
+                  {quickNewOrders}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-300 truncate">طلب جديد</p>
+              </div>
+              {quickNewOrders > 0 && (
+                <span className="mr-auto h-2 w-2 shrink-0 rounded-full bg-amber-400 animate-pulse" />
+              )}
+            </Link>
+
+            {/* مبالغ يجب تحصيلها */}
+            <Link
+              href="/dashboard/customers"
+              className={`group flex items-center gap-3 rounded-xl border p-3.5 transition-colors ${
+                quickDebtTotal > 0
+                  ? 'border-red-500/25 bg-red-500/8 hover:bg-red-500/12'
+                  : 'border-white/5 bg-slate-800/50 hover:border-white/10'
+              }`}
+            >
+              <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-lg ${
+                quickDebtTotal > 0 ? 'bg-red-500/15' : 'bg-slate-700/60'
+              }`}>
+                💰
+              </span>
+              <div className="min-w-0">
+                <p className={`text-xl font-bold leading-none ${quickDebtTotal > 0 ? 'text-red-400' : 'text-slate-400'}`}>
+                  {quickDebtTotal > 0 ? fmt(quickDebtTotal) : '0'}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-300 truncate">
+                  {quickDebtTotal > 0 ? `${cc} · ${quickDebtCount} زبون` : 'لا ذمم مستحقة'}
+                </p>
+              </div>
+            </Link>
+
+            {/* منتجات قاربت على النفاد */}
+            <Link
+              href="/dashboard/inventory/alerts"
+              className={`group flex items-center gap-3 rounded-xl border p-3.5 transition-colors ${
+                quickLowStock > 0
+                  ? 'border-orange-500/25 bg-orange-500/8 hover:bg-orange-500/12'
+                  : 'border-white/5 bg-slate-800/50 hover:border-white/10'
+              }`}
+            >
+              <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-lg ${
+                quickLowStock > 0 ? 'bg-orange-500/15' : 'bg-slate-700/60'
+              }`}>
+                📦
+              </span>
+              <div className="min-w-0">
+                <p className={`text-xl font-bold leading-none ${quickLowStock > 0 ? 'text-orange-400' : 'text-slate-400'}`}>
+                  {quickLowStock}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-300 truncate">
+                  {quickLowStock > 0 ? 'منتج قارب النفاد' : 'المخزون بخير'}
+                </p>
+              </div>
+              {quickLowStock > 0 && (
+                <span className="mr-auto h-2 w-2 shrink-0 rounded-full bg-orange-400 animate-pulse" />
+              )}
+            </Link>
+
+            {/* حالة المتجر العامة */}
+            <div className={`flex items-center gap-3 rounded-xl border p-3.5 ${
+              quickNewOrders === 0 && quickDebtTotal === 0 && quickLowStock === 0
+                ? 'border-emerald-500/25 bg-emerald-500/8'
+                : 'border-white/5 bg-slate-800/50'
+            }`}>
+              <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-lg ${
+                quickNewOrders === 0 && quickDebtTotal === 0 && quickLowStock === 0 ? 'bg-emerald-500/15' : 'bg-slate-700/60'
+              }`}>
+                {quickNewOrders === 0 && quickDebtTotal === 0 && quickLowStock === 0 ? '✅' : '⚡'}
+              </span>
+              <div className="min-w-0">
+                <p className={`text-sm font-semibold leading-snug ${
+                  quickNewOrders === 0 && quickDebtTotal === 0 && quickLowStock === 0 ? 'text-emerald-400' : 'text-white'
+                }`}>
+                  {quickNewOrders === 0 && quickDebtTotal === 0 && quickLowStock === 0 ? 'كل شيء بخير' : 'يحتاج انتباهك'}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-300 truncate">
+                  {quickNewOrders === 0 && quickDebtTotal === 0 && quickLowStock === 0
+                    ? 'لا تنبيهات اليوم'
+                    : `${[quickNewOrders > 0 && 'طلبات', quickDebtTotal > 0 && 'ذمم', quickLowStock > 0 && 'مخزون'].filter(Boolean).join(' · ')}`
+                  }
+                </p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
       {/* ── خطوات البدء السريع ── */}
       {showSetup && (
         <div className="rounded-2xl border border-sky-500/20 bg-gradient-to-l from-sky-500/5 to-transparent p-5">
@@ -259,7 +385,7 @@ export default async function DashboardPage() {
                   <p className={`text-sm font-medium ${step.done ? 'text-emerald-400 line-through decoration-emerald-500/40' : 'text-white'}`}>
                     {step.label}
                   </p>
-                  <p className="mt-0.5 text-xs text-slate-500">{step.desc}</p>
+                  <p className="mt-0.5 text-xs text-slate-400">{step.desc}</p>
                 </div>
               </Link>
             ))}
@@ -267,7 +393,7 @@ export default async function DashboardPage() {
 
           {/* شارك رابط المتجر */}
           <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-white/5 pt-4">
-            <span className="text-xs text-slate-500">رابط متجرك:</span>
+            <span className="text-xs text-slate-400">رابط متجرك:</span>
             <span className="text-xs text-sky-400 font-mono" dir="ltr">
               {store.subdomain}.{process.env.NEXT_PUBLIC_DOMAIN ?? 'bazarko.app'}
             </span>
@@ -286,7 +412,7 @@ export default async function DashboardPage() {
       {/* ── KPI Cards ── */}
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
-          <p className="text-xs font-medium text-slate-400">طلبيات اليوم</p>
+          <p className="text-xs font-medium text-slate-300">طلبيات اليوم</p>
           <p className="mt-2 text-3xl font-bold text-sky-400">{todayOrders}</p>
           <p className="mt-1 text-xs text-slate-400">
             {isNewStore ? 'أنشئ أول طلبية الآن' : `من ${ordersTotal} إجمالاً`}
@@ -294,7 +420,7 @@ export default async function DashboardPage() {
         </div>
 
         <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
-          <p className="text-xs font-medium text-slate-400">إيرادات اليوم</p>
+          <p className="text-xs font-medium text-slate-300">إيرادات اليوم</p>
           <p className="mt-2 text-3xl font-bold text-emerald-400">
             {fmt(todayRevenue)}
             <span className="mr-1 text-sm font-normal text-slate-400">{cc}</span>
@@ -305,7 +431,7 @@ export default async function DashboardPage() {
         </div>
 
         <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
-          <p className="text-xs font-medium text-slate-400">قيد المعالجة</p>
+          <p className="text-xs font-medium text-slate-300">قيد المعالجة</p>
           <p className={`mt-2 text-3xl font-bold ${processingCount > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
             {processingCount}
           </p>
@@ -315,7 +441,7 @@ export default async function DashboardPage() {
         </div>
 
         <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
-          <p className="text-xs font-medium text-slate-400">نمو هذا الأسبوع</p>
+          <p className="text-xs font-medium text-slate-300">نمو هذا الأسبوع</p>
           <p className={`mt-2 text-3xl font-bold ${
             growth === null ? 'text-slate-400' : growth >= 0 ? 'text-emerald-400' : 'text-red-400'
           }`}>
@@ -334,7 +460,7 @@ export default async function DashboardPage() {
         <div className="rounded-2xl border border-white/5 bg-slate-900 p-5 lg:col-span-2">
           <div className="mb-5 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white">مبيعات آخر 7 أيام</h2>
-            <span className="text-xs text-slate-500">{cc}</span>
+            <span className="text-xs text-slate-400">{cc}</span>
           </div>
           <div className="flex items-end gap-2" style={{ height: '140px' }}>
             {chartDays.map(day => (
@@ -348,7 +474,7 @@ export default async function DashboardPage() {
                     title={`${day.dayName} ${day.numLabel}: ${fmt(day.revenue)} ${cc} — ${day.orders} طلبية`}
                   />
                 </div>
-                <span className="text-[10px] text-slate-500">{day.numLabel}</span>
+                <span className="text-xs text-slate-400">{day.numLabel}</span>
               </div>
             ))}
           </div>
@@ -391,15 +517,15 @@ export default async function DashboardPage() {
                   >
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-semibold text-white">{order.order_number}</p>
-                      <p className="mt-0.5 truncate text-[11px] text-slate-400">
+                      <p className="mt-0.5 truncate text-xs text-slate-300">
                         {order.customer_name ?? 'زبون غير محدد'}
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-1">
-                      <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${st.color}`}>
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${st.color}`}>
                         {st.label}
                       </span>
-                      <span className="text-[11px] text-slate-300">{fmt(order.total_amount ?? 0)} {cc}</span>
+                      <span className="text-xs text-slate-300">{fmt(order.total_amount ?? 0)} {cc}</span>
                     </div>
                   </Link>
                 )
@@ -416,7 +542,7 @@ export default async function DashboardPage() {
         <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
           <div className="mb-5 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white">أكثر المنتجات مبيعاً</h2>
-            <span className="text-xs text-slate-500">آخر 30 يوم</span>
+            <span className="text-xs text-slate-400">آخر 30 يوم</span>
           </div>
           {topProducts.length === 0 ? (
             <div className="flex h-32 flex-col items-center justify-center gap-3 text-center">
@@ -438,7 +564,7 @@ export default async function DashboardPage() {
                     {p.thumbnail ? (
                       <img src={p.thumbnail} alt={p.name} className="h-full w-full object-cover" />
                     ) : (
-                      <div className="flex h-full w-full items-center justify-center text-xs text-slate-600">
+                      <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">
                         {i + 1}
                       </div>
                     )}
@@ -449,7 +575,7 @@ export default async function DashboardPage() {
                       <span className="min-w-0 truncate text-sm text-slate-300">{p.name}</span>
                       <div className="flex shrink-0 items-center gap-2">
                         <span className="text-xs font-semibold text-violet-400">{p.pct}%</span>
-                        <span className="text-xs text-slate-500">{p.qty} قطعة</span>
+                        <span className="text-xs text-slate-400">{p.qty} قطعة</span>
                       </div>
                     </div>
                     <div className="h-1.5 w-full rounded-full bg-slate-800">
@@ -481,7 +607,7 @@ export default async function DashboardPage() {
                   {stat.value}
                   {stat.suffix && <span className="mr-1 text-xs font-normal text-slate-400">{stat.suffix}</span>}
                 </p>
-                <p className="mt-0.5 text-[11px] text-slate-400">{stat.label}</p>
+                <p className="mt-0.5 text-xs text-slate-300">{stat.label}</p>
               </div>
             ))}
           </div>
@@ -490,7 +616,7 @@ export default async function DashboardPage() {
 
       {/* ── Quick Actions ── */}
       <section>
-        <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-slate-500">إجراءات سريعة</h2>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-slate-400">إجراءات سريعة</h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
             { href: '/dashboard/orders/new',          label: 'طلبية جديدة', icon: '➕', desc: 'POS أو ذمة' },

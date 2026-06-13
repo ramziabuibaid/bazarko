@@ -24,7 +24,7 @@ interface ProductData {
   low_stock_alert: string
   track_stock: boolean
   allow_backorder: boolean
-  is_active: boolean
+  status: string
   is_featured: boolean
   images: string[]
   tags: string
@@ -43,7 +43,7 @@ const EMPTY: ProductData = {
   category_id: '', price: '', compare_price: '', cost_price: '',
   stock_quantity: '0', low_stock_alert: '5',
   track_stock: true, allow_backorder: false,
-  is_active: true, is_featured: false,
+  status: 'active', is_featured: false,
   images: [], tags: '', video_url: '',
 }
 
@@ -165,7 +165,7 @@ export default function ProductForm({ storeId, currencyCode, categories, initial
       low_stock_alert: parseInt(form.low_stock_alert) || 5,
       track_stock: form.track_stock,
       allow_backorder: form.allow_backorder,
-      is_active: form.is_active,
+      status: form.status,
       is_featured: form.is_featured,
       images: form.images,
       thumbnail_url: form.images[0] ?? null,
@@ -480,13 +480,36 @@ export default function ProductForm({ storeId, currencyCode, categories, initial
             className={input()}
           />
         </div>
-        <div className="space-y-3">
-          <Toggle
-            label="منتج نشط"
-            description="يظهر في المتجر للزبائن"
-            checked={form.is_active}
-            onChange={v => set('is_active', v)}
-          />
+        <div className="space-y-4">
+          {/* حالة المنتج */}
+          <div>
+            <p className="mb-2 text-sm text-slate-300">حالة المنتج</p>
+            <div className="grid grid-cols-2 gap-2">
+              {PRODUCT_STATUSES.map(s => (
+                <label
+                  key={s.value}
+                  className={`flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 transition ${
+                    form.status === s.value ? s.activeCls : 'border-white/5 hover:border-white/10'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="product_status"
+                    value={s.value}
+                    checked={form.status === s.value}
+                    onChange={() => set('status', s.value)}
+                    className="mt-0.5 accent-sky-500"
+                  />
+                  <div>
+                    <p className={`text-sm font-medium ${form.status === s.value ? s.color : 'text-slate-300'}`}>
+                      {s.icon} {s.label}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">{s.desc}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
           <Toggle
             label="منتج مميز"
             description="يظهر في قسم المنتجات المميزة"
@@ -521,7 +544,14 @@ export default function ProductForm({ storeId, currencyCode, categories, initial
   )
 }
 
-// ── مكونات مساعدة صغيرة ──
+// ── ثوابت وأدوات ──
+
+const PRODUCT_STATUSES = [
+  { value: 'active',   icon: '✅', label: 'فعال',   desc: 'يظهر للزبائن في المتجر',    color: 'text-emerald-400', activeCls: 'border-emerald-500/40 bg-emerald-500/8' },
+  { value: 'draft',    icon: '✏️', label: 'مسودة',  desc: 'غير منشور، قيد الإعداد',    color: 'text-sky-400',     activeCls: 'border-sky-500/40 bg-sky-500/8'         },
+  { value: 'hidden',   icon: '🙈', label: 'مخفي',   desc: 'مخفي مؤقتاً، لا يُباع',    color: 'text-amber-400',   activeCls: 'border-amber-500/40 bg-amber-500/8'     },
+  { value: 'archived', icon: '📦', label: 'مؤرشف',  desc: 'متوقف عن البيع نهائياً',   color: 'text-slate-400',   activeCls: 'border-slate-500/40 bg-slate-500/8'     },
+] as const
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (

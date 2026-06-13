@@ -9,7 +9,7 @@ export default async function AlertsPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const storeId = await getStoreForUser(supabase, user!.id)
+  const storeId = await getStoreForUser(supabase, user.id)
   if (!storeId) redirect('/onboarding')
 
   const { data: store } = await supabase
@@ -86,6 +86,8 @@ export default async function AlertsPage() {
         outOfStock={outOfStock}
         lowStock={lowStock}
         currencyCode={store.currency_code}
+        storeId={store.id}
+        userId={user.id}
       />
     </div>
   )

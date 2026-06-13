@@ -6,6 +6,7 @@ import ProductCard from '@/components/store/ProductCard'
 import CategoryFilter from '@/components/store/CategoryFilter'
 import OfferCountdown from '@/components/store/OfferCountdown'
 import StoreFooter from '@/components/store/StoreFooter'
+import SortSelect from '@/components/store/SortSelect'
 
 interface StoreProduct {
   id: string
@@ -19,9 +20,17 @@ interface StoreProduct {
   category_id: string | null
 }
 
+const SORT_ORDERS: Record<string, { column: string; ascending: boolean } | null> = {
+  newest:       { column: 'created_at', ascending: false },
+  oldest:       { column: 'created_at', ascending: true  },
+  price_high:   { column: 'price',      ascending: false },
+  price_low:    { column: 'price',      ascending: true  },
+  best_selling: null, // يُرتَّب في JS بعد جلب الـ RPC
+}
+
 interface Props {
   params: { country: string; subdomain: string }
-  searchParams: { category?: string; q?: string }
+  searchParams: { category?: string; q?: string; sort?: string }
 }
 
 export async function generateMetadata({ params }: Props) {
@@ -59,13 +68,20 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
     .eq('is_active', true)
     .order('sort_order')
 
+  const sortKey = (searchParams.sort && searchParams.sort in SORT_ORDERS) ? searchParams.sort : 'newest'
+  const sortOrder = SORT_ORDERS[sortKey]
+
   let productQuery = supabase
     .from('products')
     .select('id, name, slug, price, compare_price, thumbnail_url, stock_available, is_featured, category_id')
     .eq('store_id', store.id)
     .eq('is_active', true)
-    .order('sort_order')
-    .order('created_at', { ascending: false })
+
+  if (sortOrder) {
+    productQuery = productQuery.order(sortOrder.column, { ascending: sortOrder.ascending })
+  } else {
+    productQuery = productQuery.order('created_at', { ascending: false })
+  }
 
   if (searchParams.category) {
     const cat = categories?.find((c: { id: string; name: string; slug: string }) => c.slug === searchParams.category)
@@ -77,7 +93,14 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
   }
 
   const { data: rawProducts } = await productQuery
-  const products = (rawProducts ?? []) as StoreProduct[]
+  let products = (rawProducts ?? []) as StoreProduct[]
+
+  // ترتيب الأكثر مبيعاً عبر RPC
+  if (sortKey === 'best_selling') {
+    const { data: salesData } = await supabase.rpc('get_product_sales', { p_store_id: store.id })
+    const salesMap = new Map((salesData ?? []).map((r: { product_id: string; sold_count: number }) => [r.product_id, r.sold_count]))
+    products = [...products].sort((a, b) => ((salesMap.get(b.id) ?? 0) as number) - ((salesMap.get(a.id) ?? 0) as number))
+  }
   const featured = products.filter(p => p.is_featured)
   const showFeatured = featured.length > 0 && !searchParams.category && !searchParams.q
 
@@ -203,7 +226,16 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
           country={params.country}
         />
 
-        <form action={`/store/${params.country}/${params.subdomain}`} className="mt-4 flex gap-2">
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <SortSelect
+            current={sortKey}
+            basePath={`/store/${params.country}/${params.subdomain}`}
+            category={searchParams.category}
+            q={searchParams.q}
+          />
+        </div>
+
+        <form action={`/store/${params.country}/${params.subdomain}`} className="mt-2 flex gap-2">
           <input
             name="q"
             defaultValue={searchParams.q}

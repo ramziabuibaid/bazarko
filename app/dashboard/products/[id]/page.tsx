@@ -50,7 +50,7 @@ export default async function EditProductPage({ params }: { params: { id: string
     low_stock_alert: product.low_stock_alert?.toString() ?? '5',
     track_stock: product.track_stock ?? true,
     allow_backorder: product.allow_backorder ?? false,
-    is_active: product.is_active ?? true,
+    status: product.status ?? 'active',
     is_featured: product.is_featured ?? false,
     images: product.images ?? [],
     tags: (product.tags ?? []).join(', '),
