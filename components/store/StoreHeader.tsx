@@ -1,6 +1,7 @@
 'use client'
 
 import { useCart } from '@/lib/store/cart'
+import { useWishlist } from '@/lib/store/wishlist'
 import Link from 'next/link'
 import { getHeaderTheme } from './headerThemes'
 import { ThemeToggle } from './StoreTheme'
@@ -22,7 +23,8 @@ interface Props {
 }
 
 export default function StoreHeader({ store, country, subdomain }: Props) {
-  const count = useCart(s => s.count())
+  const count         = useCart(s => s.count())
+  const wishlistCount = useWishlist(s => s.count())
   const theme = getHeaderTheme(store.header_theme)
 
   return (
@@ -61,6 +63,25 @@ export default function StoreHeader({ store, country, subdomain }: Props) {
               واتساب
             </a>
           )}
+
+          <Link
+            href={`/store/${country}/${subdomain}/wishlist`}
+            className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition ${theme.cartBtn}`}
+            aria-label="المفضلة"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24"
+              fill={wishlistCount > 0 ? 'currentColor' : 'none'}
+              stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+              className={wishlistCount > 0 ? 'text-red-400' : ''}
+            >
+              <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
+            </svg>
+            {wishlistCount > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+                {wishlistCount}
+              </span>
+            )}
+          </Link>
 
           <Link
             href={`/store/${country}/${subdomain}/cart`}

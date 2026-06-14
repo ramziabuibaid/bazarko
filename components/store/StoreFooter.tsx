@@ -22,6 +22,7 @@ interface StoreData {
   email?: string | null
   city?: string | null
   address?: string | null
+  map_url?: string | null
   instagram?: string | null
   facebook?: string | null
   tiktok?: string | null
@@ -121,21 +122,36 @@ export default function StoreFooter({ store, country, subdomain }: Props) {
           {showContact && (
             <div>
               <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-gray-300">تواصل معنا</h3>
+
+              {/* زر واتساب البارز */}
+              {store.whatsapp && (
+                <a
+                  href={`https://wa.me/${store.whatsapp.replace(/\D/g, '')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mb-4 flex items-center gap-2.5 rounded-xl bg-emerald-600/15 px-4 py-3 text-sm font-medium text-emerald-400 ring-1 ring-emerald-600/30 transition hover:bg-emerald-600/25 hover:text-emerald-300"
+                >
+                  <WhatsAppIcon className="h-5 w-5 shrink-0" />
+                  <div>
+                    <p className="font-semibold">تواصل عبر واتساب</p>
+                    <p className="text-xs text-emerald-500/80" dir="ltr">{store.whatsapp}</p>
+                  </div>
+                  <svg className="mr-auto h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+                  </svg>
+                </a>
+              )}
+
               <ul className="space-y-3 text-sm">
-                {store.whatsapp && (
+                {store.phone && !store.whatsapp && (
                   <li>
-                    <a
-                      href={`https://wa.me/${store.whatsapp.replace(/\D/g, '')}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2.5 transition hover:text-white"
-                    >
-                      <WhatsAppIcon className="h-4 w-4 shrink-0 text-emerald-500" />
-                      <span dir="ltr">{store.whatsapp}</span>
+                    <a href={`tel:${store.phone}`} className="flex items-center gap-2.5 transition hover:text-white">
+                      <PhoneIcon className="h-4 w-4 shrink-0" />
+                      <span dir="ltr">{store.phone}</span>
                     </a>
                   </li>
                 )}
-                {store.phone && !store.whatsapp && (
+                {store.phone && store.whatsapp && (
                   <li>
                     <a href={`tel:${store.phone}`} className="flex items-center gap-2.5 transition hover:text-white">
                       <PhoneIcon className="h-4 w-4 shrink-0" />
@@ -152,9 +168,40 @@ export default function StoreFooter({ store, country, subdomain }: Props) {
                   </li>
                 )}
                 {store.city && (
-                  <li className="flex items-start gap-2.5">
-                    <LocationIcon className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span>{store.city}{store.address ? ` — ${store.address}` : ''}</span>
+                  <li>
+                    {store.map_url ? (
+                      <a
+                        href={store.map_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-start gap-2.5 transition hover:text-white"
+                      >
+                        <MapPinIcon className="mt-0.5 h-4 w-4 shrink-0 text-sky-400" />
+                        <span>
+                          {store.city}{store.address ? ` — ${store.address}` : ''}
+                          <span className="mr-1 text-xs text-sky-500">↗ خريطة</span>
+                        </span>
+                      </a>
+                    ) : (
+                      <span className="flex items-start gap-2.5">
+                        <LocationIcon className="mt-0.5 h-4 w-4 shrink-0" />
+                        <span>{store.city}{store.address ? ` — ${store.address}` : ''}</span>
+                      </span>
+                    )}
+                  </li>
+                )}
+                {/* رابط الخريطة منفرداً إن لم يكن هناك city */}
+                {!store.city && store.map_url && (
+                  <li>
+                    <a
+                      href={store.map_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2.5 transition hover:text-white"
+                    >
+                      <MapPinIcon className="h-4 w-4 shrink-0 text-sky-400" />
+                      <span className="text-sky-400">الموقع على الخريطة ↗</span>
+                    </a>
                   </li>
                 )}
               </ul>
@@ -251,6 +298,15 @@ function EmailIcon({ className }: { className?: string }) {
 }
 
 function LocationIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+    </svg>
+  )
+}
+
+function MapPinIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />

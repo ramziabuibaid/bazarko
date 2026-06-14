@@ -103,6 +103,7 @@ interface Store {
   secondary_currency_code: string | null
   exchange_rate: number | null
   prefer_secondary: boolean | null
+  map_url: string | null
   header_theme: string | null
   footer_settings: FooterSettings | null
 }
@@ -134,6 +135,7 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
     email:       store.email ?? '',
     city:        store.city ?? '',
     address:     store.address ?? '',
+    map_url:     store.map_url ?? '',
     instagram:   store.instagram ?? '',
     facebook:    store.facebook ?? '',
     tiktok:      store.tiktok ?? '',
@@ -254,6 +256,7 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
         email:          form.email.trim() || null,
         city:           form.city.trim() || null,
         address:        form.address.trim() || null,
+        map_url:        form.map_url.trim() || null,
         instagram:      form.instagram.trim() || null,
         facebook:       form.facebook.trim() || null,
         tiktok:         form.tiktok.trim() || null,
@@ -575,6 +578,24 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
               placeholder="شارع المدينة، بناية رقم..."
               className={inputClass}
             />
+          </div>
+
+          {/* رابط الخريطة */}
+          <div className="sm:col-span-2">
+            <label className="mb-1.5 block text-sm text-slate-400">
+              رابط الموقع على الخريطة
+              <span className="mr-1 text-xs text-slate-600">اختياري</span>
+            </label>
+            <input
+              value={form.map_url}
+              onChange={e => update('map_url', e.target.value)}
+              placeholder="https://maps.google.com/..."
+              dir="ltr"
+              className={inputClass}
+            />
+            <p className="mt-1 text-xs text-slate-600">
+              افتح Google Maps → اضغط على موقعك → شارك → انسخ الرابط
+            </p>
           </div>
         </div>
       </div>

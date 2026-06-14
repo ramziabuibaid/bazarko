@@ -9,6 +9,8 @@ import { uploadProductImage, deleteProductImage } from '@/lib/supabase/storage'
 interface Category { id: string; name: string }
 
 
+interface Spec { name: string; value: string }
+
 interface ProductData {
   id?: string
   name: string
@@ -30,6 +32,7 @@ interface ProductData {
   images: string[]
   tags: string
   video_url: string
+  specifications: Spec[]
 }
 
 interface Props {
@@ -49,6 +52,7 @@ const EMPTY: ProductData = {
   track_stock: true, allow_backorder: false,
   status: 'active', is_featured: false,
   images: [], tags: '', video_url: '',
+  specifications: [],
 }
 
 export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCode, exchangeRate, categories, initialData }: Props) {
@@ -145,6 +149,20 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
     setForm(f => ({ ...f, images: f.images.filter(i => i !== url) }))
   }
 
+  function addSpec() {
+    setForm(f => ({ ...f, specifications: [...f.specifications, { name: '', value: '' }] }))
+  }
+  function updateSpec(idx: number, field: keyof Spec, value: string) {
+    setForm(f => {
+      const specs = [...f.specifications]
+      specs[idx] = { ...specs[idx], [field]: value }
+      return { ...f, specifications: specs }
+    })
+  }
+  function removeSpec(idx: number) {
+    setForm(f => ({ ...f, specifications: f.specifications.filter((_, i) => i !== idx) }))
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.name.trim()) { setError('اسم المنتج مطلوب'); return }
@@ -176,6 +194,7 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
       thumbnail_url: form.images[0] ?? null,
       tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : [],
       video_url: form.video_url.trim() || null,
+      specifications: form.specifications.filter(s => s.name.trim()),
     }
 
     if (isEditing) {
@@ -504,6 +523,55 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
         <p className="mt-1.5 text-xs text-slate-500">
           الملابس والعطور تزداد مبيعاتها بشكل كبير مع الفيديو — أضف رابط TikTok أو YouTube أو Instagram
         </p>
+      </Section>
+
+      {/* ── المواصفات الفنية ── */}
+      <Section title="المواصفات الفنية">
+        <p className="mb-3 text-xs text-slate-500">
+          أضف أي مواصفة تريدها — مثال: اللون، الأبعاد، نوع الخشب، مدة التوصيل...
+        </p>
+
+        {form.specifications.length > 0 && (
+          <div className="mb-3 space-y-2">
+            {/* رأس الجدول */}
+            <div className="grid grid-cols-[1fr_1fr_auto] gap-2 px-1">
+              <span className="text-xs text-slate-500">اسم المواصفة</span>
+              <span className="text-xs text-slate-500">القيمة</span>
+            </div>
+            {form.specifications.map((spec, idx) => (
+              <div key={idx} className="grid grid-cols-[1fr_1fr_auto] items-center gap-2">
+                <input
+                  value={spec.name}
+                  onChange={e => updateSpec(idx, 'name', e.target.value)}
+                  placeholder="مثال: اللون"
+                  className={input()}
+                />
+                <input
+                  value={spec.value}
+                  onChange={e => updateSpec(idx, 'value', e.target.value)}
+                  placeholder="مثال: أبيض"
+                  className={input()}
+                />
+                <button
+                  type="button"
+                  onClick={() => removeSpec(idx)}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/5 bg-slate-800 text-slate-400 transition hover:border-red-500/30 hover:bg-red-500/10 hover:text-red-400"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={addSpec}
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/10 py-2.5 text-sm text-slate-400 transition hover:border-sky-500/40 hover:text-sky-400"
+        >
+          <span className="text-base leading-none">+</span>
+          إضافة مواصفة
+        </button>
       </Section>
 
       {/* ── الوسوم والحالة ── */}

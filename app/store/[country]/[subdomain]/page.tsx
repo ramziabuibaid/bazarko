@@ -7,6 +7,7 @@ import CategoryFilter from '@/components/store/CategoryFilter'
 import OfferCountdown from '@/components/store/OfferCountdown'
 import StoreFooter from '@/components/store/StoreFooter'
 import SortSelect from '@/components/store/SortSelect'
+import CartToast from '@/components/store/CartToast'
 
 interface StoreProduct {
   id: string
@@ -54,7 +55,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, name, description, logo_url, cover_url, phone, whatsapp, email, city, address, currency_code, country_code, secondary_currency_code, exchange_rate, prefer_secondary, header_theme, instagram, facebook, tiktok, telegram, business_hours, footer_settings')
+    .select('id, name, description, logo_url, cover_url, phone, whatsapp, email, city, address, map_url, currency_code, country_code, secondary_currency_code, exchange_rate, prefer_secondary, header_theme, instagram, facebook, tiktok, telegram, business_hours, footer_settings')
     .eq('subdomain', params.subdomain)
     .eq('country_code', params.country.toUpperCase())
     .eq('status', 'active')
@@ -291,6 +292,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
       </main>
 
       <StoreFooter store={store} country={params.country} subdomain={params.subdomain} />
+      <CartToast country={params.country} subdomain={params.subdomain} />
     </div>
   )
 }

@@ -55,6 +55,8 @@ export default async function EditProductPage({ params }: { params: { id: string
     is_featured: product.is_featured ?? false,
     images: product.images ?? [],
     tags: (product.tags ?? []).join(', '),
+    video_url: product.video_url ?? '',
+    specifications: (product.specifications as Array<{ name: string; value: string }> | null) ?? [],
   }
 
   return (

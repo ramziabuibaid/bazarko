@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useCart } from '@/lib/store/cart'
 import { useState } from 'react'
+import WishlistButton from './WishlistButton'
 
 interface Product {
   id: string
@@ -79,6 +80,18 @@ export default function ProductCard({ product, currencyCode, storeId, country, s
             -{discount}%
           </span>
         )}
+        <WishlistButton
+          size="sm"
+          className="absolute left-2 top-2 opacity-0 transition-opacity group-hover:opacity-100"
+          item={{
+            productId: product.id,
+            name: product.name,
+            price: product.price,
+            price_secondary: product.price_secondary ?? null,
+            thumbnail: product.thumbnail_url,
+            slug: product.slug,
+          }}
+        />
         {outOfStock && (
           <div className="absolute inset-0 flex items-center justify-center bg-white/80 dark:bg-gray-900/80">
             <span className="text-sm font-medium text-gray-500 dark:text-gray-400">نفد المخزون</span>

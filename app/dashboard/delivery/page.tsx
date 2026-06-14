@@ -18,9 +18,10 @@ export default async function DeliveryPage() {
     .single()
   if (!store) redirect('/onboarding')
 
+  // جلب المناطق مع أنواع الشحن الخاصة بكل منطقة
   const { data: zones } = await supabase
     .from('delivery_zones')
-    .select('id, name, cost, is_active, estimated_days, sort_order')
+    .select('id, name, cost, is_active, estimated_days, sort_order, shipping_methods(id, name, cost, min_days, max_days, is_active, sort_order)')
     .eq('store_id', store.id)
     .order('sort_order', { ascending: true })
     .order('created_at', { ascending: true })
@@ -28,8 +29,10 @@ export default async function DeliveryPage() {
   return (
     <div className="p-6">
       <div className="mb-6">
-        <h1 className="text-xl font-semibold text-white">إدارة مناطق وأسعار التوصيل</h1>
-        <p className="mt-1 text-sm text-slate-400">حدّد المناطق التي توصل إليها وسعر كل منطقة وشروط الشحن المجاني</p>
+        <h1 className="text-xl font-semibold text-white">إدارة الشحن والتوصيل</h1>
+        <p className="mt-1 text-sm text-slate-400">
+          أضف المحافظات التي تشحن إليها ← ثم أضف داخل كل محافظة أنواع الشحن وأسعارها
+        </p>
       </div>
 
       <DeliveryManager
@@ -37,7 +40,7 @@ export default async function DeliveryPage() {
         currencyCode={store.currency_code}
         initialDeliveryEnabled={store.delivery_enabled ?? true}
         initialFreeThreshold={store.free_delivery_threshold ?? null}
-        initialZones={zones ?? []}
+        initialZones={(zones ?? []) as Parameters<typeof DeliveryManager>[0]['initialZones']}
       />
     </div>
   )

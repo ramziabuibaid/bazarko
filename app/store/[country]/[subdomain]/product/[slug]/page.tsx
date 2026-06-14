@@ -5,6 +5,9 @@ import AddToCartButton from '@/components/store/AddToCartButton'
 import StoreHeader from '@/components/store/StoreHeader'
 import OfferCountdown from '@/components/store/OfferCountdown'
 import StoreFooter from '@/components/store/StoreFooter'
+import CartToast from '@/components/store/CartToast'
+import WishlistButton from '@/components/store/WishlistButton'
+import ProductImageGallery from '@/components/store/ProductImageGallery'
 
 interface Props {
   params: { country: string; subdomain: string; slug: string }
@@ -15,7 +18,7 @@ export default async function ProductPage({ params }: Props) {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, name, description, logo_url, phone, whatsapp, email, city, address, currency_code, country_code, secondary_currency_code, exchange_rate, prefer_secondary, header_theme, instagram, facebook, tiktok, telegram, business_hours, footer_settings')
+    .select('id, name, description, logo_url, phone, whatsapp, email, city, address, map_url, currency_code, country_code, secondary_currency_code, exchange_rate, prefer_secondary, header_theme, instagram, facebook, tiktok, telegram, business_hours, footer_settings')
     .eq('subdomain', params.subdomain)
     .eq('country_code', params.country.toUpperCase())
     .eq('status', 'active')
@@ -25,7 +28,7 @@ export default async function ProductPage({ params }: Props) {
 
   const { data: product } = await supabase
     .from('products')
-    .select('id, name, description, price, compare_price, price_secondary, images, thumbnail_url, stock_available, track_stock, sku, video_url, categories(name)')
+    .select('id, name, description, price, compare_price, price_secondary, images, thumbnail_url, stock_available, track_stock, sku, video_url, specifications, categories(name)')
     .eq('store_id', store.id)
     .eq('slug', params.slug)
     .eq('is_active', true)
@@ -103,24 +106,7 @@ export default async function ProductPage({ params }: Props) {
       <main className="mx-auto max-w-4xl px-4 py-8">
         <div className="grid gap-8 md:grid-cols-2">
           {/* الصور */}
-          <div className="space-y-3">
-            <div className="overflow-hidden rounded-2xl bg-gray-50 aspect-square dark:bg-gray-900">
-              {images[0] ? (
-                <img src={images[0]} alt={product.name} className="h-full w-full object-cover" />
-              ) : (
-                <div className="flex h-full items-center justify-center text-6xl text-gray-200 dark:text-gray-700">🛍️</div>
-              )}
-            </div>
-            {images.length > 1 && (
-              <div className="grid grid-cols-4 gap-2">
-                {images.slice(1).map((img, i) => (
-                  <div key={i} className="overflow-hidden rounded-xl bg-gray-50 aspect-square dark:bg-gray-900">
-                    <img src={img} alt="" className="h-full w-full object-cover" />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <ProductImageGallery images={images} name={product.name} />
 
           {/* التفاصيل */}
           <div>
@@ -204,22 +190,69 @@ export default async function ProductPage({ params }: Props) {
               <p className="mt-4 leading-relaxed text-gray-600 dark:text-gray-300">{product.description}</p>
             )}
 
+            {/* المواصفات الفنية */}
+            {(() => {
+              const specs = (product as unknown as { specifications?: Array<{ name: string; value: string }> }).specifications
+              if (!specs?.length) return null
+              return (
+                <div className="mt-5 overflow-hidden rounded-2xl border border-gray-100 dark:border-gray-800">
+                  <div className="bg-gray-50 px-4 py-2.5 dark:bg-gray-900">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">المواصفات</p>
+                  </div>
+                  <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {specs.map((s, i) => (
+                      <div key={i} className="flex items-start justify-between px-4 py-3">
+                        <span className="text-sm text-gray-500 dark:text-gray-400">{s.name}</span>
+                        <span className="mr-4 text-sm font-medium text-gray-900 dark:text-white text-left">{s.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+
             <div className="mt-6">
               {outOfStock ? (
-                <div className="rounded-xl bg-gray-100 py-3 text-center text-sm font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                  نفد المخزون
+                <div className="flex gap-3">
+                  <div className="flex-1 rounded-xl bg-gray-100 py-3 text-center text-sm font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                    نفد المخزون
+                  </div>
+                  <WishlistButton
+                    item={{
+                      productId: product.id,
+                      name: product.name,
+                      price: product.price,
+                      price_secondary: (product as unknown as { price_secondary?: number | null }).price_secondary ?? null,
+                      thumbnail: product.thumbnail_url,
+                      slug: params.slug,
+                    }}
+                  />
                 </div>
               ) : (
                 <>
-                  <AddToCartButton
-                    productId={product.id}
-                    name={product.name}
-                    price={effectivePrice}
-                    thumbnail={product.thumbnail_url}
-                    maxQty={maxQty}
-                    country={params.country}
-                    subdomain={params.subdomain}
-                  />
+                  <div className="flex gap-3">
+                    <div className="flex-1">
+                      <AddToCartButton
+                        productId={product.id}
+                        name={product.name}
+                        price={effectivePrice}
+                        thumbnail={product.thumbnail_url}
+                        maxQty={maxQty}
+                        country={params.country}
+                        subdomain={params.subdomain}
+                      />
+                    </div>
+                    <WishlistButton
+                      item={{
+                        productId: product.id,
+                        name: product.name,
+                        price: product.price,
+                        price_secondary: (product as unknown as { price_secondary?: number | null }).price_secondary ?? null,
+                        thumbnail: product.thumbnail_url,
+                        slug: params.slug,
+                      }}
+                    />
+                  </div>
                   {activeOffer?.offers.per_customer_limit != null && (
                     <p className="mt-2 text-center text-xs text-gray-400 dark:text-gray-500">
                       الحد الأقصى {activeOffer.offers.per_customer_limit} لكل زبون خلال العرض
@@ -281,6 +314,7 @@ export default async function ProductPage({ params }: Props) {
         )}
       </main>
       <StoreFooter store={store} country={params.country} subdomain={params.subdomain} />
+      <CartToast country={params.country} subdomain={params.subdomain} />
     </div>
   )
 }
