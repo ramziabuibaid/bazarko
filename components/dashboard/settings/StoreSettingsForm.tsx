@@ -102,6 +102,7 @@ interface Store {
   is_verified: boolean
   secondary_currency_code: string | null
   exchange_rate: number | null
+  prefer_secondary: boolean | null
   header_theme: string | null
   footer_settings: FooterSettings | null
 }
@@ -144,6 +145,7 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
   const [headerTheme, setHeaderTheme] = useState(store.header_theme ?? 'classic')
   const [secondaryCurrency, setSecondaryCurrency] = useState(store.secondary_currency_code ?? '')
   const [exchangeRate, setExchangeRate] = useState(store.exchange_rate ? String(store.exchange_rate) : '')
+  const [preferSecondary, setPreferSecondary] = useState(store.prefer_secondary ?? false)
 
   const defaultFooter: FooterSettings = {
     tagline: '', show_contact: true, show_social: true,
@@ -260,6 +262,7 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
         header_theme:            headerTheme,
         secondary_currency_code: secondaryCurrency || null,
         exchange_rate:           exchangeRate ? parseFloat(exchangeRate) : null,
+        prefer_secondary:        secondaryCurrency ? preferSecondary : false,
         footer_settings:         footer,
         updated_at:              new Date().toISOString(),
       })
@@ -715,6 +718,29 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
                 </span>
               </div>
             )}
+
+            {/* خيار العملة الأساسية */}
+            <div className="flex items-center justify-between rounded-xl border border-white/5 bg-white/3 px-4 py-3">
+              <div>
+                <p className="text-sm font-medium text-white">اجعل {secondaryCurrency} هي العملة الأساسية</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {preferSecondary
+                    ? `يُعرض السعر بـ${secondaryCurrency} أولاً (كبير) والسعر بـ${store.currency_code} ثانياً (صغير)`
+                    : `يُعرض السعر بـ${store.currency_code} أولاً (كبير) والسعر بـ${secondaryCurrency} ثانياً (صغير)`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreferSecondary(v => !v)}
+                className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
+                  preferSecondary ? 'bg-sky-600' : 'bg-slate-700'
+                }`}
+              >
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                  preferSecondary ? 'translate-x-5' : 'translate-x-0.5'
+                }`} />
+              </button>
+            </div>
           </div>
         )}
       </div>

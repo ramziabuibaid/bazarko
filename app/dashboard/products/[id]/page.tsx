@@ -13,7 +13,7 @@ export default async function EditProductPage({ params }: { params: { id: string
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, currency_code')
+    .select('id, currency_code, secondary_currency_code, exchange_rate')
     .eq('id', storeId)
     .single()
 
@@ -46,6 +46,7 @@ export default async function EditProductPage({ params }: { params: { id: string
     price: product.price?.toString() ?? '',
     compare_price: product.compare_price?.toString() ?? '',
     cost_price: product.cost_price?.toString() ?? '',
+    price_secondary: product.price_secondary?.toString() ?? '',
     stock_quantity: product.stock_quantity?.toString() ?? '0',
     low_stock_alert: product.low_stock_alert?.toString() ?? '5',
     track_stock: product.track_stock ?? true,
@@ -65,6 +66,8 @@ export default async function EditProductPage({ params }: { params: { id: string
       <ProductForm
         storeId={store.id}
         currencyCode={store.currency_code}
+        secondaryCurrencyCode={store.secondary_currency_code}
+        exchangeRate={store.exchange_rate}
         categories={categories ?? []}
         initialData={initialData}
       />

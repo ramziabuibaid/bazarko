@@ -21,7 +21,7 @@ export default async function CategoriesPage() {
 
   const { data: categories } = await supabase
     .from('categories')
-    .select('id, name, slug, parent_id, is_active, sort_order')
+    .select('id, name, slug, parent_id, is_active, sort_order, image_url')
     .eq('store_id', store.id)
     .order('sort_order')
 

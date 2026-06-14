@@ -49,6 +49,25 @@ export async function uploadRepairPhoto(
   return data.publicUrl
 }
 
+// رفع صور الفئات — تُخزَّن في نفس bucket بمسار categories/
+export async function uploadCategoryImage(
+  storeId: string,
+  file: File
+): Promise<string> {
+  const supabase = createClient()
+  const ext = file.name.split('.').pop() ?? 'jpg'
+  const path = `categories/${storeId}/${Date.now()}.${ext}`
+
+  const { error } = await supabase.storage
+    .from(BUCKET)
+    .upload(path, file, { upsert: false })
+
+  if (error) throw new Error(error.message)
+
+  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path)
+  return data.publicUrl
+}
+
 // رفع صور المتجر (لوغو وغلاف) — تُخزَّن في نفس bucket بمسار stores/
 export async function uploadStoreImage(
   storeId: string,

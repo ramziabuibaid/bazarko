@@ -20,6 +20,7 @@ interface ProductData {
   price: string
   compare_price: string
   cost_price: string
+  price_secondary: string
   stock_quantity: string
   low_stock_alert: string
   track_stock: boolean
@@ -34,6 +35,8 @@ interface ProductData {
 interface Props {
   storeId: string
   currencyCode: string
+  secondaryCurrencyCode?: string | null
+  exchangeRate?: number | null
   categories: Category[]
   initialData?: Partial<ProductData> & { id?: string }
 }
@@ -41,13 +44,14 @@ interface Props {
 const EMPTY: ProductData = {
   name: '', slug: '', description: '', sku: '', barcode: '',
   category_id: '', price: '', compare_price: '', cost_price: '',
+  price_secondary: '',
   stock_quantity: '0', low_stock_alert: '5',
   track_stock: true, allow_backorder: false,
   status: 'active', is_featured: false,
   images: [], tags: '', video_url: '',
 }
 
-export default function ProductForm({ storeId, currencyCode, categories, initialData }: Props) {
+export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCode, exchangeRate, categories, initialData }: Props) {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
   const isEditing = !!initialData?.id
@@ -161,6 +165,7 @@ export default function ProductForm({ storeId, currencyCode, categories, initial
       price: parseFloat(form.price),
       compare_price: form.compare_price ? parseFloat(form.compare_price) : null,
       cost_price: form.cost_price ? parseFloat(form.cost_price) : null,
+      price_secondary: form.price_secondary ? parseFloat(form.price_secondary) : null,
       stock_quantity: parseInt(form.stock_quantity) || 0,
       low_stock_alert: parseInt(form.low_stock_alert) || 5,
       track_stock: form.track_stock,
@@ -368,6 +373,38 @@ export default function ProductForm({ storeId, currencyCode, categories, initial
             <p className="mt-1 text-xs text-slate-500">مخفي عن الزبائن — لحساب الأرباح</p>
           </div>
         </div>
+
+        {/* حقل السعر بالعملة الثانية — يظهر فقط إذا كانت العملة الثانية مفعّلة */}
+        {secondaryCurrencyCode && (
+          <div className="mt-4 border-t border-white/5 pt-4">
+            <div className="max-w-xs">
+              <Label>
+                السعر بـ{secondaryCurrencyCode}
+                <span className="mr-1 text-xs font-normal text-slate-500">(اختياري)</span>
+              </Label>
+              <div className="relative">
+                <input
+                  type="number" min="0" step="0.01"
+                  value={form.price_secondary}
+                  onChange={e => set('price_secondary', e.target.value)}
+                  placeholder={
+                    form.price && exchangeRate
+                      ? (parseFloat(form.price) * exchangeRate).toFixed(2)
+                      : '0.00'
+                  }
+                  dir="ltr"
+                  className={input('pl-16')}
+                />
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">{secondaryCurrencyCode}</span>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                {form.price && exchangeRate && !form.price_secondary
+                  ? `إذا تُرك فارغاً سيُحسب تلقائياً: ${(parseFloat(form.price) * exchangeRate).toFixed(2)} ${secondaryCurrencyCode}`
+                  : 'إذا تُرك فارغاً يُحسب تلقائياً من سعر الصرف في إعدادات المتجر'}
+              </p>
+            </div>
+          </div>
+        )}
       </Section>
 
       {/* ── المخزون ── */}

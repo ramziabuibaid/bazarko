@@ -11,12 +11,20 @@ ALTER TABLE products
 UPDATE products
   SET status = CASE WHEN is_active THEN 'active' ELSE 'draft' END;
 
--- 3. حذف is_active الأصلي وإعادته كعمود محسوب
+-- 3. حذف الـ policies التي تعتمد على is_active
+DROP POLICY IF EXISTS products_public_read ON products;
+
+-- 4. حذف is_active الأصلي وإعادته كعمود محسوب
 --    بذلك تستمر queries الواجهة الأمامية (.eq('is_active', true)) بدون أي تعديل
 ALTER TABLE products DROP COLUMN is_active;
 
 ALTER TABLE products
   ADD COLUMN is_active BOOLEAN GENERATED ALWAYS AS (status = 'active') STORED;
 
--- 4. فهرس للفلترة السريعة
+-- 5. إعادة إنشاء الـ policy على العمود الجديد المحسوب
+CREATE POLICY products_public_read ON products
+  FOR SELECT TO public
+  USING (is_active = true);
+
+-- 6. فهرس للفلترة السريعة
 CREATE INDEX IF NOT EXISTS idx_products_status ON products(store_id, status);

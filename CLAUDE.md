@@ -178,7 +178,9 @@ db/
     ├── 011_video_and_secondary_currency.sql   ✅ مطبّق
     ├── 012_offers.sql                         ⚠️ يجب تطبيقه في Supabase SQL Editor
     ├── 013_offers_extras.sql                  ⚠️ يجب تطبيقه في Supabase SQL Editor (بعد 012)
-    └── 014_header_theme.sql                   ⚠️ يجب تطبيقه في Supabase SQL Editor
+    ├── 014_header_theme.sql                   ⚠️ يجب تطبيقه في Supabase SQL Editor
+    ├── 015_product_status.sql                 ⚠️ يجب تطبيقه في Supabase SQL Editor
+    └── 016_price_secondary_prefer.sql         ⚠️ يجب تطبيقه في Supabase SQL Editor
 ```
 
 ---
@@ -210,6 +212,8 @@ handle_new_store()  -- SECURITY DEFINER: ينشئ store_member (owner) + حسا�
 012 — offers + offer_items + RLS (التاجر إدارة كاملة، الزبون قراءة فقط)            ⚠️ طبّقه
 013 — per_customer_limit/view_count + max/sold_quantity + RPC views/sales           ⚠️ طبّقه
 014 — header_theme في stores (classic/ocean/sunset/emerald/royal/midnight)          ⚠️ طبّقه
+015 — status في products (active/draft/hidden/archived) + is_active محسوب            ⚠️ طبّقه
+016 — price_secondary في products + prefer_secondary في stores                       ⚠️ طبّقه
 ```
 
 ### Storage (product-images bucket — PUBLIC)

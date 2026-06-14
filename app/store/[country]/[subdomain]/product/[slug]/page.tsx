@@ -15,7 +15,7 @@ export default async function ProductPage({ params }: Props) {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, name, description, logo_url, phone, whatsapp, email, city, address, currency_code, country_code, secondary_currency_code, exchange_rate, header_theme, instagram, facebook, tiktok, telegram, business_hours, footer_settings')
+    .select('id, name, description, logo_url, phone, whatsapp, email, city, address, currency_code, country_code, secondary_currency_code, exchange_rate, prefer_secondary, header_theme, instagram, facebook, tiktok, telegram, business_hours, footer_settings')
     .eq('subdomain', params.subdomain)
     .eq('country_code', params.country.toUpperCase())
     .eq('status', 'active')
@@ -25,7 +25,7 @@ export default async function ProductPage({ params }: Props) {
 
   const { data: product } = await supabase
     .from('products')
-    .select('id, name, description, price, compare_price, images, thumbnail_url, stock_available, track_stock, sku, video_url, categories(name)')
+    .select('id, name, description, price, compare_price, price_secondary, images, thumbnail_url, stock_available, track_stock, sku, video_url, categories(name)')
     .eq('store_id', store.id)
     .eq('slug', params.slug)
     .eq('is_active', true)
@@ -80,8 +80,9 @@ export default async function ProductPage({ params }: Props) {
       ? [product.thumbnail_url]
       : []
 
-  const secondaryPrice = store.exchange_rate && store.secondary_currency_code
-    ? Math.round(effectivePrice * store.exchange_rate)
+  const productSecondaryPrice = (product as unknown as { price_secondary?: number | null }).price_secondary ?? null
+  const secondaryPrice = store.secondary_currency_code
+    ? (productSecondaryPrice ?? (store.exchange_rate ? Math.round(effectivePrice * store.exchange_rate) : null))
     : null
 
   const videoUrl: string | null = (product as unknown as { video_url?: string | null }).video_url ?? null
@@ -152,25 +153,50 @@ export default async function ProductPage({ params }: Props) {
             )}
 
             <div className="mt-4">
-              <div className="flex items-center gap-3">
-                <span className={`text-2xl font-bold ${activeOffer ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
-                  {effectivePrice.toLocaleString('ar')} {store.currency_code}
-                </span>
-                {effectiveCompare && (
-                  <span className="text-lg text-gray-400 line-through dark:text-gray-500">
-                    {effectiveCompare.toLocaleString('ar')}
-                  </span>
-                )}
-                {discount && (
-                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-sm font-bold text-red-600 dark:bg-red-500/15 dark:text-red-400">
-                    وفّر {discount}%
-                  </span>
-                )}
-              </div>
-              {secondaryPrice !== null && (
-                <p className="mt-1 text-base text-gray-500 dark:text-gray-400">
-                  ≈ {secondaryPrice.toLocaleString('ar')} {store.secondary_currency_code}
-                </p>
+              {store.prefer_secondary && secondaryPrice !== null ? (
+                <>
+                  <div className="flex items-center gap-3">
+                    <span className={`text-2xl font-bold ${activeOffer ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                      {secondaryPrice.toLocaleString('ar')} {store.secondary_currency_code}
+                    </span>
+                    {effectiveCompare && (
+                      <span className="text-lg text-gray-400 line-through dark:text-gray-500">
+                        {effectiveCompare.toLocaleString('ar')}
+                      </span>
+                    )}
+                    {discount && (
+                      <span className="rounded-full bg-red-100 px-2 py-0.5 text-sm font-bold text-red-600 dark:bg-red-500/15 dark:text-red-400">
+                        وفّر {discount}%
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-base text-gray-500 dark:text-gray-400">
+                    ≈ {effectivePrice.toLocaleString('ar')} {store.currency_code}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3">
+                    <span className={`text-2xl font-bold ${activeOffer ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                      {effectivePrice.toLocaleString('ar')} {store.currency_code}
+                    </span>
+                    {effectiveCompare && (
+                      <span className="text-lg text-gray-400 line-through dark:text-gray-500">
+                        {effectiveCompare.toLocaleString('ar')}
+                      </span>
+                    )}
+                    {discount && (
+                      <span className="rounded-full bg-red-100 px-2 py-0.5 text-sm font-bold text-red-600 dark:bg-red-500/15 dark:text-red-400">
+                        وفّر {discount}%
+                      </span>
+                    )}
+                  </div>
+                  {secondaryPrice !== null && (
+                    <p className="mt-1 text-base text-gray-500 dark:text-gray-400">
+                      ≈ {secondaryPrice.toLocaleString('ar')} {store.secondary_currency_code}
+                    </p>
+                  )}
+                </>
               )}
             </div>
 

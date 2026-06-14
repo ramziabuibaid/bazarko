@@ -17,7 +17,7 @@ export default async function NewProductPage({
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, currency_code')
+    .select('id, currency_code, secondary_currency_code, exchange_rate')
     .eq('id', storeId)
     .single()
 
@@ -41,6 +41,8 @@ export default async function NewProductPage({
       <ProductForm
         storeId={store.id}
         currencyCode={store.currency_code}
+        secondaryCurrencyCode={store.secondary_currency_code}
+        exchangeRate={store.exchange_rate}
         categories={categories ?? []}
         initialData={preselectedCategory ? { category_id: preselectedCategory } : undefined}
       />

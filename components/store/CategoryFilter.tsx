@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 
-interface Category { id: string; name: string; slug: string }
+interface Category { id: string; name: string; slug: string; image_url?: string | null }
 
 interface Props {
   categories: Category[]
@@ -32,12 +32,15 @@ export default function CategoryFilter({ categories, activeSlug, subdomain, coun
         <Link
           key={cat.id}
           href={`${base}?category=${cat.slug}`}
-          className={`flex-shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition ${
+          className={`flex shrink-0 items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition ${
             activeSlug === cat.slug
               ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900'
               : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
           }`}
         >
+          {cat.image_url && (
+            <img src={cat.image_url} alt={cat.name} className="h-4 w-4 rounded-full object-cover" />
+          )}
           {cat.name}
         </Link>
       ))}

@@ -10,6 +10,7 @@ interface Product {
   slug: string
   price: number
   compare_price: number | null
+  price_secondary?: number | null
   thumbnail_url: string | null
   stock_available: number | null
 }
@@ -22,10 +23,11 @@ interface Props {
   subdomain: string
   secondaryCurrencyCode?: string | null
   exchangeRate?: number | null
-  offerSold?: { sold: number; max: number } | null  // مخزون العرض: شريط "تم بيع X%"
+  preferSecondary?: boolean
+  offerSold?: { sold: number; max: number } | null
 }
 
-export default function ProductCard({ product, currencyCode, storeId, country, subdomain, secondaryCurrencyCode, exchangeRate, offerSold }: Props) {
+export default function ProductCard({ product, currencyCode, storeId, country, subdomain, secondaryCurrencyCode, exchangeRate, preferSecondary, offerSold }: Props) {
   const addItem = useCart(s => s.addItem)
   const items = useCart(s => s.items)
   const updateQty = useCart(s => s.updateQty)
@@ -38,8 +40,8 @@ export default function ProductCard({ product, currencyCode, storeId, country, s
     ? Math.round((1 - product.price / product.compare_price) * 100)
     : null
 
-  const secondaryPrice = exchangeRate && secondaryCurrencyCode
-    ? Math.round(product.price * exchangeRate)
+  const secondaryPrice = secondaryCurrencyCode
+    ? (product.price_secondary ?? (exchangeRate ? Math.round(product.price * exchangeRate) : null))
     : null
 
   function handleAdd(e: React.MouseEvent) {
@@ -89,20 +91,40 @@ export default function ProductCard({ product, currencyCode, storeId, country, s
         <p className="line-clamp-2 text-sm font-medium text-gray-900 dark:text-gray-100">{product.name}</p>
 
         <div className="mt-2">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-gray-900 dark:text-white">
-              {product.price.toLocaleString('ar')} {currencyCode}
-            </span>
-            {product.compare_price && (
-              <span className="text-xs text-gray-400 line-through dark:text-gray-500">
-                {product.compare_price.toLocaleString('ar')}
-              </span>
-            )}
-          </div>
-          {secondaryPrice !== null && (
-            <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
-              ≈ {secondaryPrice.toLocaleString('ar')} {secondaryCurrencyCode}
-            </p>
+          {preferSecondary && secondaryPrice !== null ? (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-gray-900 dark:text-white">
+                  {secondaryPrice.toLocaleString('ar')} {secondaryCurrencyCode}
+                </span>
+                {product.compare_price && (
+                  <span className="text-xs text-gray-400 line-through dark:text-gray-500">
+                    {product.compare_price.toLocaleString('ar')}
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
+                ≈ {product.price.toLocaleString('ar')} {currencyCode}
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-gray-900 dark:text-white">
+                  {product.price.toLocaleString('ar')} {currencyCode}
+                </span>
+                {product.compare_price && (
+                  <span className="text-xs text-gray-400 line-through dark:text-gray-500">
+                    {product.compare_price.toLocaleString('ar')}
+                  </span>
+                )}
+              </div>
+              {secondaryPrice !== null && (
+                <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
+                  ≈ {secondaryPrice.toLocaleString('ar')} {secondaryCurrencyCode}
+                </p>
+              )}
+            </>
           )}
         </div>
 

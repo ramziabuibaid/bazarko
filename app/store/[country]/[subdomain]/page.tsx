@@ -14,6 +14,7 @@ interface StoreProduct {
   slug: string
   price: number
   compare_price: number | null
+  price_secondary: number | null
   thumbnail_url: string | null
   stock_available: number | null
   is_featured: boolean
@@ -53,7 +54,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, name, description, logo_url, cover_url, phone, whatsapp, email, city, address, currency_code, country_code, secondary_currency_code, exchange_rate, header_theme, instagram, facebook, tiktok, telegram, business_hours, footer_settings')
+    .select('id, name, description, logo_url, cover_url, phone, whatsapp, email, city, address, currency_code, country_code, secondary_currency_code, exchange_rate, prefer_secondary, header_theme, instagram, facebook, tiktok, telegram, business_hours, footer_settings')
     .eq('subdomain', params.subdomain)
     .eq('country_code', params.country.toUpperCase())
     .eq('status', 'active')
@@ -63,7 +64,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
 
   const { data: categories } = await supabase
     .from('categories')
-    .select('id, name, slug')
+    .select('id, name, slug, image_url')
     .eq('store_id', store.id)
     .eq('is_active', true)
     .order('sort_order')
@@ -73,7 +74,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
 
   let productQuery = supabase
     .from('products')
-    .select('id, name, slug, price, compare_price, thumbnail_url, stock_available, is_featured, category_id')
+    .select('id, name, slug, price, compare_price, price_secondary, thumbnail_url, stock_available, is_featured, category_id')
     .eq('store_id', store.id)
     .eq('is_active', true)
 
@@ -213,6 +214,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
                   subdomain={params.subdomain}
                   secondaryCurrencyCode={store.secondary_currency_code}
                   exchangeRate={store.exchange_rate}
+                  preferSecondary={store.prefer_secondary ?? false}
                 />
               ))}
             </div>
@@ -280,6 +282,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
                   subdomain={params.subdomain}
                   secondaryCurrencyCode={store.secondary_currency_code}
                   exchangeRate={store.exchange_rate}
+                  preferSecondary={store.prefer_secondary ?? false}
                 />
               ))}
             </div>
