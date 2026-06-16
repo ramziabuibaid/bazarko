@@ -8,6 +8,7 @@ import StoreFooter from '@/components/store/StoreFooter'
 import CartToast from '@/components/store/CartToast'
 import WishlistButton from '@/components/store/WishlistButton'
 import ProductImageGallery from '@/components/store/ProductImageGallery'
+import StoreAnalyticsTracker from '@/components/store/StoreAnalyticsTracker'
 
 interface Props {
   params: { country: string; subdomain: string; slug: string }
@@ -35,6 +36,8 @@ export default async function ProductPage({ params }: Props) {
     .single()
 
   if (!product) notFound()
+
+  await supabase.rpc('increment_product_views', { p_product_id: product.id })
 
   // هل المنتج ضمن عرض جارٍ حالياً؟
   const nowIso = new Date().toISOString()
@@ -101,6 +104,7 @@ export default async function ProductPage({ params }: Props) {
 
   return (
     <div className="min-h-screen bg-white transition-colors dark:bg-gray-950" dir="rtl">
+      <StoreAnalyticsTracker storeId={store.id} eventType="product_view" productId={product.id} pagePath={`/store/${params.country}/${params.subdomain}/product/${params.slug}`} />
       <StoreHeader store={store} country={params.country} subdomain={params.subdomain} />
 
       <main className="mx-auto max-w-4xl px-4 py-8">
@@ -226,6 +230,7 @@ export default async function ProductPage({ params }: Props) {
                       thumbnail: product.thumbnail_url,
                       slug: params.slug,
                     }}
+                    storeId={store.id}
                   />
                 </div>
               ) : (
@@ -240,6 +245,7 @@ export default async function ProductPage({ params }: Props) {
                         maxQty={maxQty}
                         country={params.country}
                         subdomain={params.subdomain}
+                        storeId={store.id}
                       />
                     </div>
                     <WishlistButton
@@ -251,6 +257,7 @@ export default async function ProductPage({ params }: Props) {
                         thumbnail: product.thumbnail_url,
                         slug: params.slug,
                       }}
+                      storeId={store.id}
                     />
                   </div>
                   {activeOffer?.offers.per_customer_limit != null && (

@@ -2,14 +2,16 @@
 
 import { useEffect, useState } from 'react'
 import { useWishlist, WishlistItem } from '@/lib/store/wishlist'
+import { trackEvent } from '@/components/store/StoreAnalyticsTracker'
 
 interface Props {
   item: WishlistItem
   size?: 'sm' | 'md'
   className?: string
+  storeId?: string
 }
 
-export default function WishlistButton({ item, size = 'md', className = '' }: Props) {
+export default function WishlistButton({ item, size = 'md', className = '', storeId }: Props) {
   const toggle  = useWishlist(s => s.toggle)
   const has     = useWishlist(s => s.has)
   const [mounted, setMounted] = useState(false)
@@ -19,9 +21,19 @@ export default function WishlistButton({ item, size = 'md', className = '' }: Pr
   const s = size === 'sm' ? 'h-7 w-7' : 'h-9 w-9'
   const icon = size === 'sm' ? 14 : 18
 
+  function handleToggle(e: React.MouseEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    const wasActive = has(item.productId)
+    toggle(item)
+    if (!wasActive && storeId) {
+      trackEvent(storeId, 'add_to_wishlist', { productId: item.productId })
+    }
+  }
+
   return (
     <button
-      onClick={e => { e.preventDefault(); e.stopPropagation(); toggle(item) }}
+      onClick={handleToggle}
       aria-label={active ? 'إزالة من المفضلة' : 'إضافة للمفضلة'}
       className={`flex items-center justify-center rounded-full transition ${s} ${
         active

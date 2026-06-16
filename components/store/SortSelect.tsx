@@ -7,7 +7,7 @@ const OPTIONS = [
   { value: 'oldest',       label: 'الأقدم'        },
   { value: 'price_high',   label: 'الأعلى سعراً'  },
   { value: 'price_low',    label: 'الأقل سعراً'   },
-  { value: 'best_selling', label: 'الأكثر مبيعاً' },
+  { value: 'most_viewed',  label: 'الأكثر مشاهدة' },
 ]
 
 interface Props {

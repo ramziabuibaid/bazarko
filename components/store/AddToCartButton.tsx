@@ -3,6 +3,7 @@
 import { useCart } from '@/lib/store/cart'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { trackEvent } from '@/components/store/StoreAnalyticsTracker'
 
 interface Props {
   productId: string
@@ -12,9 +13,10 @@ interface Props {
   maxQty: number | null
   country: string
   subdomain: string
+  storeId?: string
 }
 
-export default function AddToCartButton({ productId, name, price, thumbnail, maxQty, country, subdomain }: Props) {
+export default function AddToCartButton({ productId, name, price, thumbnail, maxQty, country, subdomain, storeId }: Props) {
   const { items, addItem, updateQty } = useCart()
   const router = useRouter()
   const inCart = items.find(i => i.productId === productId)
@@ -24,6 +26,7 @@ export default function AddToCartButton({ productId, name, price, thumbnail, max
     addItem({ productId, name, price, thumbnail, max: maxQty })
     setAdded(true)
     setTimeout(() => setAdded(false), 1500)
+    if (storeId) trackEvent(storeId, 'add_to_cart', { productId })
   }
 
   if (inCart) {

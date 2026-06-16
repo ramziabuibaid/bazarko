@@ -627,7 +627,7 @@ export default async function DashboardPage() {
             <a
               key={action.href}
               href={action.href}
-              className="rounded-xl border border-white/5 bg-slate-900 p-4 transition-colors hover:border-sky-500/30 hover:bg-slate-800"
+              className="flex min-h-[110px] flex-col rounded-xl border border-white/5 bg-slate-900 p-4 transition-colors hover:border-sky-500/30 hover:bg-slate-800"
             >
               <span className="text-2xl">{action.icon}</span>
               <p className="mt-2 text-sm font-semibold text-white">{action.label}</p>

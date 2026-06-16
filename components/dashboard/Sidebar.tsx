@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 interface Store {
@@ -30,6 +31,7 @@ const navGroups: NavGroup[] = [
       { href: '/dashboard/offers', label: 'العروض الحصرية', icon: '🏷️' },
       { href: '/dashboard/orders', label: 'الطلبيات', icon: '📦' },
       { href: '/dashboard/delivery', label: 'التوصيل', icon: '🚚' },
+      { href: '/dashboard/analytics', label: 'تحليلات الزوار', icon: '📡' },
     ],
   },
   {
@@ -86,6 +88,13 @@ function NavContent({
   showToggle?: boolean
 }) {
   const storeUrl = `${store.subdomain}.${process.env.NEXT_PUBLIC_DOMAIN ?? 'bazarko.app'}`
+  const [copied, setCopied] = useState(false)
+
+  function copyStoreUrl() {
+    navigator.clipboard.writeText(`https://${storeUrl}`)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
 
   function isActive(href: string) {
     if (href === '/dashboard') return pathname === '/dashboard'
@@ -99,15 +108,43 @@ function NavContent({
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-widest text-sky-400">Bazarko</p>
           <h2 className="mt-1 truncate font-semibold text-white">{store.name}</h2>
-          <a
-            href={`https://${storeUrl}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-0.5 block truncate text-xs text-slate-500 hover:text-sky-400 transition-colors"
-            dir="ltr"
-          >
-            {storeUrl}
-          </a>
+          <div className="mt-0.5 flex items-center gap-1">
+            <a
+              href={`https://${storeUrl}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="min-w-0 truncate text-xs text-slate-500 hover:text-sky-400 transition-colors"
+              dir="ltr"
+            >
+              {storeUrl}
+            </a>
+            <button
+              onClick={copyStoreUrl}
+              title="نسخ رابط المتجر"
+              className={`shrink-0 flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium transition-all ${
+                copied
+                  ? 'bg-emerald-500/20 text-emerald-400'
+                  : 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/25'
+              }`}
+            >
+              {copied ? (
+                <>
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 8 6.5 12 13 4" />
+                  </svg>
+                  تم
+                </>
+              ) : (
+                <>
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="5" y="5" width="9" height="9" rx="1.5" />
+                    <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2H3.5A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" />
+                  </svg>
+                  نسخ
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* زر الإغلاق على الموبايل */}

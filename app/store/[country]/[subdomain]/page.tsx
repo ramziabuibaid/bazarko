@@ -8,6 +8,7 @@ import OfferCountdown from '@/components/store/OfferCountdown'
 import StoreFooter from '@/components/store/StoreFooter'
 import SortSelect from '@/components/store/SortSelect'
 import CartToast from '@/components/store/CartToast'
+import StoreAnalyticsTracker from '@/components/store/StoreAnalyticsTracker'
 
 interface StoreProduct {
   id: string
@@ -20,6 +21,7 @@ interface StoreProduct {
   stock_available: number | null
   is_featured: boolean
   category_id: string | null
+  view_count: number
 }
 
 const SORT_ORDERS: Record<string, { column: string; ascending: boolean } | null> = {
@@ -27,7 +29,7 @@ const SORT_ORDERS: Record<string, { column: string; ascending: boolean } | null>
   oldest:       { column: 'created_at', ascending: true  },
   price_high:   { column: 'price',      ascending: false },
   price_low:    { column: 'price',      ascending: true  },
-  best_selling: null, // يُرتَّب في JS بعد جلب الـ RPC
+  most_viewed:  { column: 'view_count', ascending: false },
 }
 
 interface Props {
@@ -75,7 +77,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
 
   let productQuery = supabase
     .from('products')
-    .select('id, name, slug, price, compare_price, price_secondary, thumbnail_url, stock_available, is_featured, category_id')
+    .select('id, name, slug, price, compare_price, price_secondary, thumbnail_url, stock_available, is_featured, category_id, view_count')
     .eq('store_id', store.id)
     .eq('is_active', true)
 
@@ -95,14 +97,8 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
   }
 
   const { data: rawProducts } = await productQuery
-  let products = (rawProducts ?? []) as StoreProduct[]
+  const products = (rawProducts ?? []) as StoreProduct[]
 
-  // ترتيب الأكثر مبيعاً عبر RPC
-  if (sortKey === 'best_selling') {
-    const { data: salesData } = await supabase.rpc('get_product_sales', { p_store_id: store.id })
-    const salesMap = new Map((salesData ?? []).map((r: { product_id: string; sold_count: number }) => [r.product_id, r.sold_count]))
-    products = [...products].sort((a, b) => ((salesMap.get(b.id) ?? 0) as number) - ((salesMap.get(a.id) ?? 0) as number))
-  }
   const featured = products.filter(p => p.is_featured)
   const showFeatured = featured.length > 0 && !searchParams.category && !searchParams.q
 
@@ -140,6 +136,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
 
   return (
     <div className="min-h-screen bg-white transition-colors dark:bg-gray-950" dir="rtl">
+      <StoreAnalyticsTracker storeId={store.id} eventType="store_visit" pagePath={`/store/${params.country}/${params.subdomain}`} />
       <StoreHeader store={store} country={params.country} subdomain={params.subdomain} />
 
       <main className="mx-auto max-w-6xl px-4 py-8">
