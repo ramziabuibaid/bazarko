@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { getStoreForUser } from '@/lib/supabase/getStore'
 import Link from 'next/link'
 import DashboardRefresh from '@/components/dashboard/DashboardRefresh'
+import ExchangeRateWidget from '@/components/dashboard/ExchangeRateWidget'
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   pending:    { label: 'معلق',         color: 'bg-yellow-500/15 text-yellow-400' },
@@ -26,7 +27,7 @@ export default async function DashboardPage() {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, currency_code, is_active, suspended_at, logo_url, phone, whatsapp, subdomain, country_code')
+    .select('id, currency_code, secondary_currency_code, exchange_rate, is_active, suspended_at, logo_url, phone, whatsapp, subdomain, country_code')
     .eq('id', storeId)
     .single()
   if (!store) redirect('/onboarding')
@@ -229,6 +230,16 @@ export default async function DashboardPage() {
         </div>
         <DashboardRefresh loadedAt={now.toISOString()} />
       </div>
+
+      {/* ── شريط سعر الصرف ── */}
+      {store.secondary_currency_code && (
+        <ExchangeRateWidget
+          storeId={store.id}
+          primaryCode={store.currency_code}
+          secondaryCode={store.secondary_currency_code}
+          rate={(store as { exchange_rate?: number | null }).exchange_rate ?? null}
+        />
+      )}
 
       {/* ── بطاقة الحالة السريعة ── */}
       {!isNewStore && (

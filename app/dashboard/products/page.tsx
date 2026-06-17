@@ -3,6 +3,7 @@ import { getStoreForUser } from '@/lib/supabase/getStore'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import ProductsTable from '@/components/dashboard/products/ProductsTable'
+import BulkImportExport from '@/components/dashboard/products/BulkImportExport'
 
 export default async function ProductsPage({
   searchParams,
@@ -89,12 +90,15 @@ export default async function ProductsPage({
           <h1 className="text-2xl font-semibold text-white">المنتجات</h1>
           <p className="mt-1 text-sm text-slate-400">{stats.total} منتج في متجرك</p>
         </div>
-        <Link
-          href="/dashboard/products/new"
-          className="rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-slate-950 hover:bg-sky-400"
-        >
-          + منتج جديد
-        </Link>
+        <div className="flex items-center gap-2">
+          <BulkImportExport />
+          <Link
+            href="/dashboard/products/new"
+            className="rounded-xl bg-sky-500 px-4 py-2.5 text-sm font-medium text-slate-950 hover:bg-sky-400"
+          >
+            + منتج جديد
+          </Link>
+        </div>
       </div>
 
       {/* إحصائيات سريعة */}

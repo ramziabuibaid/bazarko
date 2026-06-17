@@ -25,6 +25,7 @@ interface Props {
   activeType: string
   searchQuery: string
   sort: string
+  lastOrderDates: Record<string, string>
 }
 
 const TYPE_LABELS: Record<string, { label: string; color: string }> = {
@@ -40,14 +41,80 @@ const TYPE_TABS = [
   { key: 'vip',       label: 'VIP' },
 ]
 
-export default function CustomersTable({ customers, currencyCode, storeId, activeType, searchQuery, sort }: Props) {
+function daysSince(dateStr: string): { text: string; level: 'fresh' | 'normal' | 'stale' } {
+  const days = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86_400_000)
+  const text =
+    days === 0 ? 'اليوم' :
+    days === 1 ? 'أمس' :
+    days < 7  ? `منذ ${days} أيام` :
+    days < 30 ? `منذ ${Math.floor(days / 7)} أسابيع` :
+    days < 365 ? `منذ ${Math.floor(days / 30)} شهر` :
+    `منذ ${Math.floor(days / 365)} سنة`
+  const level = days <= 7 ? 'fresh' : days <= 30 ? 'normal' : 'stale'
+  return { text, level }
+}
+
+function exportCSV(customers: Customer[], currencyCode: string, lastOrderDates: Record<string, string>) {
+  const headers = ['الاسم', 'الهاتف', 'البريد الإلكتروني', 'المدينة', 'النوع', 'الطلبيات', 'الذمة', 'آخر طلبية']
+  const rows = customers.map(c => [
+    c.name,
+    c.phone ?? '',
+    c.email ?? '',
+    c.city ?? '',
+    TYPE_LABELS[c.customer_type]?.label ?? c.customer_type,
+    c.total_orders,
+    c.balance > 0 ? `${c.balance} ${currencyCode}` : '',
+    lastOrderDates[c.id] ? new Date(lastOrderDates[c.id]).toLocaleDateString('ar') : '',
+  ])
+  const csv = [headers, ...rows]
+    .map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+    .join('\n')
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `زبائن-${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+export default function CustomersTable({
+  customers, currencyCode, storeId, activeType, searchQuery, sort, lastOrderDates,
+}: Props) {
   const router = useRouter()
   const [showAdd, setShowAdd] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importMsg, setImportMsg] = useState('')
   const [form, setForm] = useState({
     name: '', phone: '', email: '', city: '', address: '',
     customer_type: 'retail', notes: '', credit_limit: '0', social_url: '',
   })
+
+  async function importFromContacts() {
+    const nav = navigator as Navigator & { contacts?: { select: (props: string[], opts: object) => Promise<Array<{ name?: string[]; tel?: string[]; email?: string[] }>> } }
+    if (!nav.contacts) {
+      setImportMsg('هذه الميزة تعمل على Chrome (Android) وSafari (iOS) فقط.')
+      setTimeout(() => setImportMsg(''), 4000)
+      return
+    }
+    setImporting(true)
+    try {
+      const results = await nav.contacts.select(['name', 'tel', 'email'], { multiple: false })
+      if (results && results.length > 0) {
+        const c = results[0]
+        setForm(f => ({
+          ...f,
+          name:  c.name?.[0]  ?? f.name,
+          phone: c.tel?.[0]?.replace(/\s+/g, '') ?? f.phone,
+          email: c.email?.[0] ?? f.email,
+        }))
+      }
+    } catch {
+      // المستخدم ألغى الاختيار
+    }
+    setImporting(false)
+  }
 
   function buildUrl(params: Record<string, string>) {
     const sp = new URLSearchParams()
@@ -95,13 +162,13 @@ export default function CustomersTable({ customers, currencyCode, storeId, activ
 
   return (
     <div className="space-y-3">
-      {/* صف البحث وزر الإضافة */}
+      {/* صف البحث وأزرار الإجراءات */}
       <div className="flex gap-2">
         <form onSubmit={handleSearch} className="flex flex-1 gap-2">
           <input
             name="q"
             defaultValue={searchQuery}
-            placeholder="ابحث بالاسم أو الهاتف..."
+            placeholder="ابحث بالاسم، الهاتف، أو البريد..."
             className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-relaxed text-white placeholder-slate-500 outline-none focus:border-sky-500/50"
           />
           <button
@@ -111,6 +178,13 @@ export default function CustomersTable({ customers, currencyCode, storeId, activ
             بحث
           </button>
         </form>
+        <button
+          onClick={() => exportCSV(customers, currencyCode, lastOrderDates)}
+          title="تصدير CSV"
+          className="shrink-0 rounded-xl border border-white/10 px-3 py-3 text-sm text-slate-400 hover:bg-white/5 hover:text-white transition-colors"
+        >
+          ↓ CSV
+        </button>
         <button
           onClick={() => setShowAdd(true)}
           className="shrink-0 flex items-center gap-1.5 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm font-medium text-sky-400 hover:bg-sky-500/20 transition-colors"
@@ -167,23 +241,58 @@ export default function CustomersTable({ customers, currencyCode, storeId, activ
             <thead>
               <tr className="border-b border-white/5 bg-white/3">
                 <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الزبون</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الهاتف</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">التواصل</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">النوع</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الطلبيات</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الذمة</th>
+                <th className="hidden md:table-cell px-4 py-3 text-right text-xs font-medium text-slate-400">آخر طلبية</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {customers.map(c => {
                 const t = TYPE_LABELS[c.customer_type] ?? TYPE_LABELS.retail
+                const lastOrder = lastOrderDates[c.id]
+                const since = lastOrder ? daysSince(lastOrder) : null
+                const sinceColor =
+                  since?.level === 'fresh'  ? 'text-emerald-400' :
+                  since?.level === 'stale'  ? 'text-amber-400' :
+                  'text-slate-400'
+                const waNum = c.phone?.replace(/\D/g, '')
                 return (
                   <tr key={c.id} className="hover:bg-white/3 transition-colors">
                     <td className="px-4 py-3">
                       <p className="font-medium text-white">{c.name}</p>
                       {c.city && <p className="text-xs text-slate-500">{c.city}</p>}
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-300" dir="ltr">{c.phone ?? '—'}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        {c.phone ? (
+                          <>
+                            <a
+                              href={`https://wa.me/${waNum}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="فتح واتساب"
+                              className="flex-shrink-0 rounded-lg bg-emerald-500/10 px-2 py-1 text-sm text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                            >
+                              💬
+                            </a>
+                            <span className="text-sm text-slate-300" dir="ltr">{c.phone}</span>
+                          </>
+                        ) : c.email ? (
+                          <a
+                            href={`mailto:${c.email}`}
+                            className="text-sm text-slate-400 hover:text-sky-400 transition-colors"
+                            dir="ltr"
+                          >
+                            ✉️ {c.email}
+                          </a>
+                        ) : (
+                          <span className="text-xs text-slate-600">—</span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${t.color}`}>
                         {t.label}
@@ -199,10 +308,17 @@ export default function CustomersTable({ customers, currencyCode, storeId, activ
                         <span className="text-sm text-emerald-400">✓ مسدد</span>
                       )}
                     </td>
+                    <td className="hidden md:table-cell px-4 py-3">
+                      {since ? (
+                        <span className={`text-xs ${sinceColor}`}>{since.text}</span>
+                      ) : (
+                        <span className="text-xs text-slate-600">لم يطلب بعد</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <Link
                         href={`/dashboard/customers/${c.id}`}
-                        className="rounded-lg bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-white"
+                        className="rounded-lg bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-white transition-colors"
                       >
                         الملف
                       </Link>
@@ -219,7 +335,34 @@ export default function CustomersTable({ customers, currencyCode, storeId, activ
       {showAdd && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setShowAdd(false)}>
           <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-6" onClick={e => e.stopPropagation()}>
-            <h2 className="mb-5 text-lg font-semibold text-white">زبون جديد</h2>
+            <h2 className="mb-4 text-lg font-semibold text-white">زبون جديد</h2>
+
+            {/* استيراد من جهات الاتصال */}
+            <button
+              type="button"
+              onClick={importFromContacts}
+              disabled={importing}
+              className="mb-1 w-full flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 py-2.5 text-sm text-slate-300 hover:bg-white/10 hover:text-white transition-colors disabled:opacity-40"
+            >
+              {importing ? (
+                <span className="animate-pulse text-slate-400">جاري فتح جهات الاتصال...</span>
+              ) : (
+                <>
+                  <span className="text-base">📱</span>
+                  <span>استيراد من جهات الاتصال</span>
+                </>
+              )}
+            </button>
+            {importMsg && (
+              <p className="mb-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-400">{importMsg}</p>
+            )}
+
+            <div className="mb-4 flex items-center gap-3">
+              <div className="flex-1 border-t border-white/10" />
+              <span className="text-xs text-slate-600">أو أدخل يدوياً</span>
+              <div className="flex-1 border-t border-white/10" />
+            </div>
+
             <form onSubmit={addCustomer} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">

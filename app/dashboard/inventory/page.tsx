@@ -58,8 +58,12 @@ export default async function InventoryPage({ searchParams }: Props) {
     p.low_stock_alert > 0 &&
     (p.stock_available ?? 0) <= p.low_stock_alert
   ).length
-  const totalValue    = tracked.reduce((s: number, p: StockRow) => s + (p.stock_quantity ?? 0) * (p.cost_price ?? 0), 0)
-  const expectedProfit = tracked.reduce((s: number, p: StockRow) => s + (p.stock_quantity ?? 0) * ((p.price ?? 0) - (p.cost_price ?? 0)), 0)
+
+  // نحسب القيمة والأرباح فقط للمنتجات التي لديها سعر تكلفة محدد وصحيح
+  const trackedWithCost = tracked.filter((p: StockRow) => p.cost_price != null && p.cost_price > 0)
+  const missingCostCount = tracked.length - trackedWithCost.length
+  const totalValue     = trackedWithCost.reduce((s: number, p: StockRow) => s + (p.stock_quantity ?? 0) * p.cost_price!, 0)
+  const expectedProfit = trackedWithCost.reduce((s: number, p: StockRow) => s + (p.stock_quantity ?? 0) * ((p.price ?? 0) - p.cost_price!), 0)
 
   return (
     <div className="p-6">
@@ -103,6 +107,22 @@ export default async function InventoryPage({ searchParams }: Props) {
           </div>
         ))}
       </div>
+
+      {/* تحذير: منتجات بدون سعر تكلفة */}
+      {missingCostCount > 0 && (
+        <div className="mb-5 flex items-start gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
+          <span className="text-lg leading-none">⚠️</span>
+          <div>
+            <p className="text-sm font-semibold text-amber-400">
+              {missingCostCount} {missingCostCount === 1 ? 'منتج' : 'منتجات'} بدون سعر تكلفة
+            </p>
+            <p className="mt-0.5 text-xs text-slate-400">
+              قيمة المخزون والأرباح المتوقعة تشمل فقط المنتجات ذات سعر تكلفة محدد.
+              أضف سعر التكلفة للمنتجات المتبقية للحصول على أرقام دقيقة.
+            </p>
+          </div>
+        </div>
+      )}
 
       <InventoryTable
         products={products ?? []}

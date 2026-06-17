@@ -61,6 +61,8 @@ export default function StoreAnalyticsTracker({
       p_search_query: searchQuery ?? null,
       p_page_path:    pagePath ?? (typeof window !== 'undefined' ? window.location.pathname : null),
       p_is_mobile:    isMobile,
+    }).then(({ error }) => {
+      if (error) console.error('[analytics] track_store_event failed:', error.message)
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -89,6 +91,8 @@ export function trackEvent(
       p_search_query: extra.searchQuery ?? null,
       p_page_path:    extra.pagePath ?? (typeof window !== 'undefined' ? window.location.pathname : null),
       p_is_mobile:    isMobile,
+    }).then(({ error }: { error: { message: string } | null }) => {
+      if (error) console.error('[analytics] track_store_event failed:', error.message)
     })
   } catch {}
 }

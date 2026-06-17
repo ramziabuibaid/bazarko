@@ -23,6 +23,9 @@ CREATE INDEX IF NOT EXISTS idx_store_analytics_store_event ON store_analytics(st
 
 ALTER TABLE store_analytics ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "anyone can insert analytics" ON store_analytics;
+DROP POLICY IF EXISTS "store members can read analytics" ON store_analytics;
+
 -- الزوار (anon) يستطيعون الإدراج فقط
 CREATE POLICY "anyone can insert analytics" ON store_analytics
   FOR INSERT TO anon, authenticated

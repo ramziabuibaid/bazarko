@@ -9,6 +9,7 @@ import StoreFooter from '@/components/store/StoreFooter'
 import SortSelect from '@/components/store/SortSelect'
 import CartToast from '@/components/store/CartToast'
 import StoreAnalyticsTracker from '@/components/store/StoreAnalyticsTracker'
+import CurrencyRateBar from '@/components/store/CurrencyRateBar'
 
 interface StoreProduct {
   id: string
@@ -138,6 +139,14 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
     <div className="min-h-screen bg-white transition-colors dark:bg-gray-950" dir="rtl">
       <StoreAnalyticsTracker storeId={store.id} eventType="store_visit" pagePath={`/store/${params.country}/${params.subdomain}`} />
       <StoreHeader store={store} country={params.country} subdomain={params.subdomain} />
+
+      {store.secondary_currency_code && store.exchange_rate && (
+        <CurrencyRateBar
+          primaryCode={store.currency_code}
+          secondaryCode={store.secondary_currency_code}
+          rate={store.exchange_rate}
+        />
+      )}
 
       <main className="mx-auto max-w-6xl px-4 py-8">
 
