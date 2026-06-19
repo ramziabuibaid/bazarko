@@ -41,6 +41,7 @@ const navGroups: NavGroup[] = [
       { href: '/dashboard/accounting/invoices', label: 'الفواتير', icon: '📋' },
       { href: '/dashboard/accounting/receipts', label: 'سندات القبض', icon: '💵' },
       { href: '/dashboard/accounting/payments', label: 'سندات الصرف', icon: '💸' },
+      { href: '/dashboard/accounting/treasury', label: 'الصندوق والخزينة', icon: '🏦' },
       { href: '/dashboard/accounting/reports', label: 'التقارير', icon: '📈' },
     ],
   },

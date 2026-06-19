@@ -180,7 +180,9 @@ db/
     ├── 013_offers_extras.sql                  ⚠️ يجب تطبيقه في Supabase SQL Editor (بعد 012)
     ├── 014_header_theme.sql                   ⚠️ يجب تطبيقه في Supabase SQL Editor
     ├── 015_product_status.sql                 ⚠️ يجب تطبيقه في Supabase SQL Editor
-    └── 016_price_secondary_prefer.sql         ⚠️ يجب تطبيقه في Supabase SQL Editor
+    ├── 016_price_secondary_prefer.sql         ⚠️ يجب تطبيقه في Supabase SQL Editor
+    ├── 022_treasury.sql                       ⚠️ يجب تطبيقه — الصندوق + حركات + جلسات إغلاق + trigger السندات
+    └── 023_audit_invoices.sql                 ⚠️ يجب تطبيقه — سجل العمليات + حالة فاتورة partial + paid_at
 ```
 
 ---

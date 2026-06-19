@@ -117,6 +117,30 @@ export async function POST(req: NextRequest) {
     }))
   )
 
+  // تسجيل النقد المقبوض في دفتر الصندوق (كاشير أو دفعة فورية)
+  // 'credit' = بيع على الحساب بالكامل → لا نقد يدخل الصندوق
+  if (effectiveAmountPaid > 0 && paymentMethod !== 'credit') {
+    const methodMap: Record<string, 'cash' | 'bank' | 'card' | 'transfer'> = {
+      cash: 'cash', bank_transfer: 'bank', check: 'bank', online: 'card',
+    }
+    const { data: boxId } = await supabase.rpc('ensure_cash_box', { p_store_id: store.id })
+    if (boxId) {
+      await supabase.from('cash_movements').insert({
+        store_id:       store.id,
+        cash_box_id:    boxId,
+        direction:      'in',
+        amount:         effectiveAmountPaid,
+        source:         'order',
+        ref_id:         order.id,
+        party_name:     resolvedName || null,
+        payment_method: methodMap[paymentMethod] ?? 'cash',
+        description:    `طلبية #${order.order_number}`,
+        date:           new Date().toISOString().split('T')[0],
+        created_by:     user.id,
+      })
+    }
+  }
+
   // إضافة للذمة إذا account mode وتوجد ذمة متبقية
   const amountRemaining = totalAmount - effectiveAmountPaid
   if (mode === 'account' && customerId && amountRemaining > 0) {
