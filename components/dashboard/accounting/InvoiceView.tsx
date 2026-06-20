@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
-import { emailInvoice } from '@/app/dashboard/accounting/invoices/invoice-actions'
+import { emailInvoice, recordInvoicePayment } from '@/app/dashboard/accounting/invoices/invoice-actions'
+import { recordAuditEvent } from '@/app/dashboard/accounting/audit-actions'
 
 interface InvoiceItem {
   id: string
@@ -45,22 +46,11 @@ interface Props {
 }
 
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
-  draft:     { label: 'مسودة',  cls: 'bg-slate-500/15 text-slate-300' },
-  sent:      { label: 'مُرسلة', cls: 'bg-blue-500/15 text-blue-300' },
-  paid:      { label: 'مدفوعة', cls: 'bg-emerald-500/15 text-emerald-300' },
-  cancelled: { label: 'ملغاة',  cls: 'bg-red-500/15 text-red-300' },
-}
-
-const STATUS_FLOW: Record<string, string | null> = {
-  draft:     'sent',
-  sent:      'paid',
-  paid:      null,
-  cancelled: null,
-}
-
-const STATUS_NEXT_LABEL: Record<string, string> = {
-  draft: 'تحديد كـ مُرسلة',
-  sent:  'تحديد كـ مدفوعة',
+  draft:     { label: 'مسودة',          cls: 'bg-slate-500/15 text-slate-300' },
+  sent:      { label: 'مُرسلة',         cls: 'bg-blue-500/15 text-blue-300' },
+  partial:   { label: 'مدفوعة جزئياً',  cls: 'bg-amber-500/15 text-amber-300' },
+  paid:      { label: 'مدفوعة',         cls: 'bg-emerald-500/15 text-emerald-300' },
+  cancelled: { label: 'ملغاة',          cls: 'bg-red-500/15 text-red-300' },
 }
 
 export default function InvoiceView({ invoice, items, storeName, storePhone, currencyCode, linkedOrder, storeId, userId }: Props) {
@@ -74,52 +64,55 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
   const [sending, setSending] = useState(false)
   const [emailResult, setEmailResult] = useState<'sent' | 'error' | null>(null)
 
+  // نافذة تسجيل الدفعة
+  const [showPay, setShowPay] = useState(false)
+  const [payAmount, setPayAmount] = useState('')
+  const [payMethod, setPayMethod] = useState<'cash' | 'bank' | 'card' | 'transfer'>('cash')
+  const [paying, setPaying] = useState(false)
+  const [payError, setPayError] = useState('')
+
   const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 2 })
   const remaining = Math.max(0, invoice.total - invoice.amount_paid)
   const sl = STATUS_LABELS[status] ?? { label: status, cls: 'bg-white/5 text-white' }
-  const nextStatus = STATUS_FLOW[status]
+
+  // متأخرة: تجاوزت تاريخ الاستحقاق وما زال عليها متبقٍّ
+  const isOverdue = !!invoice.due_date
+    && remaining > 0
+    && ['draft', 'sent', 'partial'].includes(status)
+    && new Date(invoice.due_date) < new Date(new Date().toDateString())
+
+  const paidPct = invoice.total > 0 ? Math.min(100, Math.round((invoice.amount_paid / invoice.total) * 100)) : 0
+  const canPay  = remaining > 0 && status !== 'cancelled'
 
   async function advanceStatus() {
-    if (!nextStatus) return
+    if (status !== 'draft') return
     setAdvancing(true)
-    const updates: Record<string, string | number> = { status: nextStatus, updated_at: new Date().toISOString() }
-    if (nextStatus === 'paid') updates.amount_paid = invoice.total
-    await supabase.from('invoices').update(updates).eq('id', invoice.id)
-
-    // تسجيل الدفعة في كشف حساب الزبون عند الإغلاق كـ "مدفوعة"
-    if (nextStatus === 'paid' && invoice.customer_id && remaining > 0) {
-      const { data: custData } = await supabase
-        .from('customers')
-        .select('balance, total_paid')
-        .eq('id', invoice.customer_id)
-        .single()
-
-      const currentBalance = custData?.balance ?? 0
-      const newBalance     = currentBalance - remaining
-
-      await supabase.from('customer_ledger').insert({
-        store_id:       storeId,
-        customer_id:    invoice.customer_id,
-        type:           'payment',
-        date:           new Date().toISOString().slice(0, 10),
-        description:    `دفعة على فاتورة ${invoice.invoice_number}`,
-        debit:          0,
-        credit:         remaining,
-        balance:        newBalance,
-        reference_id:   invoice.id,
-        reference_type: 'invoice',
-        created_by:     userId,
-      })
-
-      await supabase.from('customers').update({
-        balance:    newBalance,
-        total_paid: (custData?.total_paid ?? 0) + remaining,
-      }).eq('id', invoice.customer_id)
-    }
-
-    setStatus(nextStatus)
+    await supabase.from('invoices').update({ status: 'sent', updated_at: new Date().toISOString() }).eq('id', invoice.id)
+    await recordAuditEvent({
+      entityType: 'invoice', entityId: invoice.id, entityLabel: invoice.invoice_number,
+      action: 'status_change', details: { from: 'draft', to: 'sent' },
+    })
+    setStatus('sent')
     setAdvancing(false)
     router.refresh()
+  }
+
+  async function submitPayment(e: React.FormEvent) {
+    e.preventDefault()
+    setPaying(true); setPayError('')
+    const res = await recordInvoicePayment(invoice.id, parseFloat(payAmount) || 0, payMethod)
+    setPaying(false)
+    if (res.ok) { setShowPay(false); setPayAmount(''); router.refresh() }
+    else setPayError(res.error ?? 'فشل تسجيل الدفعة')
+  }
+
+  // إشعار دفع عبر واتساب
+  function paymentReminderUrl() {
+    const phone = (invoice.customer_phone ?? '').replace(/[^\d]/g, '')
+    const msg = `مرحباً ${invoice.customer_name ?? ''}،\nنذكّركم بفاتورة رقم ${invoice.invoice_number}.\nالمتبقّي: ${fmt(remaining)} ${currencyCode}` +
+      (invoice.due_date ? `\nتاريخ الاستحقاق: ${new Date(invoice.due_date).toLocaleDateString('ar')}` : '') +
+      `\n\n${storeName}`
+    return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
   }
 
   async function cancelInvoice() {
@@ -170,6 +163,11 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
       }
     }
 
+    await recordAuditEvent({
+      entityType: 'invoice', entityId: invoice.id, entityLabel: invoice.invoice_number,
+      action: 'cancel', details: { total: invoice.total },
+    })
+
     setStatus('cancelled')
     setCancelling(false)
     router.refresh()
@@ -196,6 +194,9 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
           ← الفواتير
         </Link>
         <span className={`rounded-full px-3 py-1 text-xs font-medium ${sl.cls}`}>{sl.label}</span>
+        {isOverdue && (
+          <span className="rounded-full bg-red-500/15 px-3 py-1 text-xs font-bold text-red-400">⏰ متأخرة</span>
+        )}
         {linkedOrder && (
           <Link
             href={`/dashboard/orders/${linkedOrder.id}`}
@@ -205,11 +206,23 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
           </Link>
         )}
         <div className="flex-1" />
-        {nextStatus && (
+        {status === 'draft' && (
           <button onClick={advanceStatus} disabled={advancing}
             className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50">
-            {advancing ? '...' : STATUS_NEXT_LABEL[status]}
+            {advancing ? '...' : 'تحديد كـ مُرسلة'}
           </button>
+        )}
+        {canPay && (
+          <button onClick={() => { setPayAmount(String(remaining)); setShowPay(true) }}
+            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500">
+            💵 تسجيل دفعة
+          </button>
+        )}
+        {canPay && invoice.customer_phone && (
+          <a href={paymentReminderUrl()} target="_blank" rel="noopener noreferrer"
+            className="rounded-xl border border-emerald-500/20 px-4 py-2 text-sm text-emerald-400 hover:bg-emerald-500/10">
+            📨 إشعار دفع
+          </a>
         )}
         {status !== 'cancelled' && status !== 'paid' && (
           <button onClick={cancelInvoice} disabled={cancelling}
@@ -252,6 +265,37 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
           {emailResult === 'sent'  && <span className="text-xs text-emerald-400">✓ تم الإرسال بنجاح</span>}
           {emailResult === 'error' && <span className="text-xs text-red-400">فشل الإرسال، حاول مرة أخرى</span>}
         </form>
+      )}
+
+      {/* نافذة تسجيل الدفعة */}
+      {showPay && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 print:hidden" onClick={() => setShowPay(false)}>
+          <form onSubmit={submitPayment} onClick={e => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900 p-5">
+            <h3 className="mb-1 text-lg font-semibold text-white">💵 تسجيل دفعة</h3>
+            <p className="mb-4 text-xs text-slate-500">المتبقّي: <span dir="ltr">{fmt(remaining)} {currencyCode}</span> — سيُنشأ سند قبض ويدخل الصندوق</p>
+            <label className="mb-1 block text-xs text-slate-400">المبلغ ({currencyCode})</label>
+            <input type="number" step="any" value={payAmount} onChange={e => setPayAmount(e.target.value)} dir="ltr" autoFocus
+              className="mb-3 w-full rounded-xl border border-white/10 bg-slate-800 px-3 py-2 text-white" />
+            <label className="mb-1 block text-xs text-slate-400">طريقة الدفع</label>
+            <select value={payMethod} onChange={e => setPayMethod(e.target.value as typeof payMethod)}
+              className="mb-3 w-full rounded-xl border border-white/10 bg-slate-800 px-3 py-2 text-white">
+              <option value="cash">نقدي</option>
+              <option value="bank">بنك</option>
+              <option value="card">بطاقة</option>
+              <option value="transfer">تحويل</option>
+            </select>
+            {payError && <p className="mb-2 text-sm text-red-400">{payError}</p>}
+            <div className="flex gap-2">
+              <button type="submit" disabled={paying}
+                className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">
+                {paying ? '...' : 'تأكيد الدفعة'}
+              </button>
+              <button type="button" onClick={() => setShowPay(false)}
+                className="rounded-xl border border-white/10 px-4 py-2.5 text-sm text-slate-400 hover:text-white">إلغاء</button>
+            </div>
+          </form>
+        </div>
       )}
 
       {/* الفاتورة — تُطبع */}
@@ -354,6 +398,13 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
                     <span className="text-yellow-400 print:text-yellow-700" dir="ltr">{fmt(remaining)} {currencyCode}</span>
                   </div>
                 )}
+                {/* شريط تقدم الدفع */}
+                <div className="pt-1">
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-white/10 print:bg-gray-200">
+                    <div className={`h-full rounded-full ${paidPct >= 100 ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${paidPct}%` }} />
+                  </div>
+                  <p className="mt-1 text-left text-xs text-slate-500 print:text-gray-400" dir="ltr">{paidPct}%</p>
+                </div>
               </>
             )}
           </div>

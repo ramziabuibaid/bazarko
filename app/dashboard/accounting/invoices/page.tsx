@@ -8,10 +8,16 @@ interface Props {
 }
 
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
-  draft:     { label: 'مسودة',    cls: 'bg-slate-500/15 text-slate-400' },
-  sent:      { label: 'مُرسلة',   cls: 'bg-blue-500/15 text-blue-400' },
-  paid:      { label: 'مدفوعة',   cls: 'bg-emerald-500/15 text-emerald-400' },
-  cancelled: { label: 'ملغاة',    cls: 'bg-red-500/15 text-red-400' },
+  draft:     { label: 'مسودة',          cls: 'bg-slate-500/15 text-slate-400' },
+  sent:      { label: 'مُرسلة',         cls: 'bg-blue-500/15 text-blue-400' },
+  partial:   { label: 'مدفوعة جزئياً',  cls: 'bg-amber-500/15 text-amber-400' },
+  paid:      { label: 'مدفوعة',         cls: 'bg-emerald-500/15 text-emerald-400' },
+  cancelled: { label: 'ملغاة',          cls: 'bg-red-500/15 text-red-400' },
+}
+
+const TODAY = new Date(new Date().toDateString())
+function isOverdue(due: string | null, remaining: number, status: string) {
+  return !!due && remaining > 0 && ['draft', 'sent', 'partial'].includes(status) && new Date(due) < TODAY
 }
 
 export default async function InvoicesPage({ searchParams }: Props) {
@@ -35,38 +41,45 @@ export default async function InvoicesPage({ searchParams }: Props) {
     .eq('store_id', store.id)
     .order('created_at', { ascending: false })
 
-  if (searchParams.status === 'unpaid') {
+  if (searchParams.status === 'unpaid' || searchParams.status === 'overdue') {
     query = query.not('status', 'in', '(paid,cancelled)')
   } else if (searchParams.status) {
     query = query.eq('status', searchParams.status)
   }
 
-  const { data: invoices } = await query
+  let { data: invoices } = await query
+
+  // تبويب "متأخرة" يُفلتر في الكود (حالة محسوبة)
+  if (searchParams.status === 'overdue' && invoices) {
+    invoices = invoices.filter(i => isOverdue(i.due_date, Math.max(0, (i.total ?? 0) - (i.amount_paid ?? 0)), i.status))
+  }
 
   // إحصائيات
   const { data: all } = await supabase
     .from('invoices')
-    .select('total, amount_paid, status')
+    .select('total, amount_paid, status, due_date')
     .eq('store_id', store.id)
 
-  type InvRow = { total: number; amount_paid: number; status: string }
-  const allInv = (all ?? [] as InvRow[])
+  type InvRow = { total: number; amount_paid: number; status: string; due_date: string | null }
+  const allInv = (all ?? []) as InvRow[]
   const totalAll      = allInv.length
-  const totalPaid     = allInv.filter((i: InvRow) => i.status === 'paid').length
-  const totalDraft    = allInv.filter((i: InvRow) => i.status === 'draft').length
-  const totalAmount   = allInv.reduce((s: number, i: InvRow) => s + (i.total ?? 0), 0)
-  const outstandingAmt = allInv.filter((i: InvRow) => i.status !== 'paid' && i.status !== 'cancelled')
-    .reduce((s: number, i: InvRow) => s + Math.max(0, (i.total ?? 0) - (i.amount_paid ?? 0)), 0)
+  const totalPaid     = allInv.filter(i => i.status === 'paid').length
+  const totalDraft    = allInv.filter(i => i.status === 'draft').length
+  const totalAmount   = allInv.reduce((s, i) => s + (i.total ?? 0), 0)
+  const outstandingAmt = allInv.filter(i => i.status !== 'paid' && i.status !== 'cancelled')
+    .reduce((s, i) => s + Math.max(0, (i.total ?? 0) - (i.amount_paid ?? 0)), 0)
 
   const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
 
-  const totalUnpaid = allInv.filter((i: InvRow) => i.status !== 'paid' && i.status !== 'cancelled').length
+  const totalUnpaid  = allInv.filter(i => i.status !== 'paid' && i.status !== 'cancelled').length
+  const totalOverdue = allInv.filter(i => isOverdue(i.due_date, Math.max(0, (i.total ?? 0) - (i.amount_paid ?? 0)), i.status)).length
 
   const STATUS_TABS = [
-    { key: '',       label: 'الكل',         count: totalAll },
-    { key: 'unpaid', label: 'غير مدفوعة',   count: totalUnpaid },
-    { key: 'draft',  label: 'مسودة',         count: totalDraft },
-    { key: 'paid',   label: 'مدفوعة',        count: totalPaid },
+    { key: '',        label: 'الكل',        count: totalAll },
+    { key: 'unpaid',  label: 'غير مدفوعة',  count: totalUnpaid },
+    { key: 'overdue', label: 'متأخرة',      count: totalOverdue },
+    { key: 'draft',   label: 'مسودة',        count: totalDraft },
+    { key: 'paid',    label: 'مدفوعة',       count: totalPaid },
   ]
 
   return (
@@ -150,6 +163,7 @@ export default async function InvoicesPage({ searchParams }: Props) {
               }) => {
                 const sl = STATUS_LABELS[inv.status] ?? { label: inv.status, cls: 'bg-white/5 text-white' }
                 const remaining = Math.max(0, (inv.total ?? 0) - (inv.amount_paid ?? 0))
+                const overdue = isOverdue(inv.due_date, remaining, inv.status)
                 return (
                   <tr key={inv.id} className="hover:bg-white/3 transition-colors">
                     <td className="px-4 py-3 font-mono text-sky-400" dir="ltr">{inv.invoice_number}</td>
@@ -168,6 +182,9 @@ export default async function InvoicesPage({ searchParams }: Props) {
                     </td>
                     <td className="px-4 py-3 text-center">
                       <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${sl.cls}`}>{sl.label}</span>
+                      {overdue && (
+                        <span className="mr-1 inline-flex rounded-full bg-red-500/15 px-2 py-1 text-[10px] font-bold text-red-400">⏰ متأخرة</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <Link

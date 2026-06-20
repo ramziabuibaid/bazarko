@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { recordAuditEvent } from '@/app/dashboard/accounting/audit-actions'
 
 interface Customer {
   id: string
@@ -135,6 +136,12 @@ export default function VouchersTable({ vouchers, type, storeId, userId, currenc
 
     setSaving(false)
     if (err) { setError('حدث خطأ أثناء الحفظ'); return }
+
+    await recordAuditEvent({
+      entityType: 'voucher', entityLabel: voucherNumber,
+      action: 'create',
+      details: { type, amount: amt, party: (customer?.name ?? partyName.trim()) || null, method: paymentMethod },
+    })
 
     setShowModal(false)
     resetForm()

@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { recordAuditEvent } from '@/app/dashboard/accounting/audit-actions'
 
 interface Product {
   id: string
@@ -196,7 +197,8 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
         customer_address: customerAddress.trim() || null,
         issue_date:       issueDate,
         due_date:         dueDate || null,
-        status:           amountPaid >= total ? 'paid' : 'draft',
+        status:           amountPaid >= total ? 'paid' : amountPaid > 0 ? 'partial' : 'draft',
+        paid_at:          amountPaid >= total ? new Date().toISOString() : null,
         subtotal,
         discount_amount:  discountAmount,
         total,
@@ -266,6 +268,12 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
         total_paid:     finalPaid,
       }).eq('id', selectedCustomer.id)
     }
+
+    await recordAuditEvent({
+      entityType: 'invoice', entityId: inv.id, entityLabel: invoiceNumber,
+      action: 'create',
+      details: { total, amountPaid, items: items.length, customer: selectedCustomer?.name ?? null },
+    })
 
     router.push(`/dashboard/accounting/invoices/${inv.id}`)
   }

@@ -1,22 +1,12 @@
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
+import { getDefaultCashBox, getCashBalance } from '@/lib/accounting/treasury'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import AccountingPeriodFilter from '@/components/dashboard/accounting/AccountingPeriodFilter'
 
-type PctChange = { up: boolean; pct: number; label: string } | null
+const ORDER_STATUSES = ['delivered', 'processing', 'confirmed', 'ready', 'shipped', 'pending']
 
-function calcPct(current: number, prev: number, compareLabel: string): PctChange {
-  if (prev === 0) return null
-  const pct = ((current - prev) / Math.abs(prev)) * 100
-  return { up: pct >= 0, pct: Math.abs(Math.round(pct)), label: `${pct >= 0 ? '↑' : '↓'} ${Math.abs(Math.round(pct))}٪ ${compareLabel}` }
-}
-
-interface Props {
-  searchParams: { period?: string }
-}
-
-export default async function AccountingPage({ searchParams }: Props) {
+export default async function AccountingPage() {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
@@ -25,306 +15,187 @@ export default async function AccountingPage({ searchParams }: Props) {
   if (!storeId) redirect('/onboarding')
 
   const { data: store } = await supabase
-    .from('stores')
-    .select('id, currency_code')
-    .eq('id', storeId)
-    .single()
+    .from('stores').select('id, currency_code').eq('id', storeId).single()
   if (!store) redirect('/onboarding')
 
-  // ── حساب نطاق التاريخ بناءً على الفترة ────────────────────────
+  // ── نطاقات التاريخ ─────────────────────────────────────────────
+  const now = new Date()
+  const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0)
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const todayStr = todayStart.toISOString()
+  const monthStr = monthStart.toISOString()
+  const monthDateStr = monthStr.slice(0, 10)
 
-  const now    = new Date()
-  const period = searchParams.period ?? 'month'
+  // آخر 7 أيام (للرسم البياني)
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(now); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (6 - i))
+    return d.toISOString().slice(0, 10)
+  })
 
-  let periodStart: Date
-  let periodEnd:   Date = now
-  let prevStart:   Date
-  let prevEnd:     Date
-  let periodLabel: string
-  let compareLabel: string
-
-  switch (period) {
-    case 'today': {
-      periodStart = new Date(now); periodStart.setHours(0, 0, 0, 0)
-      prevEnd     = new Date(periodStart)
-      prevStart   = new Date(prevEnd); prevStart.setDate(prevStart.getDate() - 1)
-      periodLabel  = 'اليوم'
-      compareLabel = 'عن أمس'
-      break
-    }
-    case 'week': {
-      // أول يوم في الأسبوع الحالي (الأحد)
-      periodStart = new Date(now); periodStart.setDate(now.getDate() - now.getDay()); periodStart.setHours(0, 0, 0, 0)
-      prevEnd     = new Date(periodStart)
-      prevStart   = new Date(prevEnd); prevStart.setDate(prevStart.getDate() - 7)
-      periodLabel  = 'هذا الأسبوع'
-      compareLabel = 'عن الأسبوع الماضي'
-      break
-    }
-    case 'last_month': {
-      periodStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      periodEnd   = new Date(now.getFullYear(), now.getMonth(), 1)
-      prevStart   = new Date(now.getFullYear(), now.getMonth() - 2, 1)
-      prevEnd     = new Date(periodStart)
-      periodLabel  = periodStart.toLocaleDateString('ar', { month: 'long', year: 'numeric' })
-      compareLabel = 'عن الشهر قبله'
-      break
-    }
-    default: { // month
-      periodStart = new Date(now.getFullYear(), now.getMonth(), 1)
-      prevStart   = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      prevEnd     = new Date(periodStart)
-      periodLabel  = now.toLocaleDateString('ar', { month: 'long', year: 'numeric' })
-      compareLabel = 'عن الشهر الماضي'
-      break
-    }
-  }
-
-  const pStartStr    = periodStart.toISOString()
-  const pEndStr      = periodEnd.toISOString()
-  const prevStartStr = prevStart.toISOString()
-  const prevEndStr   = prevEnd.toISOString()
-
-  // ── جلب البيانات ─────────────────────────────────────────────
+  // ── جلب البيانات ──────────────────────────────────────────────
+  const box = await getDefaultCashBox(supabase, store.id)
+  const balance = box ? await getCashBalance(supabase, store.id, box.id, box.opening_balance) : 0
 
   const [
-    { data: rawOrders },
-    { data: rawVouchers },
-    { data: rawInvoices },
-    { data: customers },
+    { data: monthOrders },
+    { data: vouchers },
+    { data: invoices },
+    { data: debtors },
+    { data: weekMovements },
   ] = await Promise.all([
-    // الطلبيات من بداية الفترة السابقة (للمقارنة)
-    supabase
-      .from('orders')
-      .select('total, amount_paid, created_at')
+    supabase.from('orders')
+      .select('id, total_amount, created_at, status')
       .eq('store_id', store.id)
-      .in('status', ['delivered', 'processing', 'confirmed', 'ready'])
-      .gte('created_at', prevStartStr),
-
-    // السندات من بداية الفترة السابقة
-    supabase
-      .from('vouchers')
+      .in('status', ORDER_STATUSES)
+      .gte('created_at', monthStr),
+    supabase.from('vouchers')
       .select('type, amount, date')
       .eq('store_id', store.id)
-      .gte('date', prevStartStr.slice(0, 10)),
-
-    // الفواتير في الفترة الحالية فقط
-    supabase
-      .from('invoices')
-      .select('total, amount_paid, status, created_at')
-      .eq('store_id', store.id)
-      .gte('created_at', pStartStr)
-      .lte('created_at', pEndStr),
-
-    // ذمم الزبائن — دائماً حالية بغض النظر عن الفترة
-    supabase
-      .from('customers')
+      .gte('date', monthDateStr),
+    supabase.from('invoices')
+      .select('total, amount_paid, status')
+      .eq('store_id', store.id),
+    supabase.from('customers')
       .select('balance')
       .eq('store_id', store.id)
       .gt('balance', 0),
+    supabase.from('cash_movements')
+      .select('direction, amount, date')
+      .eq('store_id', store.id)
+      .gte('date', days[0]),
   ])
 
-  type OrderRow   = { total: number | null; amount_paid: number | null; created_at: string }
-  type VoucherRow = { type: string; amount: number; date: string }
-  type InvoiceRow = { total: number | null; amount_paid: number | null; status: string; created_at: string }
+  type OrderRow = { id: string; total_amount: number | null; created_at: string; status: string }
+  const orders = (monthOrders ?? []) as OrderRow[]
+  const monthSales = orders.reduce((s, o) => s + (o.total_amount ?? 0), 0)
+  const todaySales = orders.filter(o => o.created_at >= todayStr).reduce((s, o) => s + (o.total_amount ?? 0), 0)
 
-  // ── تصفية الطلبيات ──────────────────────────────────────────
+  // تكلفة البضاعة المباعة لهذا الشهر (من بنود الطلبيات)
+  const orderIds = orders.map(o => o.id)
+  let monthCOGS = 0
+  if (orderIds.length > 0) {
+    const { data: lineItems } = await supabase
+      .from('order_items')
+      .select('quantity, cost_price, order_id')
+      .in('order_id', orderIds)
+    monthCOGS = (lineItems ?? []).reduce(
+      (s, li: { quantity: number; cost_price: number | null }) => s + (li.cost_price ?? 0) * li.quantity, 0,
+    )
+  }
 
-  const allOrders    = (rawOrders   ?? []) as OrderRow[]
-  const periodOrders = allOrders.filter(o => o.created_at >= pStartStr && o.created_at < pEndStr)
-  const prevOrders   = allOrders.filter(o => o.created_at >= prevStartStr && o.created_at < prevEndStr)
+  const vts = (vouchers ?? []) as { type: string; amount: number; date: string }[]
+  const monthReceipts = vts.filter(v => v.type === 'receipt').reduce((s, v) => s + v.amount, 0)
+  const monthPayments = vts.filter(v => v.type === 'payment').reduce((s, v) => s + v.amount, 0)
 
-  const periodRevenue = periodOrders.reduce((s, o) => s + (o.amount_paid ?? 0), 0)
-  const prevRevenue   = prevOrders.reduce((s, o) => s + (o.amount_paid ?? 0), 0)
-  const outstanding   = periodOrders.reduce((s, o) => s + Math.max(0, (o.total ?? 0) - (o.amount_paid ?? 0)), 0)
+  // صافي الربح التقديري = مبيعات − تكلفة − مصروفات
+  const netProfit = monthSales - monthCOGS - monthPayments
 
-  // ── تصفية السندات ────────────────────────────────────────────
+  const inv = (invoices ?? []) as { total: number; amount_paid: number; status: string }[]
+  const unpaidInvoices = inv.filter(i => i.status !== 'paid' && i.status !== 'cancelled')
+  const unpaidCount = unpaidInvoices.length
+  const unpaidAmount = unpaidInvoices.reduce((s, i) => s + Math.max(0, (i.total ?? 0) - (i.amount_paid ?? 0)), 0)
 
-  const pDateStart = pStartStr.slice(0, 10)
-  const pDateEnd   = pEndStr.slice(0, 10)
-  const prDateStart = prevStartStr.slice(0, 10)
-  const prDateEnd   = prevEndStr.slice(0, 10)
+  const debtorRows = (debtors ?? []) as { balance: number }[]
+  const debtorCount = debtorRows.length
+  const totalDebt = debtorRows.reduce((s, c) => s + (c.balance ?? 0), 0)
 
-  const allVouchers   = (rawVouchers ?? []) as VoucherRow[]
-  const periodVouchers = allVouchers.filter(v => v.date >= pDateStart && v.date < pDateEnd)
-  const prevVouchers   = allVouchers.filter(v => v.date >= prDateStart && v.date < prDateEnd)
+  // رسم التدفق النقدي — آخر 7 أيام
+  const mv = (weekMovements ?? []) as { direction: string; amount: number; date: string }[]
+  const chart = days.map(d => ({
+    date: d,
+    in:  mv.filter(m => m.date === d && m.direction === 'in').reduce((s, m) => s + m.amount, 0),
+    out: mv.filter(m => m.date === d && m.direction === 'out').reduce((s, m) => s + m.amount, 0),
+  }))
+  const chartMax = Math.max(1, ...chart.map(c => Math.max(c.in, c.out)))
 
-  const periodReceipts = periodVouchers.filter(v => v.type === 'receipt').reduce((s, v) => s + v.amount, 0)
-  const periodPayments = periodVouchers.filter(v => v.type === 'payment').reduce((s, v) => s + v.amount, 0)
-  const prevReceipts   = prevVouchers.filter(v => v.type === 'receipt').reduce((s, v) => s + v.amount, 0)
-  const prevPayments   = prevVouchers.filter(v => v.type === 'payment').reduce((s, v) => s + v.amount, 0)
-
-  const netProfit = periodReceipts - periodPayments
-  const prevNet   = prevReceipts   - prevPayments
-
-  // ── الفواتير ─────────────────────────────────────────────────
-
-  const allInvoices    = (rawInvoices ?? []) as InvoiceRow[]
-  const invoicesPaid   = allInvoices.filter(i => i.status === 'paid').length
-  const invoicesDraft  = allInvoices.filter(i => i.status === 'draft').length
-  const invoicesPaidAmt = allInvoices.filter(i => i.status === 'paid').reduce((s, i) => s + (i.total ?? 0), 0)
-
-  // ── الذمم ────────────────────────────────────────────────────
-
-  const totalDebt = ((customers ?? []) as { balance: number }[]).reduce((s, c) => s + (c.balance ?? 0), 0)
-
-  const netChange = calcPct(netProfit,    prevNet,      compareLabel)
-  const revChange = calcPct(periodRevenue, prevRevenue, compareLabel)
-
-  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
   const cur = store.currency_code
+  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
+  const monthLabel = now.toLocaleDateString('ar', { month: 'long', year: 'numeric' })
 
   const cards = [
-    {
-      label: 'الإيرادات',   sub: `طلبيات — ${periodLabel}`,
-      value: fmt(periodRevenue), change: revChange,
-      color: 'text-emerald-400', border: 'border-emerald-500/10',
-      href: '/dashboard/accounting/invoices',
-    },
-    {
-      label: 'المصروفات',   sub: `سندات الصرف — ${periodLabel}`,
-      value: fmt(periodPayments), change: null,
-      color: 'text-red-400', border: 'border-red-500/10',
-      href: '/dashboard/accounting/payments',
-    },
-    {
-      label: 'المقبوضات',   sub: `سندات القبض — ${periodLabel}`,
-      value: fmt(periodReceipts), change: null,
-      color: 'text-sky-400', border: 'border-sky-500/10',
-      href: '/dashboard/accounting/receipts',
-    },
-    {
-      label: 'المستحقات',   sub: 'أرصدة الزبائن — الآن',
-      value: fmt(totalDebt), change: null,
-      color: 'text-amber-400', border: 'border-amber-500/10',
-      href: '/dashboard/customers',
-    },
+    { icon: '💰', label: 'مبيعات اليوم',     value: fmt(todaySales),     unit: cur, color: 'text-emerald-400', border: 'border-emerald-500/15', href: '/dashboard/orders' },
+    { icon: '📈', label: 'مبيعات الشهر',     value: fmt(monthSales),     unit: cur, color: 'text-sky-400',     border: 'border-sky-500/15',     href: '/dashboard/orders' },
+    { icon: '💵', label: 'صافي الربح',       value: fmt(netProfit),      unit: cur, color: netProfit >= 0 ? 'text-emerald-400' : 'text-red-400', border: 'border-emerald-500/15', href: '/dashboard/accounting/reports' },
+    { icon: '📥', label: 'المقبوضات',        value: fmt(monthReceipts),  unit: cur, color: 'text-emerald-400', border: 'border-emerald-500/10', href: '/dashboard/accounting/receipts' },
+    { icon: '📤', label: 'المصروفات',        value: fmt(monthPayments),  unit: cur, color: 'text-red-400',     border: 'border-red-500/10',     href: '/dashboard/accounting/payments' },
+    { icon: '🧾', label: 'فواتير غير مسددة', value: String(unpaidCount), unit: `(${fmt(unpaidAmount)} ${cur})`, color: 'text-amber-400', border: 'border-amber-500/10', href: '/dashboard/accounting/invoices?status=unpaid' },
+    { icon: '👥', label: 'عملاء مدينون',     value: String(debtorCount), unit: `(${fmt(totalDebt)} ${cur})`,   color: 'text-amber-400', border: 'border-amber-500/10', href: '/dashboard/customers' },
   ]
 
   return (
     <div className="space-y-5 p-4 sm:p-6">
-
-      {/* العنوان + فلتر الفترة */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      {/* العنوان */}
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-white">المحاسبة والمالية</h1>
-          <p className="mt-0.5 text-sm text-slate-400">{periodLabel}</p>
+          <h1 className="text-xl font-semibold text-white">💰 لوحة المؤشرات المالية</h1>
+          <p className="mt-0.5 text-sm text-slate-400">{monthLabel}</p>
         </div>
-        <AccountingPeriodFilter active={period} />
+        <Link href="/dashboard/accounting/treasury"
+          className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-2 text-sm font-medium text-emerald-400 hover:bg-emerald-500/10">
+          🏦 الصندوق
+        </Link>
       </div>
 
-      {/* ── صافي الربح — البطاقة الرئيسية ── */}
-      <div className={`rounded-2xl border p-5 sm:p-6 ${
-        netProfit > 0 ? 'border-emerald-500/20 bg-emerald-500/5' :
-        netProfit < 0 ? 'border-red-500/20 bg-red-500/5' :
-                        'border-white/5 bg-slate-900'
-      }`}>
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-              صافي الربح — {periodLabel}
-            </p>
+      {/* رصيد الصندوق — بطاقة بارزة */}
+      <Link href="/dashboard/accounting/treasury"
+        className={`block rounded-2xl border p-5 transition-colors hover:bg-white/3 ${
+          balance >= 0 ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-red-500/20 bg-red-500/5'
+        }`}>
+        <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">💵 رصيد الصندوق الحالي</p>
+        <p dir="ltr" className={`mt-2 text-3xl font-bold tabular-nums sm:text-4xl ${balance >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+          {fmt(balance)}<span className="mr-2 text-base font-normal text-slate-400">{cur}</span>
+        </p>
+      </Link>
 
-            <p
-              dir="ltr"
-              className={`mt-2 text-4xl font-bold tabular-nums sm:text-5xl ${
-                netProfit > 0 ? 'text-emerald-400' :
-                netProfit < 0 ? 'text-red-400' : 'text-slate-300'
-              }`}
-            >
-              {netProfit > 0 ? '+' : ''}{fmt(netProfit)}
-              <span className="mr-2 text-lg font-normal text-slate-400">{cur}</span>
-            </p>
-
-            <p className="mt-2.5 text-xs text-slate-500">
-              مقبوضات{' '}
-              <span className="font-semibold text-emerald-400">{fmt(periodReceipts)}</span>
-              {' '}−{' '}
-              مصروفات{' '}
-              <span className="font-semibold text-red-400">{fmt(periodPayments)}</span>
-            </p>
-
-            {netChange && (
-              <p className={`mt-2 text-sm font-bold ${netChange.up ? 'text-emerald-400' : 'text-red-400'}`}>
-                {netChange.label}
-              </p>
-            )}
-            {!netChange && prevNet === 0 && netProfit !== 0 && (
-              <p className="mt-2 text-xs text-slate-500">لا توجد بيانات الفترة السابقة للمقارنة</p>
-            )}
-          </div>
-          <div className="shrink-0 text-4xl">{netProfit >= 0 ? '📈' : '📉'}</div>
-        </div>
-      </div>
-
-      {/* ── 4 بطاقات ── */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {cards.map(card => (
-          <Link
-            key={card.label}
-            href={card.href}
-            className={`rounded-2xl border bg-slate-900 p-4 sm:p-5 transition-colors hover:bg-slate-800 ${card.border}`}
-          >
-            <p className="text-xs font-semibold text-slate-400">{card.label}</p>
-            <p dir="ltr" className={`mt-2 text-2xl font-bold tabular-nums sm:text-3xl ${card.color}`}>
-              {card.value}
-            </p>
-            <p className="mt-1 text-[11px] text-slate-600">{cur} · {card.sub}</p>
-            {card.change && (
-              <p className={`mt-1.5 text-[11px] font-bold ${card.change.up ? 'text-emerald-400' : 'text-red-400'}`}>
-                {card.change.label}
-              </p>
-            )}
+      {/* 7 بطاقات المؤشرات */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        {cards.map(c => (
+          <Link key={c.label} href={c.href}
+            className={`rounded-2xl border bg-slate-900 p-4 transition-colors hover:bg-slate-800 ${c.border}`}>
+            <div className="flex items-center gap-2">
+              <span className="text-lg">{c.icon}</span>
+              <p className="text-xs font-semibold text-slate-400">{c.label}</p>
+            </div>
+            <p dir="ltr" className={`mt-2 text-2xl font-bold tabular-nums ${c.color}`}>{c.value}</p>
+            <p className="mt-0.5 text-[11px] text-slate-600">{c.unit}</p>
           </Link>
         ))}
       </div>
 
-      {/* ── ملخص إضافي ── */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-white/5 bg-slate-900 p-4 sm:p-5">
-          <p className="text-xs font-medium text-slate-400">إيرادات الطلبيات</p>
-          <p dir="ltr" className="mt-2 text-2xl font-bold tabular-nums text-white sm:text-3xl">
-            {fmt(periodRevenue)}
-            <span className="mr-1 text-sm font-normal text-slate-500">{cur}</span>
-          </p>
-          <p className="mt-1 text-xs text-slate-500">{periodOrders.length} طلبية في الفترة</p>
+      {/* رسم التدفق النقدي — آخر 7 أيام */}
+      <div className="rounded-2xl border border-white/5 bg-slate-900 p-4 sm:p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-white">📊 التدفق النقدي — آخر 7 أيام</h2>
+          <div className="flex items-center gap-3 text-[11px]">
+            <span className="flex items-center gap-1 text-slate-400"><span className="h-2 w-2 rounded-sm bg-emerald-500" /> داخل</span>
+            <span className="flex items-center gap-1 text-slate-400"><span className="h-2 w-2 rounded-sm bg-red-500" /> خارج</span>
+          </div>
         </div>
-
-        <div className="rounded-2xl border border-amber-500/10 bg-slate-900 p-4 sm:p-5">
-          <p className="text-xs font-medium text-slate-400">مستحق التحصيل</p>
-          <p dir="ltr" className="mt-2 text-2xl font-bold tabular-nums text-amber-400 sm:text-3xl">
-            {fmt(outstanding)}
-            <span className="mr-1 text-sm font-normal text-slate-500">{cur}</span>
-          </p>
-          <p className="mt-1 text-xs text-slate-500">{invoicesDraft} فاتورة غير مدفوعة في الفترة</p>
-        </div>
-
-        <div className="rounded-2xl border border-emerald-500/10 bg-slate-900 p-4 sm:p-5">
-          <p className="text-xs font-medium text-slate-400">فواتير محصّلة</p>
-          <p dir="ltr" className="mt-2 text-2xl font-bold tabular-nums text-emerald-400 sm:text-3xl">
-            {fmt(invoicesPaidAmt)}
-            <span className="mr-1 text-sm font-normal text-slate-500">{cur}</span>
-          </p>
-          <p className="mt-1 text-xs text-slate-500">{invoicesPaid} فاتورة مدفوعة في الفترة</p>
+        <div className="flex items-end justify-between gap-2" style={{ height: 140 }}>
+          {chart.map(c => (
+            <div key={c.date} className="flex flex-1 flex-col items-center gap-1">
+              <div className="flex w-full items-end justify-center gap-0.5" style={{ height: 110 }}>
+                <div className="w-1/2 rounded-t bg-emerald-500/70" style={{ height: `${(c.in / chartMax) * 100}%`, minHeight: c.in > 0 ? 3 : 0 }} title={`داخل ${fmt(c.in)}`} />
+                <div className="w-1/2 rounded-t bg-red-500/70" style={{ height: `${(c.out / chartMax) * 100}%`, minHeight: c.out > 0 ? 3 : 0 }} title={`خارج ${fmt(c.out)}`} />
+              </div>
+              <span className="text-[10px] text-slate-500">{new Date(c.date).toLocaleDateString('ar', { weekday: 'short' })}</span>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* ── وصول سريع ── */}
+      {/* وصول سريع */}
       <div>
-        <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-slate-500">
-          وصول سريع
-        </h2>
+        <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-slate-500">وصول سريع</h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
-            { href: '/dashboard/accounting/invoices',     icon: '📋', label: 'الفواتير',     desc: 'عرض وإدارة الفواتير' },
             { href: '/dashboard/accounting/invoices/new', icon: '➕', label: 'فاتورة جديدة', desc: 'إنشاء فاتورة للزبون' },
             { href: '/dashboard/accounting/receipts',     icon: '💵', label: 'سندات القبض',  desc: 'تسجيل مبلغ مقبوض' },
             { href: '/dashboard/accounting/payments',     icon: '💸', label: 'سندات الصرف',  desc: 'تسجيل مصروف أو دفعة' },
+            { href: '/dashboard/accounting/reports',      icon: '📊', label: 'التقارير',     desc: 'الأرباح والتدفق النقدي' },
           ].map(s => (
-            <Link
-              key={s.href} href={s.href}
-              className="rounded-2xl border border-white/5 bg-slate-900 p-3.5 transition-colors hover:border-sky-500/20 hover:bg-sky-500/5 sm:p-4"
-            >
+            <Link key={s.href} href={s.href}
+              className="rounded-2xl border border-white/5 bg-slate-900 p-3.5 transition-colors hover:border-sky-500/20 hover:bg-sky-500/5 sm:p-4">
               <span className="text-2xl">{s.icon}</span>
               <p className="mt-2 text-sm font-semibold text-white">{s.label}</p>
               <p className="mt-0.5 text-xs text-slate-500">{s.desc}</p>
@@ -332,7 +203,6 @@ export default async function AccountingPage({ searchParams }: Props) {
           ))}
         </div>
       </div>
-
     </div>
   )
 }

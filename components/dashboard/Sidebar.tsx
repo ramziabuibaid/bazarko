@@ -37,19 +37,22 @@ const navGroups: NavGroup[] = [
   {
     title: 'المحاسبة والمالية',
     items: [
-      { href: '/dashboard/accounting', label: 'نظرة مالية', icon: '💰' },
-      { href: '/dashboard/accounting/invoices', label: 'الفواتير', icon: '📋' },
-      { href: '/dashboard/accounting/receipts', label: 'سندات القبض', icon: '💵' },
-      { href: '/dashboard/accounting/payments', label: 'سندات الصرف', icon: '💸' },
+      { href: '/dashboard/accounting', label: 'لوحة المؤشرات', icon: '💰' },
+      { href: '/dashboard/accounting/invoices', label: 'الفواتير', icon: '🧾' },
+      { href: '/dashboard/accounting/receipts', label: 'سندات القبض', icon: '📥' },
+      { href: '/dashboard/accounting/payments', label: 'سندات الصرف', icon: '📤' },
       { href: '/dashboard/accounting/treasury', label: 'الصندوق والخزينة', icon: '🏦' },
-      { href: '/dashboard/accounting/reports', label: 'التقارير', icon: '📈' },
+      { href: '/dashboard/accounting/expenses', label: 'المصروفات', icon: '💸' },
+      { href: '/dashboard/accounting/reports', label: 'التقارير', icon: '📊' },
+      { href: '/dashboard/accounting/audit', label: 'سجل العمليات', icon: '📜' },
     ],
   },
   {
     title: 'الزبائن',
     items: [
       { href: '/dashboard/customers', label: 'قائمة الزبائن', icon: '👥' },
-      { href: '/dashboard/customers/ledger', label: 'ذمم الزبائن', icon: '💳' },
+      { href: '/dashboard/customers/ledger', label: 'كشف الحسابات', icon: '📋' },
+      { href: '/dashboard/customers/support', label: 'دعم الزبائن', icon: '🎫' },
     ],
   },
   {
