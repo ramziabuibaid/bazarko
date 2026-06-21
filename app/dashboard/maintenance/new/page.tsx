@@ -20,7 +20,7 @@ export default async function NewRepairPage() {
   if (!store) redirect('/onboarding')
 
   return (
-    <div className="p-6 max-w-2xl">
+    <div className="p-4 sm:p-6 max-w-2xl">
       <div className="mb-6 flex items-center gap-3">
         <Link href="/dashboard/maintenance"
           className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-slate-400 hover:text-white">

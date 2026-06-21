@@ -81,7 +81,7 @@ export default async function MaintenancePage() {
   const overdueJobs = activeJobs.filter(j => j.estimated_done && new Date(j.estimated_done) < now)
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
 
       {/* ── Header ── */}
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -152,8 +152,8 @@ export default async function MaintenancePage() {
         {recentReceived.length === 0 ? (
           <p className="text-center text-sm text-slate-500 py-4">لا يوجد أجهزة بعد</p>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-white/5">
-            <table className="w-full">
+          <div className="overflow-x-auto rounded-xl border border-white/5">
+            <table className="min-w-[680px] w-full">
               <thead>
                 <tr className="border-b border-white/5 bg-white/3">
                   <th className="px-4 py-2.5 text-right text-xs text-slate-400">رقم الطلب</th>

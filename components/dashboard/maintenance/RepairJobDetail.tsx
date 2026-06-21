@@ -568,8 +568,8 @@ export default function RepairJobDetail({
           <div className="rounded-2xl border border-white/5 bg-slate-900 p-5 print:hidden">
             <h2 className="mb-4 text-sm font-semibold text-white">قطع الغيار المستخدمة</h2>
             {parts.length > 0 && (
-              <div className="mb-4 overflow-hidden rounded-xl border border-white/5">
-                <table className="w-full text-sm">
+              <div className="mb-4 overflow-x-auto rounded-xl border border-white/5">
+                <table className="min-w-[680px] w-full text-sm">
                   <thead>
                     <tr className="border-b border-white/5 bg-white/3">
                       <th className="px-3 py-2 text-right text-xs text-slate-400">القطعة</th>

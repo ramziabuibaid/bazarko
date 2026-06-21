@@ -144,7 +144,7 @@ export default async function InventoryReportsPage() {
   const maxBar = Math.max(...daySales, ...dayBuys, 1)
 
   return (
-    <div className="p-6 space-y-6 max-w-6xl">
+    <div className="p-4 sm:p-6 space-y-6 max-w-6xl">
       {/* Header */}
       <div className="flex items-center gap-3">
         <Link href="/dashboard/inventory"

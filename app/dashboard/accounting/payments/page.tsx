@@ -14,7 +14,7 @@ export default async function PaymentsPage() {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, currency_code')
+    .select('id, currency_code, name, phone')
     .eq('id', storeId)
     .single()
   if (!store) redirect('/onboarding')
@@ -34,7 +34,7 @@ export default async function PaymentsPage() {
     .order('name')
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <div className="mb-6 flex items-center gap-3">
         <Link href="/dashboard/accounting" className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-slate-400 hover:text-white">
           ← المحاسبة
@@ -49,6 +49,8 @@ export default async function PaymentsPage() {
         userId={user.id}
         currencyCode={store.currency_code}
         customers={customers ?? []}
+        storeName={store.name}
+        storePhone={store.phone ?? undefined}
       />
     </div>
   )

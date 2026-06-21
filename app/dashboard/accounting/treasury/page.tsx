@@ -24,7 +24,7 @@ export default async function TreasuryPage() {
 
   const box = await getDefaultCashBox(supabase, store.id)
   if (!box) {
-    return <div className="p-6 text-slate-400">تعذّر تجهيز الصندوق. أعد المحاولة.</div>
+    return <div className="p-4 sm:p-6 text-slate-400">تعذّر تجهيز الصندوق. أعد المحاولة.</div>
   }
 
   const balance = await getCashBalance(supabase, store.id, box.id, box.opening_balance)
@@ -139,8 +139,8 @@ export default async function TreasuryPage() {
             لا توجد حركات بعد
           </p>
         ) : (
-          <div className="overflow-hidden rounded-2xl border border-white/5 bg-slate-900">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto rounded-2xl border border-white/5 bg-slate-900">
+            <table className="min-w-[680px] w-full text-sm">
               <thead className="border-b border-white/5 text-xs text-slate-500">
                 <tr>
                   <th className="px-4 py-3 text-right font-medium">الوصف</th>

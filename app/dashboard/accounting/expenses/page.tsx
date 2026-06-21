@@ -137,8 +137,8 @@ export default async function ExpensesPage({ searchParams }: Props) {
             <p className="mt-1 text-sm text-slate-500">استخدم زر "➕ مصروف جديد" للتسجيل السريع</p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-2xl border border-white/5 bg-slate-900">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto rounded-2xl border border-white/5 bg-slate-900">
+            <table className="min-w-[680px] w-full text-sm">
               <thead className="border-b border-white/5 text-xs text-slate-500">
                 <tr>
                   <th className="px-4 py-3 text-right font-medium">البيان</th>

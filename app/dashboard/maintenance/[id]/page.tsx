@@ -42,7 +42,7 @@ export default async function RepairJobPage({ params }: Props) {
   ])
 
   return (
-    <div className="p-6 max-w-6xl">
+    <div className="p-4 sm:p-6 max-w-6xl">
       <RepairJobDetail
         job={job}
         parts={parts ?? []}

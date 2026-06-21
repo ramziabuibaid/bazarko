@@ -2,6 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import Sidebar from './Sidebar'
+import DashboardTopbar, { type DashNotification } from './DashboardTopbar'
+import MobileBottomNav from './MobileBottomNav'
+import { ToastProvider } from '@/components/ui/Toast'
+import { ConfirmProvider } from '@/components/ui/Confirm'
 
 interface Store {
   id: string
@@ -14,9 +18,11 @@ interface Store {
 
 export default function DashboardShell({
   store,
+  notifications = [],
   children,
 }: {
   store: Store
+  notifications?: DashNotification[]
   children: React.ReactNode
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -27,6 +33,8 @@ export default function DashboardShell({
   }, [])
 
   return (
+    <ToastProvider>
+    <ConfirmProvider>
     <div className="flex h-screen overflow-hidden bg-slate-950 text-white" dir="rtl">
       {/* طبقة خلفية للموبايل عند فتح السايدبار */}
       {sidebarOpen && (
@@ -43,24 +51,9 @@ export default function DashboardShell({
         onToggle={() => setSidebarOpen(s => !s)}
       />
 
-      {/* زر إعادة فتح السايدبار على الديسكتوب عند إغلاقه */}
-      {!sidebarOpen && (
-        <button
-          onClick={() => setSidebarOpen(true)}
-          className="hidden lg:flex fixed right-3 top-3 z-40 h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-slate-900 text-slate-400 shadow-lg hover:bg-white/5 hover:text-white transition-colors"
-          aria-label="فتح القائمة"
-        >
-          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-            <line x1="3" y1="5" x2="17" y2="5" />
-            <line x1="3" y1="10" x2="17" y2="10" />
-            <line x1="3" y1="15" x2="17" y2="15" />
-          </svg>
-        </button>
-      )}
-
       <div className="flex flex-1 flex-col overflow-hidden min-w-0">
-        {/* شريط علوي — يظهر على الموبايل فقط */}
-        <header className="lg:hidden flex h-14 shrink-0 items-center gap-3 border-b border-white/5 bg-slate-900 px-4">
+        {/* شريط علوي — بحث + إشعارات (كل الأحجام) */}
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-white/5 bg-slate-900 px-4">
           <button
             onClick={() => setSidebarOpen(s => !s)}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white/5 hover:text-white transition-colors"
@@ -72,13 +65,18 @@ export default function DashboardShell({
               <line x1="3" y1="15" x2="17" y2="15" />
             </svg>
           </button>
-          <span className="text-sm font-semibold text-white truncate">{store.name}</span>
+          <DashboardTopbar storeId={store.id} notifications={notifications} />
         </header>
 
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto pb-16 lg:pb-0">
           {children}
         </main>
       </div>
+
+      {/* شريط تنقّل سفلي — موبايل فقط (إحساس تطبيق) */}
+      <MobileBottomNav onMore={() => setSidebarOpen(true)} />
     </div>
+    </ConfirmProvider>
+    </ToastProvider>
   )
 }

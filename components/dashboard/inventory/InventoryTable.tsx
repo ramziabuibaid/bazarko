@@ -221,8 +221,8 @@ export default function InventoryTable({ products, currencyCode, storeId, userId
           <p className="mt-3 text-slate-400">لا توجد منتجات</p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-white/5">
-          <table className="w-full">
+        <div className="overflow-x-auto rounded-2xl border border-white/5">
+          <table className="min-w-[680px] w-full">
             <thead>
               <tr className="border-b border-white/5 bg-white/3">
                 <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">المنتج</th>

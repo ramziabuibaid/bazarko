@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { recordAuditEvent } from '@/app/dashboard/accounting/audit-actions'
+import { useToast } from '@/components/ui/Toast'
+import { useConfirm } from '@/components/ui/Confirm'
 
 interface Customer {
   id: string
@@ -32,6 +34,8 @@ interface Props {
   userId: string
   currencyCode: string
   customers: Customer[]
+  storeName?: string
+  storePhone?: string
 }
 
 const PAYMENT_METHODS = [
@@ -63,9 +67,12 @@ function formatAmountInput(val: string): { raw: string; display: string } {
 
 // ── المكوّن ───────────────────────────────────────────────────
 
-export default function VouchersTable({ vouchers, type, storeId, userId, currencyCode, customers }: Props) {
+export default function VouchersTable({ vouchers, type, storeId, userId, currencyCode, customers, storeName, storePhone }: Props) {
   const router   = useRouter()
   const supabase = createClient()
+  const toast    = useToast()
+  const confirm  = useConfirm()
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const [showModal, setShowModal]           = useState(false)
   const [date, setDate]                     = useState(new Date().toISOString().slice(0, 10))
@@ -145,7 +152,120 @@ export default function VouchersTable({ vouchers, type, storeId, userId, currenc
 
     setShowModal(false)
     resetForm()
+    toast(`تم حفظ سند ${isReceipt ? 'القبض' : 'الصرف'} ${voucherNumber} بنجاح`)
     router.refresh()
+  }
+
+  // ── حذف سند (مع تأكيد) ────────────────────────────────────────
+  async function handleDelete(v: Voucher) {
+    const ok = await confirm({
+      title: `حذف سند ${isReceipt ? 'القبض' : 'الصرف'}`,
+      message: `هل تريد حذف السند ${v.voucher_number} بمبلغ ${fmt(v.amount)} ${currencyCode}؟ سيُعكَس أثره على رصيد الصندوق ولا يمكن التراجع.`,
+      confirmLabel: 'حذف نهائي',
+      danger: true,
+    })
+    if (!ok) return
+    setDeletingId(v.id)
+    const { error: err } = await supabase.from('vouchers').delete().eq('id', v.id)
+    setDeletingId(null)
+    if (err) { toast('تعذّر حذف السند', 'error'); return }
+    await recordAuditEvent({
+      entityType: 'voucher', entityLabel: v.voucher_number,
+      action: 'delete', details: { type: v.type, amount: v.amount },
+    })
+    toast(`تم حذف السند ${v.voucher_number}`)
+    router.refresh()
+  }
+
+  // ── رقم هاتف الجهة (للواتساب) ─────────────────────────────────
+  function partyPhone(v: Voucher): string | null {
+    const c = customers.find(x => x.id === v.customer_id)
+    return c?.phone ? c.phone.replace(/[^\d]/g, '') : null
+  }
+
+  // ── مشاركة السند عبر واتساب ────────────────────────────────────
+  function shareWhatsApp(v: Voucher) {
+    const phone = partyPhone(v)
+    if (!phone) { toast('لا يوجد رقم هاتف مسجّل لهذه الجهة', 'error'); return }
+    const head = isReceipt ? 'سند قبض' : 'سند صرف'
+    const msg =
+      `*${storeName ?? ''}*\n` +
+      `${head}: ${v.voucher_number}\n` +
+      `التاريخ: ${new Date(v.date).toLocaleDateString('ar')}\n` +
+      `المبلغ: ${fmt(v.amount)} ${currencyCode}\n` +
+      `بخصوص: ${v.description}` +
+      (isReceipt ? '\n\nشكراً لتعاملكم معنا 🌟' : '')
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank')
+  }
+
+  // ── طباعة السند (نافذة مستقلة → PDF) ──────────────────────────
+  function printVoucher(v: Voucher) {
+    const w = window.open('', '_blank', 'width=460,height=640')
+    if (!w) { toast('فضلاً اسمح بالنوافذ المنبثقة للطباعة', 'error'); return }
+    const methodLabel = PAYMENT_METHODS.find(m => m.value === v.payment_method)?.label ?? v.payment_method
+    const head = isReceipt ? 'سند قبض' : 'سند صرف'
+    const partyLabel = isReceipt ? 'استلمنا من' : 'صرفنا إلى'
+    const esc = (s: string) => s.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c] as string))
+    w.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8">
+      <title>${esc(v.voucher_number)}</title>
+      <style>
+        *{box-sizing:border-box;font-family:'Segoe UI',Tahoma,Arial,sans-serif}
+        body{margin:0;padding:28px;color:#0f172a}
+        .card{border:2px solid #0f172a;border-radius:14px;padding:24px;max-width:400px;margin:0 auto}
+        .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px dashed #cbd5e1;padding-bottom:14px;margin-bottom:14px}
+        .store{font-size:18px;font-weight:700}
+        .phone{font-size:12px;color:#64748b;direction:ltr;text-align:left}
+        .badge{background:${isReceipt ? '#dcfce7' : '#fee2e2'};color:${isReceipt ? '#166534' : '#991b1b'};border-radius:8px;padding:4px 10px;font-size:12px;font-weight:700}
+        .num{font-family:monospace;color:#0369a1;direction:ltr}
+        .row{display:flex;justify-content:space-between;font-size:13px;margin:8px 0}
+        .label{color:#64748b}
+        .amount{text-align:center;margin:18px 0;padding:14px;background:#f1f5f9;border-radius:10px}
+        .amount .v{font-size:26px;font-weight:800;direction:ltr}
+        .desc{font-size:13px;background:#f8fafc;border-radius:8px;padding:10px;margin-top:10px}
+        .sign{display:flex;justify-content:space-between;margin-top:32px;font-size:12px;color:#64748b}
+        .sign div{border-top:1px solid #94a3b8;padding-top:6px;width:40%;text-align:center}
+        @media print{body{padding:0}}
+      </style></head><body>
+      <div class="card">
+        <div class="head">
+          <div><div class="store">${esc(storeName ?? 'المتجر')}</div>
+          ${storePhone ? `<div class="phone">${esc(storePhone)}</div>` : ''}</div>
+          <div class="badge">${head}</div>
+        </div>
+        <div class="row"><span class="label">رقم السند</span><span class="num">${esc(v.voucher_number)}</span></div>
+        <div class="row"><span class="label">التاريخ</span><span>${new Date(v.date).toLocaleDateString('ar')}</span></div>
+        <div class="row"><span class="label">${partyLabel}</span><span>${esc(v.party_name ?? '—')}</span></div>
+        <div class="row"><span class="label">طريقة الدفع</span><span>${esc(methodLabel)}</span></div>
+        ${v.category ? `<div class="row"><span class="label">التصنيف</span><span>${esc(v.category)}</span></div>` : ''}
+        <div class="amount"><div class="label" style="font-size:12px">المبلغ</div><div class="v">${fmt(v.amount)} ${esc(currencyCode)}</div></div>
+        <div class="desc"><b>بخصوص:</b> ${esc(v.description)}</div>
+        ${v.reference ? `<div class="row" style="margin-top:10px"><span class="label">مرجع</span><span class="num">${esc(v.reference)}</span></div>` : ''}
+        <div class="sign"><div>توقيع المستلم</div><div>توقيع المسؤول</div></div>
+      </div>
+      <script>window.onload=function(){window.print()}</script>
+      </body></html>`)
+    w.document.close()
+  }
+
+  // ── تصدير Excel (CSV بترميز UTF-8) ────────────────────────────
+  function exportExcel() {
+    if (vouchers.length === 0) { toast('لا توجد بيانات للتصدير', 'error'); return }
+    const headers = ['رقم السند', 'التاريخ', isReceipt ? 'مصدر القبض' : 'الجهة', 'الوصف', 'التصنيف', 'طريقة الدفع', 'المبلغ', 'مرجع']
+    const cell = (s: string | number | null) => `"${String(s ?? '').replace(/"/g, '""')}"`
+    const rows = vouchers.map(v => [
+      v.voucher_number, v.date, v.party_name ?? '', v.description, v.category ?? '',
+      PAYMENT_METHODS.find(m => m.value === v.payment_method)?.label ?? v.payment_method,
+      v.amount, v.reference ?? '',
+    ].map(cell).join(','))
+    const csv = '﻿' + [headers.map(cell).join(','), ...rows].join('\r\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${isReceipt ? 'receipts' : 'payments'}-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    toast('تم تصدير الملف بنجاح')
   }
 
   return (
@@ -159,14 +279,22 @@ export default function VouchersTable({ vouchers, type, storeId, userId, currenc
             {fmt(totalAmount)} {currencyCode}
           </p>
         </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className={`rounded-xl px-4 py-2.5 text-sm font-medium text-white transition-colors ${
-            isReceipt ? 'bg-sky-600 hover:bg-sky-500' : 'bg-red-700 hover:bg-red-600'
-          }`}
-        >
-          ➕ سند {isReceipt ? 'قبض' : 'صرف'} جديد
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={exportExcel}
+            className="rounded-xl border border-white/10 px-3 py-2.5 text-sm font-medium text-emerald-400 transition-colors hover:bg-emerald-500/10"
+          >
+            ⬇️ تصدير Excel
+          </button>
+          <button
+            onClick={() => setShowModal(true)}
+            className={`rounded-xl px-4 py-2.5 text-sm font-medium text-white transition-colors ${
+              isReceipt ? 'bg-sky-600 hover:bg-sky-500' : 'bg-red-700 hover:bg-red-600'
+            }`}
+          >
+            ➕ سند {isReceipt ? 'قبض' : 'صرف'} جديد
+          </button>
+        </div>
       </div>
 
       {/* الجدول */}
@@ -190,6 +318,7 @@ export default function VouchersTable({ vouchers, type, storeId, userId, currenc
                 <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">التصنيف</th>
                 <th className="px-4 py-3 text-center text-xs font-medium text-slate-400">طريقة الدفع</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-400">المبلغ</th>
+                <th className="px-4 py-3 text-center text-xs font-medium text-slate-400">إجراءات</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5 bg-slate-900/60">
@@ -217,6 +346,18 @@ export default function VouchersTable({ vouchers, type, storeId, userId, currenc
                       {isReceipt ? '+' : '−'}{fmt(v.amount)} {currencyCode}
                     </span>
                     {v.reference && <p className="text-xs text-slate-600" dir="ltr">{v.reference}</p>}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-center gap-1">
+                      <button onClick={() => printVoucher(v)} title="طباعة السند"
+                        className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white/5 hover:text-white">🖨️</button>
+                      {partyPhone(v) && (
+                        <button onClick={() => shareWhatsApp(v)} title="إرسال عبر واتساب"
+                          className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-emerald-500/10 hover:text-emerald-400">📲</button>
+                      )}
+                      <button onClick={() => handleDelete(v)} disabled={deletingId === v.id} title="حذف السند"
+                        className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40">🗑️</button>
+                    </div>
                   </td>
                 </tr>
               ))}

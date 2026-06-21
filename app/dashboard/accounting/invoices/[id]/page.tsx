@@ -47,7 +47,7 @@ export default async function InvoiceDetailPage({ params }: Props) {
   ])
 
   return (
-    <div className="p-6 max-w-4xl">
+    <div className="p-4 sm:p-6 max-w-4xl">
       <InvoiceView
         invoice={invoice}
         items={items ?? []}

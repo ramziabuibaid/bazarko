@@ -48,7 +48,7 @@ export default async function CustomerLedgerPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-white">ذمم الزبائن</h1>
@@ -92,8 +92,8 @@ export default async function CustomerLedgerPage() {
       ) : (
         <div>
           <h2 className="mb-3 font-semibold text-white">الزبائن المدينون</h2>
-          <div className="overflow-hidden rounded-2xl border border-white/5">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto rounded-2xl border border-white/5">
+            <table className="min-w-[680px] w-full text-sm">
               <thead>
                 <tr className="border-b border-white/5 bg-white/3">
                   <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الزبون</th>
@@ -165,8 +165,8 @@ export default async function CustomerLedgerPage() {
       {(cleared?.length ?? 0) > 0 && (
         <div>
           <h2 className="mb-3 font-semibold text-slate-400">مسددون مؤخراً (آخر 20)</h2>
-          <div className="overflow-hidden rounded-2xl border border-white/5">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto rounded-2xl border border-white/5">
+            <table className="min-w-[680px] w-full text-sm">
               <thead>
                 <tr className="border-b border-white/5 bg-white/3">
                   <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الزبون</th>

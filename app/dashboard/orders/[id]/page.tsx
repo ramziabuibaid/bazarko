@@ -47,7 +47,7 @@ export default async function OrderDetailPage({ params }: Props) {
   ])
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <Link
           href="/dashboard/orders"

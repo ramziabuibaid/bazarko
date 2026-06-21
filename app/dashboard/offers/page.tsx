@@ -28,7 +28,7 @@ export default async function OffersPage() {
   const offers = (rawOffers ?? []) as unknown as Parameters<typeof OffersClient>[0]['offers']
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-white">العروض الحصرية</h1>

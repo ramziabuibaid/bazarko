@@ -6,6 +6,8 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { emailInvoice, recordInvoicePayment } from '@/app/dashboard/accounting/invoices/invoice-actions'
 import { recordAuditEvent } from '@/app/dashboard/accounting/audit-actions'
+import { useToast } from '@/components/ui/Toast'
+import { useConfirm } from '@/components/ui/Confirm'
 
 interface InvoiceItem {
   id: string
@@ -56,6 +58,8 @@ const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
 export default function InvoiceView({ invoice, items, storeName, storePhone, currencyCode, linkedOrder, storeId, userId }: Props) {
   const router = useRouter()
   const supabase = createClient()
+  const toast = useToast()
+  const confirm = useConfirm()
   const [status, setStatus] = useState(invoice.status)
   const [advancing, setAdvancing] = useState(false)
   const [cancelling, setCancelling] = useState(false)
@@ -102,8 +106,8 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
     setPaying(true); setPayError('')
     const res = await recordInvoicePayment(invoice.id, parseFloat(payAmount) || 0, payMethod)
     setPaying(false)
-    if (res.ok) { setShowPay(false); setPayAmount(''); router.refresh() }
-    else setPayError(res.error ?? 'فشل تسجيل الدفعة')
+    if (res.ok) { setShowPay(false); setPayAmount(''); toast('تم تسجيل الدفعة بنجاح'); router.refresh() }
+    else { setPayError(res.error ?? 'فشل تسجيل الدفعة'); toast(res.error ?? 'فشل تسجيل الدفعة', 'error') }
   }
 
   // إشعار دفع عبر واتساب
@@ -116,7 +120,14 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
   }
 
   async function cancelInvoice() {
-    if (!confirm('هل تريد إلغاء هذه الفاتورة؟')) return
+    const ok = await confirm({
+      title: 'إلغاء الفاتورة',
+      message: `هل تريد إلغاء الفاتورة ${invoice.invoice_number}؟ سيُعكَس أثرها على كشف حساب الزبون.`,
+      confirmLabel: 'إلغاء الفاتورة',
+      cancelLabel: 'تراجع',
+      danger: true,
+    })
+    if (!ok) return
     setCancelling(true)
     await supabase.from('invoices').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', invoice.id)
 
@@ -170,6 +181,7 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
 
     setStatus('cancelled')
     setCancelling(false)
+    toast(`تم إلغاء الفاتورة ${invoice.invoice_number}`)
     router.refresh()
   }
 
@@ -181,7 +193,10 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
     setSending(false)
     setEmailResult(result.ok ? 'sent' : 'error')
     if (result.ok) {
+      toast('تم إرسال الفاتورة بالإيميل')
       setTimeout(() => { setShowEmailForm(false); setEmailResult(null) }, 2500)
+    } else {
+      toast('فشل إرسال الإيميل', 'error')
     }
   }
 
@@ -343,7 +358,8 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
         </div>
 
         {/* جدول البنود */}
-        <table className="w-full mb-6 text-sm">
+        <div className="-mx-2 mb-6 overflow-x-auto px-2 print:mx-0 print:overflow-visible print:px-0">
+        <table className="w-full min-w-[460px] text-sm print:min-w-0">
           <thead>
             <tr className="border-b-2 border-white/10 print:border-gray-300">
               <th className="pb-2 text-right text-xs font-semibold uppercase tracking-widest text-slate-400 print:text-gray-500">#</th>
@@ -368,6 +384,7 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
             ))}
           </tbody>
         </table>
+        </div>
 
         {/* الإجماليات */}
         <div className="flex justify-end">

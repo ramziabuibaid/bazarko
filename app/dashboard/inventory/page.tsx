@@ -66,7 +66,7 @@ export default async function InventoryPage({ searchParams }: Props) {
   const expectedProfit = trackedWithCost.reduce((s: number, p: StockRow) => s + (p.stock_quantity ?? 0) * ((p.price ?? 0) - p.cost_price!), 0)
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-white">إدارة المخزون</h1>

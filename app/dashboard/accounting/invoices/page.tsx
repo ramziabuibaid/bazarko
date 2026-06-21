@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
+import InvoiceRowActions from '@/components/dashboard/accounting/InvoiceRowActions'
 
 interface Props {
   searchParams: { status?: string; q?: string }
@@ -37,7 +38,7 @@ export default async function InvoicesPage({ searchParams }: Props) {
 
   let query = supabase
     .from('invoices')
-    .select('id, invoice_number, customer_name, customer_id, issue_date, due_date, total, amount_paid, status')
+    .select('id, invoice_number, customer_name, customer_id, customer_phone, issue_date, due_date, total, amount_paid, status')
     .eq('store_id', store.id)
     .order('created_at', { ascending: false })
 
@@ -83,7 +84,7 @@ export default async function InvoicesPage({ searchParams }: Props) {
   ]
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-4 sm:p-6 space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-3 mb-1">
@@ -144,8 +145,8 @@ export default async function InvoicesPage({ searchParams }: Props) {
           </Link>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-white/5">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto rounded-2xl border border-white/5">
+          <table className="min-w-[680px] w-full text-sm">
             <thead>
               <tr className="border-b border-white/5 bg-white/3">
                 <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">رقم الفاتورة</th>
@@ -159,6 +160,7 @@ export default async function InvoicesPage({ searchParams }: Props) {
             <tbody className="divide-y divide-white/5">
               {invoices.map((inv: {
                 id: string; invoice_number: string; customer_name: string | null; customer_id: string | null
+                customer_phone: string | null
                 issue_date: string; due_date: string | null; total: number; amount_paid: number; status: string
               }) => {
                 const sl = STATUS_LABELS[inv.status] ?? { label: inv.status, cls: 'bg-white/5 text-white' }
@@ -187,12 +189,17 @@ export default async function InvoicesPage({ searchParams }: Props) {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <Link
-                        href={`/dashboard/accounting/invoices/${inv.id}`}
-                        className="rounded-lg bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:bg-sky-500/15 hover:text-sky-400"
-                      >
-                        عرض
-                      </Link>
+                      <InvoiceRowActions
+                        id={inv.id}
+                        invoiceNumber={inv.invoice_number}
+                        customerName={inv.customer_name}
+                        customerPhone={inv.customer_phone}
+                        remaining={remaining}
+                        status={inv.status}
+                        dueDate={inv.due_date}
+                        currencyCode={store.currency_code}
+                        storeName={store.name}
+                      />
                     </td>
                   </tr>
                 )

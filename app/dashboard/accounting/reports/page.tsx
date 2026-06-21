@@ -149,7 +149,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
   ]
 
   return (
-    <div className="p-6 space-y-6" dir="rtl">
+    <div className="p-4 sm:p-6 space-y-6" dir="rtl">
       <div className="flex flex-wrap items-center gap-3">
         <Link href="/dashboard/accounting" className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-slate-400 hover:text-white">
           ← المحاسبة

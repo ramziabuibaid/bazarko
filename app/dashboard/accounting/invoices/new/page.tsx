@@ -60,7 +60,7 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: S
   }
 
   return (
-    <div className="p-6 max-w-3xl">
+    <div className="p-4 sm:p-6 max-w-3xl">
       <div className="mb-6 flex items-center gap-3">
         <Link
           href={prefill ? `/dashboard/orders/${prefill.orderId}` : '/dashboard/accounting/invoices'}

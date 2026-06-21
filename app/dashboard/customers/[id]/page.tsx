@@ -47,7 +47,7 @@ export default async function CustomerDetailPage({ params }: Props) {
     .limit(10)
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <div className="mb-6 flex items-center gap-3">
         <Link href="/dashboard/customers" className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-slate-400 hover:text-white">
           ← الزبائن

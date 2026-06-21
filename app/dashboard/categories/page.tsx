@@ -26,7 +26,7 @@ export default async function CategoriesPage() {
     .order('sort_order')
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-white">الفئات</h1>

@@ -45,7 +45,7 @@ export default async function MovementsPage({ searchParams }: Props) {
   const TYPES = ['purchase', 'sale', 'return', 'adjustment', 'damage']
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <div className="mb-6 flex items-center gap-3">
         <Link href="/dashboard/inventory" className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-slate-400 hover:text-white">
           المخزون →
@@ -77,8 +77,8 @@ export default async function MovementsPage({ searchParams }: Props) {
           <p className="text-slate-500">لا توجد حركات مسجّلة</p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-white/5">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto rounded-2xl border border-white/5">
+          <table className="min-w-[680px] w-full text-sm">
             <thead>
               <tr className="border-b border-white/5 bg-white/3">
                 <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">التاريخ</th>

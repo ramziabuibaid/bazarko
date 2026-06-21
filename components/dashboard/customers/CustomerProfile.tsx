@@ -303,7 +303,8 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
             {ledger.length === 0 ? (
               <div className="py-12 text-center text-slate-500">لا توجد حركات مالية</div>
             ) : (
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px] text-sm print:min-w-0">
                 <thead>
                   <tr className="border-b border-white/5 bg-white/3 print:bg-gray-100">
                     <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">التاريخ</th>
@@ -349,6 +350,7 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
                   </tr>
                 </tfoot>
               </table>
+              </div>
             )}
           </div>
         )}
@@ -359,7 +361,8 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
             {orders.length === 0 ? (
               <div className="py-12 text-center text-slate-500">لا توجد طلبيات</div>
             ) : (
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px] text-sm print:min-w-0">
                 <thead>
                   <tr className="border-b border-white/5 bg-white/3">
                     <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">رقم الطلبية</th>
@@ -393,6 +396,7 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         )}
