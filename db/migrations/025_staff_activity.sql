@@ -28,13 +28,35 @@ CREATE TABLE IF NOT EXISTS public.staff_activity (
   page_path    TEXT,                                    -- /dashboard/products/...
   details      JSONB       NOT NULL DEFAULT '{}'::jsonb,-- before/after أو معلومات إضافية (مثلاً عدد أحرف اللصق)
   is_mobile    BOOLEAN     NOT NULL DEFAULT false,
+  -- معلومات الجهاز والشبكة (تُملأ خادمياً عبر /api/activity)
+  ip_address   TEXT,                                    -- IP العام للموظف (من x-forwarded-for)
+  user_agent   TEXT,                                    -- سلسلة User-Agent الكاملة
+  browser      TEXT,                                    -- Chrome / Safari / Firefox ...
+  os           TEXT,                                    -- Windows / Android / iOS / macOS ...
+  device_type  TEXT,                                    -- desktop / mobile / tablet
+  screen       TEXT,                                    -- دقة الشاشة "1920x1080"
+  viewport     TEXT,                                    -- حجم النافذة "1440x780"
+  language     TEXT,                                    -- لغة المتصفح
+  timezone     TEXT,                                    -- المنطقة الزمنية للجهاز
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- توافق مع النسخة الأولى من الجدول (إن كانت طُبّقت بدون أعمدة الجهاز/الشبكة)
+ALTER TABLE public.staff_activity ADD COLUMN IF NOT EXISTS ip_address  TEXT;
+ALTER TABLE public.staff_activity ADD COLUMN IF NOT EXISTS user_agent  TEXT;
+ALTER TABLE public.staff_activity ADD COLUMN IF NOT EXISTS browser     TEXT;
+ALTER TABLE public.staff_activity ADD COLUMN IF NOT EXISTS os          TEXT;
+ALTER TABLE public.staff_activity ADD COLUMN IF NOT EXISTS device_type TEXT;
+ALTER TABLE public.staff_activity ADD COLUMN IF NOT EXISTS screen      TEXT;
+ALTER TABLE public.staff_activity ADD COLUMN IF NOT EXISTS viewport    TEXT;
+ALTER TABLE public.staff_activity ADD COLUMN IF NOT EXISTS language    TEXT;
+ALTER TABLE public.staff_activity ADD COLUMN IF NOT EXISTS timezone    TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_staff_activity_store        ON public.staff_activity(store_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_staff_activity_actor        ON public.staff_activity(store_id, actor_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_staff_activity_session      ON public.staff_activity(session_id);
 CREATE INDEX IF NOT EXISTS idx_staff_activity_kind         ON public.staff_activity(store_id, kind, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_staff_activity_ip           ON public.staff_activity(store_id, ip_address);
 
 ALTER TABLE public.staff_activity ENABLE ROW LEVEL SECURITY;
 
@@ -55,6 +77,11 @@ CREATE POLICY "staff_activity_insert" ON public.staff_activity
 -- 2. RPC لتسجيل الحدث — SECURITY DEFINER
 --    يملأ actor_id/actor_name تلقائياً من الجلسة، ويتحقق من العضوية.
 -- ─────────────────────────────────────────────────
+-- إسقاط التوقيع القديم (10 معاملات) إن وُجد من نسخة سابقة — تفادياً لـ overload مزدوج
+DROP FUNCTION IF EXISTS public.log_staff_activity(
+  uuid, text, text, text, text, uuid, text, text, jsonb, boolean
+);
+
 CREATE OR REPLACE FUNCTION public.log_staff_activity(
   p_store_id     uuid,
   p_session_id   text,
@@ -65,7 +92,16 @@ CREATE OR REPLACE FUNCTION public.log_staff_activity(
   p_entity_label text    DEFAULT NULL,
   p_page_path    text    DEFAULT NULL,
   p_details      jsonb   DEFAULT '{}'::jsonb,
-  p_is_mobile    boolean DEFAULT false
+  p_is_mobile    boolean DEFAULT false,
+  p_ip_address   text    DEFAULT NULL,
+  p_user_agent   text    DEFAULT NULL,
+  p_browser      text    DEFAULT NULL,
+  p_os           text    DEFAULT NULL,
+  p_device_type  text    DEFAULT NULL,
+  p_screen       text    DEFAULT NULL,
+  p_viewport     text    DEFAULT NULL,
+  p_language     text    DEFAULT NULL,
+  p_timezone     text    DEFAULT NULL
 ) RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -89,14 +125,19 @@ BEGIN
 
   INSERT INTO staff_activity(
     store_id, actor_id, actor_name, session_id, kind, action,
-    entity_type, entity_id, entity_label, page_path, details, is_mobile
+    entity_type, entity_id, entity_label, page_path, details, is_mobile,
+    ip_address, user_agent, browser, os, device_type, screen, viewport, language, timezone
   ) VALUES (
     p_store_id, v_uid, v_name, p_session_id, p_kind, p_action,
     p_entity_type, p_entity_id, p_entity_label, p_page_path,
-    COALESCE(p_details, '{}'::jsonb), p_is_mobile
+    COALESCE(p_details, '{}'::jsonb), p_is_mobile,
+    p_ip_address, p_user_agent, p_browser, p_os, p_device_type,
+    p_screen, p_viewport, p_language, p_timezone
   );
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.log_staff_activity(uuid, text, text, text, text, uuid, text, text, jsonb, boolean)
-  TO authenticated;
+GRANT EXECUTE ON FUNCTION public.log_staff_activity(
+  uuid, text, text, text, text, uuid, text, text, jsonb, boolean,
+  text, text, text, text, text, text, text, text, text
+) TO authenticated;

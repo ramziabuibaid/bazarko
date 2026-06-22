@@ -19,6 +19,15 @@ type StaffRow = {
   entity_label: string | null
   page_path: string | null
   details: Record<string, unknown> | null
+  ip_address: string | null
+  user_agent: string | null
+  browser: string | null
+  os: string | null
+  device_type: string | null
+  screen: string | null
+  viewport: string | null
+  language: string | null
+  timezone: string | null
   created_at: string
 }
 
@@ -99,7 +108,7 @@ export default async function StoreActivityPage({ params, searchParams }: Props)
   // أحداث النشاط + السجل المالي ضمن الفترة
   const [{ data: staff }, { data: fin }] = await Promise.all([
     supabase.from('staff_activity')
-      .select('id, actor_id, actor_name, session_id, kind, action, entity_type, entity_label, page_path, details, created_at')
+      .select('id, actor_id, actor_name, session_id, kind, action, entity_type, entity_label, page_path, details, ip_address, user_agent, browser, os, device_type, screen, viewport, language, timezone, created_at')
       .eq('store_id', params.id).gte('created_at', since)
       .order('created_at', { ascending: true }),
     supabase.from('financial_audit_log')
@@ -131,6 +140,9 @@ export default async function StoreActivityPage({ params, searchParams }: Props)
     firstSeen: string | null
     lastSeen: string | null
     perDaySeconds: Record<string, number>
+    ips: Map<string, number>          // IP → عدد المرات
+    devices: Set<string>              // "Chrome · Windows · desktop"
+    timezones: Set<string>
   }
   const stats = new Map<string, ActorStat>()
   const ensure = (actorId: string | null, fallbackName: string | null): ActorStat => {
@@ -142,6 +154,7 @@ export default async function StoreActivityPage({ params, searchParams }: Props)
         role: memberMeta.get(key)?.role ?? '—',
         activeSeconds: 0, sessionIds: new Set(), pageViews: 0, pastes: 0,
         actions: {}, firstSeen: null, lastSeen: null, perDaySeconds: {},
+        ips: new Map(), devices: new Set(), timezones: new Set(),
       })
     }
     return stats.get(key)!
@@ -159,6 +172,9 @@ export default async function StoreActivityPage({ params, searchParams }: Props)
       if (ev.kind === 'page_view') st.pageViews++
       if (ev.kind === 'paste') st.pastes++
       if (ev.kind === 'action' && ev.action) st.actions[ev.action] = (st.actions[ev.action] ?? 0) + 1
+      if (ev.ip_address) st.ips.set(ev.ip_address, (st.ips.get(ev.ip_address) ?? 0) + 1)
+      if (ev.browser || ev.os) st.devices.add([ev.browser, ev.os, ev.device_type].filter(Boolean).join(' · '))
+      if (ev.timezone) st.timezones.add(ev.timezone)
       // الوقت النشط = الفجوة عن الحدث السابق (بحد أقصى)
       if (i > 0) {
         const gap = (new Date(ev.created_at).getTime() - new Date(events[i - 1].created_at).getTime()) / 1000
@@ -184,6 +200,7 @@ export default async function StoreActivityPage({ params, searchParams }: Props)
     id: string; actorName: string; created_at: string
     kind: string; action: string | null; entityType: string | null
     entityLabel: string | null; pagePath: string | null; details: Record<string, unknown> | null
+    ip: string | null; device: string | null
   }
   const timeline: TimelineItem[] = [
     ...staffRows
@@ -192,11 +209,13 @@ export default async function StoreActivityPage({ params, searchParams }: Props)
         id: r.id, actorName: r.actor_name ?? memberMeta.get(r.actor_id ?? '')?.name ?? 'غير معروف',
         created_at: r.created_at, kind: r.kind, action: r.action,
         entityType: r.entity_type, entityLabel: r.entity_label, pagePath: r.page_path, details: r.details,
+        ip: r.ip_address, device: [r.browser, r.os].filter(Boolean).join(' · ') || null,
       })),
     ...finRows.map(f => ({
       id: f.id, actorName: f.actor_name ?? 'غير معروف', created_at: f.created_at,
       kind: 'action', action: f.action, entityType: f.entity_type,
       entityLabel: f.entity_label, pagePath: null, details: f.details,
+      ip: null, device: null,
     })),
   ]
   .filter(t => !searchParams.actor || (memberMeta.get(searchParams.actor)?.name === t.actorName) || searchParams.actor === 'unknown')
@@ -306,6 +325,35 @@ export default async function StoreActivityPage({ params, searchParams }: Props)
                     })}
                   </div>
 
+                  {/* الأجهزة والـ IP */}
+                  <div className="mt-3 space-y-1.5 border-t border-white/5 pt-3">
+                    <div>
+                      <p className="text-[10px] text-slate-500">عناوين IP ({st.ips.size})</p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {[...st.ips.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([ip, n]) => (
+                          <span key={ip} className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-slate-300" dir="ltr">
+                            {ip} <span className="text-slate-500">×{n}</span>
+                          </span>
+                        ))}
+                        {st.ips.size === 0 && <span className="text-[10px] text-slate-600">—</span>}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500">الأجهزة ({st.devices.size})</p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {[...st.devices].slice(0, 3).map(d => (
+                          <span key={d} className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-300">{d}</span>
+                        ))}
+                        {st.devices.size === 0 && <span className="text-[10px] text-slate-600">—</span>}
+                      </div>
+                    </div>
+                    {st.timezones.size > 0 && (
+                      <p className="text-[10px] text-slate-500">
+                        المنطقة الزمنية: <span className="text-slate-300" dir="ltr">{[...st.timezones].join('، ')}</span>
+                      </p>
+                    )}
+                  </div>
+
                   <p className="mt-2 text-[11px] text-slate-500">
                     آخر ظهور: {st.lastSeen ? fmtTime(st.lastSeen) : '—'}
                   </p>
@@ -340,7 +388,11 @@ export default async function StoreActivityPage({ params, searchParams }: Props)
                           <span className="mr-1 text-xs text-slate-500">— غيّر: {changed.join('، ')}</span>
                         )}
                       </p>
-                      <p className="text-[11px] text-slate-500">{t.actorName} · {fmtTime(t.created_at)}</p>
+                      <p className="text-[11px] text-slate-500">
+                        {t.actorName} · {fmtTime(t.created_at)}
+                        {t.ip && <span className="font-mono text-slate-600" dir="ltr"> · {t.ip}</span>}
+                        {t.device && <span className="text-slate-600"> · {t.device}</span>}
+                      </p>
                     </div>
                   </div>
                 )

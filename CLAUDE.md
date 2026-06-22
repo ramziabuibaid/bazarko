@@ -189,12 +189,13 @@ db/
 
 ### تتبّع نشاط الموظفين (migration 025)
 لمراقبة موظف يعمل على المتجر عن بُعد: **كم وقتاً قضى فعلاً + كل ما فعله بدقة**.
-- جدول `staff_activity` يلتقط: `session_start/heartbeat/session_end` (لحساب الوقت النشط)، `page_view` (التنقّل)، `action` (إنشاء/تعديل/حذف/تغيير حالة مع diff)، `paste` (لصق نص طويل — مؤشر AI/نسخ).
+- جدول `staff_activity` يلتقط: `session_start/heartbeat/session_end` (لحساب الوقت النشط)، `page_view` (التنقّل)، `action` (إنشاء/تعديل/حذف/تغيير حالة مع diff)، `paste` (لصق نص طويل — مؤشر AI/نسخ). + أعمدة الجهاز/الشبكة: `ip_address, user_agent, browser, os, device_type, screen, viewport, language, timezone`.
 - RPC `log_staff_activity(...)` بـ `SECURITY DEFINER` — يملأ actor تلقائياً ويتحقق من العضوية. GRANT لـ authenticated.
-- `lib/activity/track.ts` — `trackActivity` / `trackAction` / `diffFields` (client). يُستدعى بعد نجاح كل كتابة Supabase.
+- **الـ IP ومعلومات الجهاز تُلتقط خادمياً**: التتبّع يمرّ عبر `app/api/activity/route.ts` (POST) الذي يقرأ `x-forwarded-for` ويشتقّ المتصفح/النظام من User-Agent ثم يستدعي الـ RPC. (لا يمكن أخذ IP الحقيقي من RPC مباشر لأن الاتصال يمرّ عبر pooler.)
+- `lib/activity/track.ts` — `trackActivity` / `trackAction` / `diffFields` (client). يرسل عبر `fetch keepalive` (أو `sendBeacon` لـ session_end) مع معلومات المتصفح (شاشة/نافذة/لغة/منطقة زمنية). يُستدعى بعد نجاح كل كتابة Supabase.
 - `components/dashboard/StaffActivityTracker.tsx` — مركّب في `DashboardShell`: بداية جلسة مرة واحدة، نبضة كل 30ث (تتوقف عند الخمول >60ث أو إخفاء التبويب)، page_view عند كل تغيّر مسار، كشف اللصق >40 حرف.
 - الكتابات المرصودة: المنتجات (نموذج + جدول)، الفئات، العروض، الإعدادات، حالة الطلبية، الصيانة. (المالية يغطّيها `financial_audit_log` المنفصل.)
-- **التقرير**: `/admin/stores/[id]/activity` (super admin) — بطاقة لكل موظف (وقت نشط، جلسات، عدد العمليات، تصفّح، نسبة لصق، أعمدة وقت يومي) + تايملاين موحّد يدمج `staff_activity` + `financial_audit_log`. رابط من صفحة تفاصيل المتجر.
+- **التقرير**: `/admin/stores/[id]/activity` (super admin) — بطاقة لكل موظف (وقت نشط، جلسات، عدد العمليات، تصفّح، نسبة لصق، أعمدة وقت يومي، **عناوين IP المستخدمة + الأجهزة + المنطقة الزمنية**) + تايملاين موحّد (مع IP والجهاز لكل حدث) يدمج `staff_activity` + `financial_audit_log`. رابط من صفحة تفاصيل المتجر.
 
 ---
 

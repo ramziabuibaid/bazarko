@@ -1,7 +1,5 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
-
 export type ActivityKind = 'session_start' | 'heartbeat' | 'session_end' | 'page_view' | 'action' | 'paste'
 export type ActivityAction =
   | 'create' | 'update' | 'delete' | 'status_change'
@@ -31,36 +29,54 @@ export function getStaffSessionId(): string {
   }
 }
 
-function isMobile(): boolean {
+/** معلومات الجهاز التي يعرفها المتصفح فقط (الباقي — IP/UA — يُضاف خادمياً). */
+function clientInfo(): Record<string, string> {
   try {
-    return /Mobi|Android/i.test(navigator.userAgent)
+    return {
+      screen:    `${window.screen.width}x${window.screen.height}`,
+      viewport:  `${window.innerWidth}x${window.innerHeight}`,
+      language:  navigator.language,
+      timezone:  Intl.DateTimeFormat().resolvedOptions().timeZone,
+      userAgent: navigator.userAgent,
+    }
   } catch {
-    return false
+    return {}
   }
 }
 
 /**
- * يسجّل حدث نشاط للموظف الحالي. يبتلع الأخطاء بهدوء —
- * فشل التتبّع يجب ألّا يُعطّل عمل الموظف.
+ * يسجّل حدث نشاط للموظف الحالي عبر /api/activity (ليلتقط الخادمُ الـ IP الحقيقي
+ * ومعلومات الجهاز). يبتلع الأخطاء بهدوء — التتبّع يجب ألّا يُعطّل عمل الموظف.
  */
 export function trackActivity(storeId: string, params: TrackParams): void {
   try {
-    createClient()
-      .rpc('log_staff_activity', {
-        p_store_id:     storeId,
-        p_session_id:   getStaffSessionId(),
-        p_kind:         params.kind,
-        p_action:       params.action      ?? null,
-        p_entity_type:  params.entityType  ?? null,
-        p_entity_id:    params.entityId    ?? null,
-        p_entity_label: params.entityLabel ?? null,
-        p_page_path:    params.pagePath ?? (typeof window !== 'undefined' ? window.location.pathname : null),
-        p_details:      params.details     ?? {},
-        p_is_mobile:    isMobile(),
-      })
-      .then(({ error }: { error: { message: string } | null }) => {
-        if (error) console.error('[activity] log_staff_activity failed:', error.message)
-      })
+    const ci = clientInfo()
+    const payload = JSON.stringify({
+      storeId,
+      sessionId:   getStaffSessionId(),
+      kind:        params.kind,
+      action:      params.action      ?? null,
+      entityType:  params.entityType  ?? null,
+      entityId:    params.entityId    ?? null,
+      entityLabel: params.entityLabel ?? null,
+      pagePath:    params.pagePath ?? (typeof window !== 'undefined' ? window.location.pathname : null),
+      details:     params.details     ?? {},
+      userAgent:   ci.userAgent,
+      client:      ci,
+    })
+
+    // عند إغلاق التبويب نستخدم sendBeacon لضمان الإرسال؛ غير ذلك fetch مع keepalive.
+    if (params.kind === 'session_end' && typeof navigator !== 'undefined' && navigator.sendBeacon) {
+      navigator.sendBeacon('/api/activity', new Blob([payload], { type: 'application/json' }))
+      return
+    }
+
+    fetch('/api/activity', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    payload,
+      keepalive: true,
+    }).catch(() => {})
   } catch {
     /* تجاهل بهدوء */
   }
@@ -69,10 +85,6 @@ export function trackActivity(storeId: string, params: TrackParams): void {
 /**
  * اختصار لتسجيل فعل (إنشاء/تعديل/حذف…) على عنصر.
  * استدعِه بعد نجاح عملية الكتابة في Supabase.
- *
- * مثال:
- *   trackAction(storeId, { action: 'update', entityType: 'product',
- *     entityId: id, entityLabel: name, details: { changed: ['price'] } })
  */
 export function trackAction(
   storeId: string,
@@ -89,7 +101,6 @@ export function trackAction(
 
 /**
  * يحسب قائمة الحقول التي تغيّرت بين نسختين (للتمييز: تعديل سعر فقط أم إعادة كتابة كاملة).
- * يُستخدم في details.changed لقياس "حجم" التعديل.
  */
 export function diffFields(
   before: Record<string, unknown>,
