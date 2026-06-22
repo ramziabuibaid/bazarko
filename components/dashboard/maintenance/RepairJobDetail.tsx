@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { uploadRepairPhoto } from '@/lib/supabase/storage'
+import { trackAction } from '@/lib/activity/track'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -210,6 +211,10 @@ export default function RepairJobDetail({
       priority,
       updated_at:     new Date().toISOString(),
     }).eq('id', job.id)
+    trackAction(job.store_id, {
+      action: 'update', entityType: 'repair',
+      entityId: job.id, entityLabel: job.job_number,
+    })
     setSaving(false)
     router.refresh()
   }
@@ -225,6 +230,11 @@ export default function RepairJobDetail({
       job_id: job.id, from_status: status, to_status: nextStatus,
       note: STATUS_NEXT_LABEL[status] ?? null, changed_by: userId,
     })
+    trackAction(job.store_id, {
+      action: 'status_change', entityType: 'repair',
+      entityId: job.id, entityLabel: job.job_number,
+      details: { from: status, to: nextStatus },
+    })
     setStatus(nextStatus)
     setAdvancing(false)
     router.refresh()
@@ -238,6 +248,11 @@ export default function RepairJobDetail({
       job_id: job.id, from_status: status, to_status: 'waiting_parts',
       note: 'في انتظار وصول قطع الغيار', changed_by: userId,
     })
+    trackAction(job.store_id, {
+      action: 'status_change', entityType: 'repair',
+      entityId: job.id, entityLabel: job.job_number,
+      details: { from: status, to: 'waiting_parts' },
+    })
     setStatus('waiting_parts')
     setAdvancing(false)
     router.refresh()
@@ -250,6 +265,11 @@ export default function RepairJobDetail({
     await supabase.from('repair_job_history').insert({
       job_id: job.id, from_status: status, to_status: 'cancelled',
       note: 'تم إلغاء الطلب', changed_by: userId,
+    })
+    trackAction(job.store_id, {
+      action: 'status_change', entityType: 'repair',
+      entityId: job.id, entityLabel: job.job_number,
+      details: { from: status, to: 'cancelled' },
     })
     setStatus('cancelled')
     router.refresh()

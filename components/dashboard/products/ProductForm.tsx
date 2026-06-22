@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { generateSlug } from '@/lib/utils/slug'
 import { uploadProductImage, deleteProductImage } from '@/lib/supabase/storage'
+import { trackAction, diffFields } from '@/lib/activity/track'
 
 interface Category { id: string; name: string }
 
@@ -203,13 +204,25 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
         .update(payload)
         .eq('id', initialData!.id!)
       if (err) { setError(err.message); setSaving(false); return }
+      const changed = diffFields(initialData as unknown as Record<string, unknown>, payload)
+      trackAction(storeId, {
+        action: 'update', entityType: 'product',
+        entityId: initialData!.id!, entityLabel: payload.name,
+        details: { changed, changedCount: changed.length },
+      })
     } else {
-      const { error: err } = await supabase.from('products').insert(payload)
+      const { data: created, error: err } = await supabase
+        .from('products').insert(payload).select('id').single()
       if (err) {
         setError(err.message.includes('duplicate') ? 'يوجد منتج بنفس الرابط (slug)' : err.message)
         setSaving(false)
         return
       }
+      trackAction(storeId, {
+        action: 'create', entityType: 'product',
+        entityId: created?.id ?? null, entityLabel: payload.name,
+        details: { price: payload.price, stock: payload.stock_quantity },
+      })
     }
 
     router.push('/dashboard/products')

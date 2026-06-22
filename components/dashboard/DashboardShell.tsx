@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Sidebar from './Sidebar'
 import DashboardTopbar, { type DashNotification } from './DashboardTopbar'
 import MobileBottomNav from './MobileBottomNav'
+import StaffActivityTracker from './StaffActivityTracker'
 import { ToastProvider } from '@/components/ui/Toast'
 import { ConfirmProvider } from '@/components/ui/Confirm'
 
@@ -35,6 +36,7 @@ export default function DashboardShell({
   return (
     <ToastProvider>
     <ConfirmProvider>
+    <StaffActivityTracker storeId={store.id} />
     <div className="flex h-screen overflow-hidden bg-slate-950 text-white" dir="rtl">
       {/* طبقة خلفية للموبايل عند فتح السايدبار */}
       {sidebarOpen && (

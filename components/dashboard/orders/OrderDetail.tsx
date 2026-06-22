@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { trackAction } from '@/lib/activity/track'
 
 interface OrderItem {
   id: string
@@ -37,6 +38,7 @@ interface Props {
   order: Order
   items: OrderItem[]
   currencyCode: string
+  storeId: string
 }
 
 const STATUS_FLOW: Record<string, { label: string; color: string; next: string | null }> = {
@@ -70,7 +72,7 @@ function formatDate(iso: string) {
   })
 }
 
-export default function OrderDetail({ order, items, currencyCode }: Props) {
+export default function OrderDetail({ order, items, currencyCode, storeId }: Props) {
   const router = useRouter()
   const [status, setStatus] = useState(order.status)
   const [notes, setNotes] = useState(order.internal_notes ?? '')
@@ -94,6 +96,11 @@ export default function OrderDetail({ order, items, currencyCode }: Props) {
     if (err) {
       setError('حدث خطأ أثناء التحديث')
     } else {
+      trackAction(storeId, {
+        action: 'status_change', entityType: 'order',
+        entityId: order.id, entityLabel: order.order_number,
+        details: { from: status, to: nextStatus },
+      })
       setStatus(nextStatus)
       router.refresh()
     }
@@ -108,6 +115,11 @@ export default function OrderDetail({ order, items, currencyCode }: Props) {
       .from('orders')
       .update({ status: 'cancelled', updated_at: new Date().toISOString() })
       .eq('id', order.id)
+    trackAction(storeId, {
+      action: 'status_change', entityType: 'order',
+      entityId: order.id, entityLabel: order.order_number,
+      details: { from: status, to: 'cancelled' },
+    })
     setStatus('cancelled')
     router.refresh()
     setUpdating(false)

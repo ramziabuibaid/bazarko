@@ -80,6 +80,7 @@ export default async function OrderDetailPage({ params }: Props) {
         order={order}
         items={items ?? []}
         currencyCode={store.currency_code}
+        storeId={store.id}
       />
     </div>
   )

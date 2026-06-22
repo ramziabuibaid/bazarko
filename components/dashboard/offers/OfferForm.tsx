@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { trackAction } from '@/lib/activity/track'
 
 interface Product {
   id: string
@@ -205,6 +206,12 @@ export default function OfferForm({ storeId, currencyCode, products, categories,
     )
     if (itemsErr) { setError(itemsErr.message); setSaving(false); return }
 
+    trackAction(storeId, {
+      action: isEditing ? 'update' : 'create', entityType: 'offer',
+      entityId: offerId ?? null, entityLabel: offerPayload.title,
+      details: { items: form.items.length, is_active: offerPayload.is_active },
+    })
+
     router.push('/dashboard/offers')
     router.refresh()
   }
@@ -216,6 +223,10 @@ export default function OfferForm({ storeId, currencyCode, products, categories,
     const supabase = createClient()
     const { error: err } = await supabase.from('offers').delete().eq('id', initialData.id)
     if (err) { setError(err.message); setDeleting(false); return }
+    trackAction(storeId, {
+      action: 'delete', entityType: 'offer',
+      entityId: initialData.id, entityLabel: form.title,
+    })
     router.push('/dashboard/offers')
     router.refresh()
   }

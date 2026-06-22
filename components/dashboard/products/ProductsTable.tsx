@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { uniqueSlug } from '@/lib/utils/slug'
+import { trackAction } from '@/lib/activity/track'
 
 interface Product {
   id: string
@@ -63,6 +64,11 @@ export default function ProductsTable({ products: initial, categories, storeId, 
     const next = product.status === 'active' ? 'hidden' : 'active'
     const supabase = createClient()
     await supabase.from('products').update({ status: next }).eq('id', product.id)
+    trackAction(storeId, {
+      action: 'status_change', entityType: 'product',
+      entityId: product.id, entityLabel: product.name,
+      details: { from: product.status, to: next },
+    })
     setProducts(ps => ps.map(p => p.id === product.id ? { ...p, status: next, is_active: next === 'active' } : p))
   }
 
@@ -111,6 +117,11 @@ export default function ProductsTable({ products: initial, categories, storeId, 
     setDuplicating(prev => { const n = { ...prev }; delete n[product.id]; return n })
 
     if (!error && copy) {
+      trackAction(storeId, {
+        action: 'create', entityType: 'product',
+        entityId: copy.id, entityLabel: `نسخة - ${product.name}`,
+        details: { duplicatedFrom: product.id },
+      })
       router.push(`/dashboard/products/${copy.id}`)
     }
   }
@@ -118,7 +129,12 @@ export default function ProductsTable({ products: initial, categories, storeId, 
   async function confirmDelete(id: string) {
     setDeleting(true)
     const supabase = createClient()
+    const deleted = products.find(p => p.id === id)
     await supabase.from('products').delete().eq('id', id)
+    trackAction(storeId, {
+      action: 'delete', entityType: 'product',
+      entityId: id, entityLabel: deleted?.name ?? null,
+    })
     setProducts(ps => ps.filter(p => p.id !== id))
     setDeleteId(null)
     setDeleting(false)

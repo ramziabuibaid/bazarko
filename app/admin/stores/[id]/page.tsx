@@ -257,12 +257,12 @@ export default async function AdminStoreDetailPage({ params }: Props) {
                   {activityEvents.length} حدث — طلبيات، منتجات، زبائن، صيانة، دخول
                 </p>
               </div>
-              <div className="flex items-center gap-3 text-xs text-slate-600">
-                <span className="flex items-center gap-1"><span className="text-emerald-400">🛒</span> طلبية</span>
-                <span className="flex items-center gap-1"><span className="text-violet-400">📦</span> منتج</span>
-                <span className="flex items-center gap-1"><span className="text-orange-400">👤</span> زبون</span>
-                <span className="flex items-center gap-1"><span className="text-rose-400">🔧</span> صيانة</span>
-              </div>
+              <Link
+                href={`/admin/stores/${params.id}/activity`}
+                className="rounded-lg bg-sky-500/15 px-3 py-1.5 text-xs font-medium text-sky-400 hover:bg-sky-500/25 transition-colors"
+              >
+                ⏱️ تقرير وقت وتحركات الموظفين ←
+              </Link>
             </div>
 
             {activityEvents.length === 0 ? (

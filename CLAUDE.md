@@ -184,7 +184,17 @@ db/
     ├── 022_treasury.sql                       ⚠️ يجب تطبيقه — الصندوق + حركات + جلسات إغلاق + trigger السندات
     ├── 023_audit_invoices.sql                 ⚠️ يجب تطبيقه — سجل العمليات + حالة فاتورة partial + paid_at
     └── 024_support_tickets.sql                ⚠️ يجب تطبيقه — تذاكر دعم الزبائن + محادثة
+    └── 025_staff_activity.sql                 ⚠️ يجب تطبيقه — تتبّع نشاط الموظفين (وقت فعلي + تحركات + لصق) + RPC
 ```
+
+### تتبّع نشاط الموظفين (migration 025)
+لمراقبة موظف يعمل على المتجر عن بُعد: **كم وقتاً قضى فعلاً + كل ما فعله بدقة**.
+- جدول `staff_activity` يلتقط: `session_start/heartbeat/session_end` (لحساب الوقت النشط)، `page_view` (التنقّل)، `action` (إنشاء/تعديل/حذف/تغيير حالة مع diff)، `paste` (لصق نص طويل — مؤشر AI/نسخ).
+- RPC `log_staff_activity(...)` بـ `SECURITY DEFINER` — يملأ actor تلقائياً ويتحقق من العضوية. GRANT لـ authenticated.
+- `lib/activity/track.ts` — `trackActivity` / `trackAction` / `diffFields` (client). يُستدعى بعد نجاح كل كتابة Supabase.
+- `components/dashboard/StaffActivityTracker.tsx` — مركّب في `DashboardShell`: بداية جلسة مرة واحدة، نبضة كل 30ث (تتوقف عند الخمول >60ث أو إخفاء التبويب)، page_view عند كل تغيّر مسار، كشف اللصق >40 حرف.
+- الكتابات المرصودة: المنتجات (نموذج + جدول)، الفئات، العروض، الإعدادات، حالة الطلبية، الصيانة. (المالية يغطّيها `financial_audit_log` المنفصل.)
+- **التقرير**: `/admin/stores/[id]/activity` (super admin) — بطاقة لكل موظف (وقت نشط، جلسات، عدد العمليات، تصفّح، نسبة لصق، أعمدة وقت يومي) + تايملاين موحّد يدمج `staff_activity` + `financial_audit_log`. رابط من صفحة تفاصيل المتجر.
 
 ---
 

@@ -4,6 +4,7 @@ import { useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { uploadStoreImage } from '@/lib/supabase/storage'
 import { useRouter } from 'next/navigation'
+import { trackAction } from '@/lib/activity/track'
 import { HEADER_THEMES } from '@/components/store/headerThemes'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -275,6 +276,10 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
     if (err) {
       setError('حدث خطأ أثناء الحفظ')
     } else {
+      trackAction(store.id, {
+        action: 'update', entityType: 'settings',
+        entityId: store.id, entityLabel: form.name.trim(),
+      })
       setSuccess(true)
       router.refresh()
       setTimeout(() => setSuccess(false), 3000)

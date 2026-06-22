@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { generateSlug } from '@/lib/utils/slug'
 import { uploadCategoryImage } from '@/lib/supabase/storage'
+import { trackAction } from '@/lib/activity/track'
 
 interface Category {
   id: string
@@ -125,6 +126,10 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
         setLoading(false)
         return
       }
+      trackAction(storeId, {
+        action: 'update', entityType: 'category',
+        entityId: editing.id, entityLabel: payload.name,
+      })
       setCategories(cats =>
         cats.map(c => c.id === editing.id ? { ...c, ...payload } : c)
           .sort((a, b) => a.sort_order - b.sort_order)
@@ -142,6 +147,10 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
         return
       }
       if (data) {
+        trackAction(storeId, {
+          action: 'create', entityType: 'category',
+          entityId: data.id, entityLabel: payload.name,
+        })
         setCategories(cats => [...cats, data].sort((a, b) => a.sort_order - b.sort_order))
       }
     }
@@ -154,6 +163,11 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
   async function toggleActive(cat: Category) {
     const supabase = createClient()
     await supabase.from('categories').update({ is_active: !cat.is_active }).eq('id', cat.id)
+    trackAction(storeId, {
+      action: 'status_change', entityType: 'category',
+      entityId: cat.id, entityLabel: cat.name,
+      details: { is_active: !cat.is_active },
+    })
     setCategories(cats => cats.map(c => c.id === cat.id ? { ...c, is_active: !c.is_active } : c))
   }
 
@@ -190,6 +204,10 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
       setLoading(false)
       return
     }
+    trackAction(storeId, {
+      action: 'delete', entityType: 'category',
+      entityId: id, entityLabel: categories.find(c => c.id === id)?.name ?? null,
+    })
     setCategories(cats => cats.filter(c => c.id !== id))
     setDeleteId(null)
     setLoading(false)
