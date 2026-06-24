@@ -88,7 +88,7 @@ export default function VouchersTable({ vouchers, type, storeId, userId, currenc
   const [error, setError]                   = useState('')
 
   const categories  = type === 'receipt' ? RECEIPT_CATEGORIES : PAYMENT_CATEGORIES
-  const fmt         = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 2 })
+  const fmt         = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })
   const totalAmount = vouchers.reduce((s, v) => s + v.amount, 0)
   const isReceipt   = type === 'receipt'
   const icon        = isReceipt ? '💵' : '💸'
@@ -191,7 +191,7 @@ export default function VouchersTable({ vouchers, type, storeId, userId, currenc
     const msg =
       `*${storeName ?? ''}*\n` +
       `${head}: ${v.voucher_number}\n` +
-      `التاريخ: ${new Date(v.date).toLocaleDateString('ar')}\n` +
+      `التاريخ: ${new Date(v.date).toLocaleDateString('ar-u-nu-latn')}\n` +
       `المبلغ: ${fmt(v.amount)} ${currencyCode}\n` +
       `بخصوص: ${v.description}` +
       (isReceipt ? '\n\nشكراً لتعاملكم معنا 🌟' : '')
@@ -233,7 +233,7 @@ export default function VouchersTable({ vouchers, type, storeId, userId, currenc
           <div class="badge">${head}</div>
         </div>
         <div class="row"><span class="label">رقم السند</span><span class="num">${esc(v.voucher_number)}</span></div>
-        <div class="row"><span class="label">التاريخ</span><span>${new Date(v.date).toLocaleDateString('ar')}</span></div>
+        <div class="row"><span class="label">التاريخ</span><span>${new Date(v.date).toLocaleDateString('ar-u-nu-latn')}</span></div>
         <div class="row"><span class="label">${partyLabel}</span><span>${esc(v.party_name ?? '—')}</span></div>
         <div class="row"><span class="label">طريقة الدفع</span><span>${esc(methodLabel)}</span></div>
         ${v.category ? `<div class="row"><span class="label">التصنيف</span><span>${esc(v.category)}</span></div>` : ''}
@@ -326,7 +326,7 @@ export default function VouchersTable({ vouchers, type, storeId, userId, currenc
                 <tr key={v.id} className="transition-colors hover:bg-white/[0.03]">
                   <td className="px-4 py-3 font-mono text-xs text-slate-400" dir="ltr">{v.voucher_number}</td>
                   <td className="px-4 py-3 text-xs text-slate-400">
-                    {new Date(v.date).toLocaleDateString('ar', { year: 'numeric', month: 'short', day: 'numeric' })}
+                    {new Date(v.date).toLocaleDateString('ar-u-nu-latn', { year: 'numeric', month: 'short', day: 'numeric' })}
                   </td>
                   <td className="px-4 py-3 text-sm text-white">{v.party_name ?? '—'}</td>
                   <td className="max-w-[180px] truncate px-4 py-3 text-sm text-slate-300">{v.description}</td>
@@ -414,7 +414,7 @@ export default function VouchersTable({ vouchers, type, storeId, userId, currenc
                 </div>
                 {amountRaw && parseFloat(amountRaw) > 0 && (
                   <p className="mt-1 text-xs text-slate-500" dir="ltr">
-                    = {parseFloat(amountRaw).toLocaleString('ar-SA', { maximumFractionDigits: 2 })} {currencyCode}
+                    = {parseFloat(amountRaw).toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })} {currencyCode}
                   </p>
                 )}
               </div>

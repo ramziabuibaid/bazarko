@@ -33,19 +33,19 @@ export default function CartClient({
     if (preferSecondary && sec !== null) {
       return (
         <span className={className}>
-          <span>{sec.toLocaleString('ar')} {secondaryCurrencyCode}</span>
+          <span>{sec.toLocaleString('ar-u-nu-latn')} {secondaryCurrencyCode}</span>
           <span className="block text-xs text-gray-400 dark:text-gray-500">
-            ≈ {price.toLocaleString('ar')} {currencyCode}
+            ≈ {price.toLocaleString('ar-u-nu-latn')} {currencyCode}
           </span>
         </span>
       )
     }
     return (
       <span className={className}>
-        <span>{price.toLocaleString('ar')} {currencyCode}</span>
+        <span>{price.toLocaleString('ar-u-nu-latn')} {currencyCode}</span>
         {sec !== null && (
           <span className="block text-xs text-gray-400 dark:text-gray-500">
-            ≈ {sec.toLocaleString('ar')} {secondaryCurrencyCode}
+            ≈ {sec.toLocaleString('ar-u-nu-latn')} {secondaryCurrencyCode}
           </span>
         )}
       </span>
@@ -104,20 +104,20 @@ export default function CartClient({
                   <div className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
                     {preferSecondary && secondaryPrice(item.price) !== null ? (
                       <>
-                        <span>{secondaryPrice(item.price)!.toLocaleString('ar')} {secondaryCurrencyCode}</span>
+                        <span>{secondaryPrice(item.price)!.toLocaleString('ar-u-nu-latn')} {secondaryCurrencyCode}</span>
                         <span className="mx-1 text-gray-300 dark:text-gray-600">·</span>
                         <span className="text-xs text-gray-400 dark:text-gray-500">
-                          {item.price.toLocaleString('ar')} {currencyCode}
+                          {item.price.toLocaleString('ar-u-nu-latn')} {currencyCode}
                         </span>
                       </>
                     ) : (
                       <>
-                        <span>{item.price.toLocaleString('ar')} {currencyCode}</span>
+                        <span>{item.price.toLocaleString('ar-u-nu-latn')} {currencyCode}</span>
                         {secondaryPrice(item.price) !== null && (
                           <>
                             <span className="mx-1 text-gray-300 dark:text-gray-600">·</span>
                             <span className="text-xs text-gray-400 dark:text-gray-500">
-                              {secondaryPrice(item.price)!.toLocaleString('ar')} {secondaryCurrencyCode}
+                              {secondaryPrice(item.price)!.toLocaleString('ar-u-nu-latn')} {secondaryCurrencyCode}
                             </span>
                           </>
                         )}
@@ -132,20 +132,20 @@ export default function CartClient({
                     {preferSecondary && lineSecondary !== null ? (
                       <>
                         <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                          {lineSecondary.toLocaleString('ar')} {secondaryCurrencyCode}
+                          {lineSecondary.toLocaleString('ar-u-nu-latn')} {secondaryCurrencyCode}
                         </span>
                         <span className="mr-1.5 text-xs text-gray-400 dark:text-gray-500">
-                          ≈ {lineTotal.toLocaleString('ar')} {currencyCode}
+                          ≈ {lineTotal.toLocaleString('ar-u-nu-latn')} {currencyCode}
                         </span>
                       </>
                     ) : (
                       <>
                         <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                          {lineTotal.toLocaleString('ar')} {currencyCode}
+                          {lineTotal.toLocaleString('ar-u-nu-latn')} {currencyCode}
                         </span>
                         {lineSecondary !== null && (
                           <span className="mr-1.5 text-xs text-gray-400 dark:text-gray-500">
-                            ≈ {lineSecondary.toLocaleString('ar')} {secondaryCurrencyCode}
+                            ≈ {lineSecondary.toLocaleString('ar-u-nu-latn')} {secondaryCurrencyCode}
                           </span>
                         )}
                       </>
@@ -183,20 +183,20 @@ export default function CartClient({
               {preferSecondary && totalSecondary !== null ? (
                 <>
                   <p className="font-medium text-gray-900 dark:text-white">
-                    {totalSecondary.toLocaleString('ar')} {secondaryCurrencyCode}
+                    {totalSecondary.toLocaleString('ar-u-nu-latn')} {secondaryCurrencyCode}
                   </p>
                   <p className="text-xs text-gray-400 dark:text-gray-500">
-                    ≈ {totalPrimary.toLocaleString('ar')} {currencyCode}
+                    ≈ {totalPrimary.toLocaleString('ar-u-nu-latn')} {currencyCode}
                   </p>
                 </>
               ) : (
                 <>
                   <p className="font-medium text-gray-900 dark:text-white">
-                    {totalPrimary.toLocaleString('ar')} {currencyCode}
+                    {totalPrimary.toLocaleString('ar-u-nu-latn')} {currencyCode}
                   </p>
                   {totalSecondary !== null && (
                     <p className="text-xs text-gray-400 dark:text-gray-500">
-                      ≈ {totalSecondary.toLocaleString('ar')} {secondaryCurrencyCode}
+                      ≈ {totalSecondary.toLocaleString('ar-u-nu-latn')} {secondaryCurrencyCode}
                     </p>
                   )}
                 </>
@@ -216,20 +216,20 @@ export default function CartClient({
                 {preferSecondary && totalSecondary !== null ? (
                   <>
                     <p className="text-lg text-gray-900 dark:text-white">
-                      {totalSecondary.toLocaleString('ar')} {secondaryCurrencyCode}
+                      {totalSecondary.toLocaleString('ar-u-nu-latn')} {secondaryCurrencyCode}
                     </p>
                     <p className="text-sm font-normal text-gray-400 dark:text-gray-500">
-                      ≈ {totalPrimary.toLocaleString('ar')} {currencyCode}
+                      ≈ {totalPrimary.toLocaleString('ar-u-nu-latn')} {currencyCode}
                     </p>
                   </>
                 ) : (
                   <>
                     <p className="text-lg text-gray-900 dark:text-white">
-                      {totalPrimary.toLocaleString('ar')} {currencyCode}
+                      {totalPrimary.toLocaleString('ar-u-nu-latn')} {currencyCode}
                     </p>
                     {totalSecondary !== null && (
                       <p className="text-sm font-normal text-gray-400 dark:text-gray-500">
-                        ≈ {totalSecondary.toLocaleString('ar')} {secondaryCurrencyCode}
+                        ≈ {totalSecondary.toLocaleString('ar-u-nu-latn')} {secondaryCurrencyCode}
                       </p>
                     )}
                   </>

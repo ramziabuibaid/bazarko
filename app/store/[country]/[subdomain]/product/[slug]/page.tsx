@@ -2,6 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import AddToCartButton from '@/components/store/AddToCartButton'
+import StickyBuyBar from '@/components/store/StickyBuyBar'
+import ProductReviews from '@/components/store/ProductReviews'
 import StoreHeader from '@/components/store/StoreHeader'
 import OfferCountdown from '@/components/store/OfferCountdown'
 import StoreFooter from '@/components/store/StoreFooter'
@@ -38,6 +40,20 @@ export default async function ProductPage({ params }: Props) {
   if (!product) notFound()
 
   await supabase.rpc('increment_product_views', { p_product_id: product.id })
+
+  // تقييمات المنتج المعتمدة
+  const { data: reviewRows } = await supabase
+    .from('product_reviews')
+    .select('id, customer_name, rating, comment, photos, created_at')
+    .eq('product_id', product.id)
+    .eq('status', 'approved')
+    .order('created_at', { ascending: false })
+
+  const reviews = (reviewRows ?? []) as {
+    id: string; customer_name: string; rating: number; comment: string | null; photos: string[]; created_at: string
+  }[]
+  const reviewCount = reviews.length
+  const reviewAvg = reviewCount ? reviews.reduce((s, r) => s + r.rating, 0) / reviewCount : null
 
   // هل المنتج ضمن عرض جارٍ حالياً؟
   const nowIso = new Date().toISOString()
@@ -107,7 +123,7 @@ export default async function ProductPage({ params }: Props) {
       <StoreAnalyticsTracker storeId={store.id} eventType="product_view" productId={product.id} pagePath={`/store/${params.country}/${params.subdomain}/product/${params.slug}`} />
       <StoreHeader store={store} country={params.country} subdomain={params.subdomain} />
 
-      <main className="mx-auto max-w-4xl px-4 py-8">
+      <main className="mx-auto max-w-4xl px-4 py-8 pb-28 md:pb-8">
         <div className="grid gap-8 md:grid-cols-2">
           {/* الصور */}
           <ProductImageGallery images={images} name={product.name} />
@@ -120,6 +136,19 @@ export default async function ProductPage({ params }: Props) {
               </p>
             )}
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{product.name}</h1>
+
+            {reviewCount > 0 && (
+              <div className="mt-1.5 flex items-center gap-2" dir="ltr">
+                <span className="text-amber-400">
+                  {[1, 2, 3, 4, 5].map(n => (
+                    <span key={n} className={n <= Math.round(reviewAvg ?? 0) ? 'text-amber-400' : 'text-gray-300 dark:text-gray-600'}>★</span>
+                  ))}
+                </span>
+                <span className="text-sm text-gray-500 dark:text-gray-400">
+                  {(reviewAvg ?? 0).toFixed(1)} ({reviewCount})
+                </span>
+              </div>
+            )}
 
             {activeOffer && (
               <Link
@@ -147,11 +176,11 @@ export default async function ProductPage({ params }: Props) {
                 <>
                   <div className="flex items-center gap-3">
                     <span className={`text-2xl font-bold ${activeOffer ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
-                      {secondaryPrice.toLocaleString('ar')} {store.secondary_currency_code}
+                      {secondaryPrice.toLocaleString('ar-u-nu-latn')} {store.secondary_currency_code}
                     </span>
                     {effectiveCompare && (
                       <span className="text-lg text-gray-400 line-through dark:text-gray-500">
-                        {effectiveCompare.toLocaleString('ar')}
+                        {effectiveCompare.toLocaleString('ar-u-nu-latn')}
                       </span>
                     )}
                     {discount && (
@@ -161,18 +190,18 @@ export default async function ProductPage({ params }: Props) {
                     )}
                   </div>
                   <p className="mt-1 text-base text-gray-500 dark:text-gray-400">
-                    ≈ {effectivePrice.toLocaleString('ar')} {store.currency_code}
+                    ≈ {effectivePrice.toLocaleString('ar-u-nu-latn')} {store.currency_code}
                   </p>
                 </>
               ) : (
                 <>
                   <div className="flex items-center gap-3">
                     <span className={`text-2xl font-bold ${activeOffer ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
-                      {effectivePrice.toLocaleString('ar')} {store.currency_code}
+                      {effectivePrice.toLocaleString('ar-u-nu-latn')} {store.currency_code}
                     </span>
                     {effectiveCompare && (
                       <span className="text-lg text-gray-400 line-through dark:text-gray-500">
-                        {effectiveCompare.toLocaleString('ar')}
+                        {effectiveCompare.toLocaleString('ar-u-nu-latn')}
                       </span>
                     )}
                     {discount && (
@@ -183,7 +212,7 @@ export default async function ProductPage({ params }: Props) {
                   </div>
                   {secondaryPrice !== null && (
                     <p className="mt-1 text-base text-gray-500 dark:text-gray-400">
-                      ≈ {secondaryPrice.toLocaleString('ar')} {store.secondary_currency_code}
+                      ≈ {secondaryPrice.toLocaleString('ar-u-nu-latn')} {store.secondary_currency_code}
                     </p>
                   )}
                 </>
@@ -319,9 +348,30 @@ export default async function ProductPage({ params }: Props) {
             )}
           </div>
         )}
+
+        <ProductReviews
+          productId={product.id}
+          storeId={store.id}
+          reviews={reviews}
+          avg={reviewAvg}
+          count={reviewCount}
+        />
       </main>
       <StoreFooter store={store} country={params.country} subdomain={params.subdomain} />
       <CartToast country={params.country} subdomain={params.subdomain} />
+
+      <StickyBuyBar
+        productId={product.id}
+        name={product.name}
+        price={effectivePrice}
+        thumbnail={product.thumbnail_url}
+        maxQty={maxQty}
+        country={params.country}
+        subdomain={params.subdomain}
+        storeId={store.id}
+        currencyCode={store.currency_code}
+        outOfStock={!!outOfStock}
+      />
     </div>
   )
 }

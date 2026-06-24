@@ -23,7 +23,7 @@ interface SendOfferEmailParams {
 }
 
 function buildOfferEmailHtml(p: SendOfferEmailParams): string {
-  const endsText = new Date(p.endsAt).toLocaleDateString('ar', {
+  const endsText = new Date(p.endsAt).toLocaleDateString('ar-u-nu-latn', {
     weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
   })
 
@@ -37,8 +37,8 @@ function buildOfferEmailHtml(p: SendOfferEmailParams): string {
     return `
     <tr>
       <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#374151">${item.name}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#9ca3af;text-align:left;text-decoration:line-through" dir="ltr">${item.price.toLocaleString('ar')} ${p.currencyCode}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:14px;font-weight:700;color:#dc2626;text-align:left" dir="ltr">${item.offer_price.toLocaleString('ar')} ${p.currencyCode}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#9ca3af;text-align:left;text-decoration:line-through" dir="ltr">${item.price.toLocaleString('ar-u-nu-latn')} ${p.currencyCode}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:14px;font-weight:700;color:#dc2626;text-align:left" dir="ltr">${item.offer_price.toLocaleString('ar-u-nu-latn')} ${p.currencyCode}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;text-align:center"><span style="background:#fee2e2;color:#dc2626;font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px">-${pct}%</span></td>
     </tr>`
   }).join('')

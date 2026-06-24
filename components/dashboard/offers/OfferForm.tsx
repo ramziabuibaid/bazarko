@@ -354,7 +354,7 @@ export default function OfferForm({ storeId, currencyCode, products, categories,
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm text-white">{product.name}</p>
                     <p className="text-xs text-slate-500">
-                      السعر الأصلي: {product.price.toLocaleString('ar')} {currencyCode}
+                      السعر الأصلي: {product.price.toLocaleString('ar-u-nu-latn')} {currencyCode}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -469,7 +469,7 @@ export default function OfferForm({ storeId, currencyCode, products, categories,
                     <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-800 text-base">🛍️</div>
                   )}
                   <span className="min-w-0 flex-1 truncate text-sm text-slate-200">{p.name}</span>
-                  <span className="text-xs text-slate-500">{p.price.toLocaleString('ar')} {currencyCode}</span>
+                  <span className="text-xs text-slate-500">{p.price.toLocaleString('ar-u-nu-latn')} {currencyCode}</span>
                 </button>
               )
             })

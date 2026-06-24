@@ -5,7 +5,7 @@ import Link from 'next/link'
 import InvoiceRowActions from '@/components/dashboard/accounting/InvoiceRowActions'
 
 interface Props {
-  searchParams: { status?: string; q?: string }
+  searchParams: { status?: string; q?: string; customer?: string }
 }
 
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
@@ -48,6 +48,10 @@ export default async function InvoicesPage({ searchParams }: Props) {
     query = query.eq('status', searchParams.status)
   }
 
+  if (searchParams.customer) {
+    query = query.eq('customer_id', searchParams.customer)
+  }
+
   let { data: invoices } = await query
 
   // تبويب "متأخرة" يُفلتر في الكود (حالة محسوبة)
@@ -70,7 +74,7 @@ export default async function InvoicesPage({ searchParams }: Props) {
   const outstandingAmt = allInv.filter(i => i.status !== 'paid' && i.status !== 'cancelled')
     .reduce((s, i) => s + Math.max(0, (i.total ?? 0) - (i.amount_paid ?? 0)), 0)
 
-  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
+  const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 0 })
 
   const totalUnpaid  = allInv.filter(i => i.status !== 'paid' && i.status !== 'cancelled').length
   const totalOverdue = allInv.filter(i => isOverdue(i.due_date, Math.max(0, (i.total ?? 0) - (i.amount_paid ?? 0)), i.status)).length
@@ -171,9 +175,9 @@ export default async function InvoicesPage({ searchParams }: Props) {
                     <td className="px-4 py-3 font-mono text-sky-400" dir="ltr">{inv.invoice_number}</td>
                     <td className="px-4 py-3 text-white">{inv.customer_name ?? '—'}</td>
                     <td className="px-4 py-3 text-slate-400 text-xs">
-                      {new Date(inv.issue_date).toLocaleDateString('ar', { year: 'numeric', month: 'short', day: 'numeric' })}
+                      {new Date(inv.issue_date).toLocaleDateString('ar-u-nu-latn', { year: 'numeric', month: 'short', day: 'numeric' })}
                       {inv.due_date && (
-                        <p className="text-slate-600">حتى: {new Date(inv.due_date).toLocaleDateString('ar', { month: 'short', day: 'numeric' })}</p>
+                        <p className="text-slate-600">حتى: {new Date(inv.due_date).toLocaleDateString('ar-u-nu-latn', { month: 'short', day: 'numeric' })}</p>
                       )}
                     </td>
                     <td className="px-4 py-3 text-left">

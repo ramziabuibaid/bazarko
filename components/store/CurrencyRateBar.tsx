@@ -13,8 +13,8 @@ export default function CurrencyRateBar({ primaryCode, secondaryCode, rate }: Pr
 
   const formatted =
     value >= 1000
-      ? value.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
-      : value.toLocaleString('ar-SA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      ? value.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 0 })
+      : value.toLocaleString('ar-u-nu-latn', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
   return (
     <div className="border-b border-black/5 bg-gradient-to-r from-amber-50 to-yellow-50 py-1.5 text-center dark:border-white/5 dark:from-slate-800/80 dark:to-slate-800/60">

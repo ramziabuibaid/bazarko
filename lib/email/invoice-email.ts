@@ -29,7 +29,7 @@ interface SendInvoiceEmailParams {
 
 function buildInvoiceHtml(p: SendInvoiceEmailParams): string {
   const remaining = Math.max(0, p.total - p.amountPaid)
-  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 2 })
+  const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })
 
   const itemsRows = p.items.map(item => `
     <tr>
@@ -43,7 +43,7 @@ function buildInvoiceHtml(p: SendInvoiceEmailParams): string {
   const dueDateRow = p.dueDate ? `
     <div style="display:flex;justify-content:space-between;margin-bottom:6px">
       <span style="font-size:13px;color:#6b7280">تاريخ الاستحقاق</span>
-      <span style="font-size:13px;color:#374151" dir="ltr">${new Date(p.dueDate).toLocaleDateString('ar', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+      <span style="font-size:13px;color:#374151" dir="ltr">${new Date(p.dueDate).toLocaleDateString('ar-u-nu-latn', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
     </div>
   ` : ''
 
@@ -83,7 +83,7 @@ function buildInvoiceHtml(p: SendInvoiceEmailParams): string {
       </div>
       <div style="text-align:left">
         <p style="margin:0;font-size:13px;color:#6b7280">تاريخ الإصدار</p>
-        <p style="margin:4px 0 0;font-size:14px;color:#374151" dir="ltr">${new Date(p.issueDate).toLocaleDateString('ar', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+        <p style="margin:4px 0 0;font-size:14px;color:#374151" dir="ltr">${new Date(p.issueDate).toLocaleDateString('ar-u-nu-latn', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
       </div>
     </div>
   </div>

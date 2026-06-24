@@ -32,7 +32,7 @@ export default function TreasuryClient({
   function open(m: Modal) { reset(); setModal(m) }
   function close() { setModal(null); reset() }
 
-  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 2 })
+  const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })
   const variance = (parseFloat(counted) || 0) - systemBalance
 
   async function submit() {

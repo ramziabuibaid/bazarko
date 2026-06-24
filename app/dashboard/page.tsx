@@ -193,7 +193,7 @@ export default async function DashboardPage() {
   const maxRevenue = Math.max(...chartDays.map(d => d.revenue), 1)
 
   const cc  = store.currency_code
-  const fmt = (n: number) => n.toLocaleString('ar')
+  const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn')
 
   type RecentOrder = {
     id: string; order_number: string; status: string;
@@ -220,11 +220,11 @@ export default async function DashboardPage() {
             </span>
           </div>
           <p className="mt-1.5 text-sm text-slate-400">
-            {now.toLocaleDateString('ar', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            {now.toLocaleDateString('ar-u-nu-latn', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
           </p>
           {!isActive && store.suspended_at && (
             <p className="mt-2 text-xs text-red-400/80">
-              متوقف منذ {new Date(store.suspended_at).toLocaleDateString('ar')}
+              متوقف منذ {new Date(store.suspended_at).toLocaleDateString('ar-u-nu-latn')}
             </p>
           )}
         </div>

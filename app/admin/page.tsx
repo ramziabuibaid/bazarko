@@ -32,7 +32,7 @@ export default async function AdminOverviewPage() {
   ])
 
   const gmv = (gmvData ?? []).reduce((s: number, o: { total_amount: number | null }) => s + (o.total_amount ?? 0), 0)
-  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
+  const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 0 })
 
   const PLAN_COLORS: Record<string, string> = {
     free:  'text-slate-400 bg-slate-400/10 border-slate-400/20',
@@ -105,7 +105,7 @@ export default async function AdminOverviewPage() {
                   {PLAN_LABELS[store.plan] ?? store.plan}
                 </span>
                 <span className="text-xs text-slate-600">
-                  {new Date(store.created_at).toLocaleDateString('ar', { month: 'short', day: 'numeric' })}
+                  {new Date(store.created_at).toLocaleDateString('ar-u-nu-latn', { month: 'short', day: 'numeric' })}
                 </span>
               </div>
             </Link>

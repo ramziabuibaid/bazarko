@@ -272,12 +272,12 @@ export default function ProductsTable({ products: initial, categories, storeId, 
                   {/* السعر */}
                   <td className="px-4 py-3">
                     <span className="whitespace-nowrap font-medium text-white">
-                      {product.price.toLocaleString('ar')}
+                      {product.price.toLocaleString('ar-u-nu-latn')}
                       <span className="mr-1 text-xs font-normal text-slate-500">{currencyCode}</span>
                     </span>
                     {product.compare_price && (
                       <p className="whitespace-nowrap text-xs text-slate-500 line-through">
-                        {product.compare_price.toLocaleString('ar')}
+                        {product.compare_price.toLocaleString('ar-u-nu-latn')}
                       </p>
                     )}
                   </td>

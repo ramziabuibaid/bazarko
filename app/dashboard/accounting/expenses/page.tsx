@@ -69,7 +69,7 @@ export default async function ExpensesPage({ searchParams }: Props) {
   const categories = Object.entries(byCategory).sort((a, b) => b[1] - a[1])
 
   const cur = store.currency_code
-  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
+  const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 0 })
 
   return (
     <div className="space-y-5 p-4 sm:p-6">

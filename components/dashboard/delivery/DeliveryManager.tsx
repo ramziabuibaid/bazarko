@@ -261,7 +261,7 @@ export default function DeliveryManager({
               </div>
               {freeThreshold && parseFloat(freeThreshold) > 0 && (
                 <p className="mt-1.5 text-xs text-emerald-400">
-                  ✓ الطلبيات فوق {parseFloat(freeThreshold).toLocaleString('ar')} {currencyCode} → شحن مجاني
+                  ✓ الطلبيات فوق {parseFloat(freeThreshold).toLocaleString('ar-u-nu-latn')} {currencyCode} → شحن مجاني
                 </p>
               )}
             </div>
@@ -333,7 +333,7 @@ export default function DeliveryManager({
                           {methods.length > 0
                             ? `${methods.filter(m => m.is_active).length} / ${methods.length} نوع شحن نشط`
                             : zone.cost > 0
-                              ? `تكلفة افتراضية: ${zone.cost.toLocaleString('ar')} ${currencyCode}`
+                              ? `تكلفة افتراضية: ${zone.cost.toLocaleString('ar-u-nu-latn')} ${currencyCode}`
                               : 'اضغط لإضافة أنواع الشحن'}
                         </p>
                       </div>
@@ -382,7 +382,7 @@ export default function DeliveryManager({
                                 <p className="text-sm font-medium text-white">{m.name}</p>
                                 <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-400">
                                   <span className={m.cost === 0 ? 'font-medium text-emerald-400' : ''}>
-                                    {m.cost === 0 ? 'مجاني' : `${m.cost.toLocaleString('ar')} ${currencyCode}`}
+                                    {m.cost === 0 ? 'مجاني' : `${m.cost.toLocaleString('ar-u-nu-latn')} ${currencyCode}`}
                                   </span>
                                   {(m.min_days || m.max_days) && (
                                     <span>• {m.min_days && m.max_days ? `${m.min_days}–${m.max_days}` : (m.min_days ?? m.max_days)} أيام</span>

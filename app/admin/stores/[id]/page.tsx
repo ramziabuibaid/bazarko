@@ -88,7 +88,7 @@ export default async function AdminStoreDetailPage({ params }: Props) {
   }
 
   const revenue = (revenueData ?? []).reduce((acc: number, o: { total_amount: number | null }) => acc + (o.total_amount ?? 0), 0)
-  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
+  const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 0 })
 
   const PLAN_LABELS: Record<string, string> = { free: 'مجاني', basic: 'أساسي', pro: 'احترافي' }
   const ORDER_STATUS: Record<string, string> = {
@@ -151,7 +151,7 @@ export default async function AdminStoreDetailPage({ params }: Props) {
   activityEvents.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
 
   const formatTime = (iso: string) =>
-    new Date(iso).toLocaleString('ar', {
+    new Date(iso).toLocaleString('ar-u-nu-latn', {
       year: 'numeric', month: 'short', day: 'numeric',
       hour: '2-digit', minute: '2-digit',
     })
@@ -192,7 +192,7 @@ export default async function AdminStoreDetailPage({ params }: Props) {
               <p className="text-sm text-red-300">{s.suspended_reason}</p>
               {s.suspended_at && (
                 <p className="text-xs text-slate-500 mt-1">
-                  {new Date(s.suspended_at).toLocaleDateString('ar', { year: 'numeric', month: 'long', day: 'numeric' })}
+                  {new Date(s.suspended_at).toLocaleDateString('ar-u-nu-latn', { year: 'numeric', month: 'long', day: 'numeric' })}
                 </p>
               )}
             </div>
@@ -223,14 +223,14 @@ export default async function AdminStoreDetailPage({ params }: Props) {
                 { label: 'الإيميل',          value: ownerEmail ?? '—' },
                 { label: 'رقم الهاتف',       value: s.phone ?? '—' },
                 { label: 'العملة',           value: s.currency_code },
-                { label: 'تاريخ الانضمام',   value: new Date(s.created_at).toLocaleDateString('ar', { year: 'numeric', month: 'long', day: 'numeric' }) },
+                { label: 'تاريخ الانضمام',   value: new Date(s.created_at).toLocaleDateString('ar-u-nu-latn', { year: 'numeric', month: 'long', day: 'numeric' }) },
                 {
                   label: 'آخر دخول',
                   value: ownerLastSignIn
-                    ? new Date(ownerLastSignIn).toLocaleString('ar', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                    ? new Date(ownerLastSignIn).toLocaleString('ar-u-nu-latn', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
                     : 'لم يسجّل دخول بعد',
                 },
-                { label: 'انتهاء الاشتراك',  value: s.plan_expires_at ? new Date(s.plan_expires_at).toLocaleDateString('ar', { year: 'numeric', month: 'long', day: 'numeric' }) : 'غير محدد' },
+                { label: 'انتهاء الاشتراك',  value: s.plan_expires_at ? new Date(s.plan_expires_at).toLocaleDateString('ar-u-nu-latn', { year: 'numeric', month: 'long', day: 'numeric' }) : 'غير محدد' },
               ].map(row => (
                 <div key={row.label} className="flex justify-between gap-4">
                   <dt className="text-slate-500 shrink-0">{row.label}</dt>

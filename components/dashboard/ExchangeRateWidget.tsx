@@ -24,8 +24,8 @@ export default function ExchangeRateWidget({ storeId, primaryCode, secondaryCode
       ? [primaryCode, secondaryCode, r]
       : [secondaryCode, primaryCode, 1 / r]
     const formatted = val >= 1000
-      ? val.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
-      : val.toLocaleString('ar-SA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      ? val.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 0 })
+      : val.toLocaleString('ar-u-nu-latn', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     return `1 ${from} = ${formatted} ${to}`
   }
 

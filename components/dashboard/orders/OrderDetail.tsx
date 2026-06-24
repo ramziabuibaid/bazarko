@@ -66,7 +66,7 @@ const PAYMENT_LABELS: Record<string, string> = {
 }
 
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('ar', {
+  return new Date(iso).toLocaleDateString('ar-u-nu-latn', {
     year: 'numeric', month: 'long', day: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
@@ -151,11 +151,11 @@ export default function OrderDetail({ order, items, currencyCode, storeId }: Pro
                 <div>
                   <p className="text-sm font-medium text-white">{item.product_name}</p>
                   <p className="text-xs text-slate-400">
-                    {item.unit_price.toLocaleString('ar')} {currencyCode} × {item.quantity}
+                    {item.unit_price.toLocaleString('ar-u-nu-latn')} {currencyCode} × {item.quantity}
                   </p>
                 </div>
                 <span className="text-sm font-semibold text-white">
-                  {item.total_price.toLocaleString('ar')} {currencyCode}
+                  {item.total_price.toLocaleString('ar-u-nu-latn')} {currencyCode}
                 </span>
               </div>
             ))}
@@ -165,23 +165,23 @@ export default function OrderDetail({ order, items, currencyCode, storeId }: Pro
           <div className="border-t border-white/5 px-5 py-4 space-y-2">
             <div className="flex justify-between text-sm text-slate-400">
               <span>المجموع الجزئي</span>
-              <span>{order.subtotal.toLocaleString('ar')} {currencyCode}</span>
+              <span>{order.subtotal.toLocaleString('ar-u-nu-latn')} {currencyCode}</span>
             </div>
             {(order.shipping_amount ?? 0) > 0 && (
               <div className="flex justify-between text-sm text-slate-400">
                 <span>الشحن</span>
-                <span>{(order.shipping_amount ?? 0).toLocaleString('ar')} {currencyCode}</span>
+                <span>{(order.shipping_amount ?? 0).toLocaleString('ar-u-nu-latn')} {currencyCode}</span>
               </div>
             )}
             {(order.discount_amount ?? 0) > 0 && (
               <div className="flex justify-between text-sm text-emerald-400">
                 <span>الخصم</span>
-                <span>- {(order.discount_amount ?? 0).toLocaleString('ar')} {currencyCode}</span>
+                <span>- {(order.discount_amount ?? 0).toLocaleString('ar-u-nu-latn')} {currencyCode}</span>
               </div>
             )}
             <div className="flex justify-between border-t border-white/5 pt-2 font-semibold text-white">
               <span>الإجمالي</span>
-              <span>{order.total_amount.toLocaleString('ar')} {currencyCode}</span>
+              <span>{order.total_amount.toLocaleString('ar-u-nu-latn')} {currencyCode}</span>
             </div>
           </div>
         </div>

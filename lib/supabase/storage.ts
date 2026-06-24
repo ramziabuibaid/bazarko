@@ -68,6 +68,26 @@ export async function uploadCategoryImage(
   return data.publicUrl
 }
 
+// رفع صور تقييمات العملاء — bucket عام منفصل (الزبون غير مسجّل)
+export async function uploadReviewPhoto(
+  storeId: string,
+  productId: string,
+  file: File
+): Promise<string> {
+  const supabase = createClient()
+  const ext = file.name.split('.').pop() ?? 'jpg'
+  const path = `${storeId}/${productId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+
+  const { error } = await supabase.storage
+    .from('review-photos')
+    .upload(path, file, { upsert: false })
+
+  if (error) throw new Error(error.message)
+
+  const { data } = supabase.storage.from('review-photos').getPublicUrl(path)
+  return data.publicUrl
+}
+
 // رفع صور المتجر (لوغو وغلاف) — تُخزَّن في نفس bucket بمسار stores/
 export async function uploadStoreImage(
   storeId: string,

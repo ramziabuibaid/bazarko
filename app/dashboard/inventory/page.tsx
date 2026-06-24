@@ -65,6 +65,19 @@ export default async function InventoryPage({ searchParams }: Props) {
   const totalValue     = trackedWithCost.reduce((s: number, p: StockRow) => s + (p.stock_quantity ?? 0) * p.cost_price!, 0)
   const expectedProfit = trackedWithCost.reduce((s: number, p: StockRow) => s + (p.stock_quantity ?? 0) * ((p.price ?? 0) - p.cost_price!), 0)
 
+  // إن لم يوجد أي منتج بسعر تكلفة → نعرض «—» بدل «0» حتى لا يظنّ المستخدم أنه خطأ
+  const hasCostData    = trackedWithCost.length > 0
+  const valueDisplay   = hasCostData ? `${totalValue.toLocaleString('ar-u-nu-latn')} ${store.currency_code}` : '—'
+  const profitDisplay  = hasCostData ? `${expectedProfit.toLocaleString('ar-u-nu-latn')} ${store.currency_code}` : '—'
+
+  // أهمّ تنبيه يُعرض داخل البطاقة (الأشدّ أولاً)
+  const topAlert =
+    outOfStock > 0 ? `🔴 ${outOfStock} ${outOfStock === 1 ? 'منتج نفد' : 'منتجات نفدت'} من المخزون`
+    : lowStock > 0 ? `🟡 ${lowStock} ${lowStock === 1 ? 'منتج قارب' : 'منتجات قاربت'} النفاد`
+    : missingCostCount > 0 ? `⚠️ ${missingCostCount} ${missingCostCount === 1 ? 'منتج' : 'منتجات'} بدون سعر تكلفة`
+    : null
+  const alertCount = outOfStock + lowStock + missingCostCount
+
   return (
     <div className="p-4 sm:p-6">
       <div className="mb-6 flex items-center justify-between">
@@ -83,23 +96,37 @@ export default async function InventoryPage({ searchParams }: Props) {
           </Link>
           <Link href="/dashboard/inventory/alerts"
             className={`rounded-xl px-4 py-2 text-sm font-medium ${
-              (outOfStock + lowStock) > 0
+              alertCount > 0
                 ? 'bg-red-500/15 text-red-400 border border-red-500/20'
                 : 'border border-white/10 text-slate-300 hover:bg-white/5'
             }`}>
-            ⚠️ تنبيهات {(outOfStock + lowStock) > 0 && `(${outOfStock + lowStock})`}
+            ⚠️ تنبيهات {alertCount > 0 && `(${alertCount})`}
           </Link>
         </div>
       </div>
 
-      {/* بطاقات */}
+      {/* بطاقة التنبيه الأهم — يعرف المستخدم السبب فوراً */}
+      {topAlert && (
+        <Link href="/dashboard/inventory/alerts"
+          className="mb-5 flex items-center justify-between gap-3 rounded-2xl border border-red-500/20 bg-red-500/5 p-4 transition hover:bg-red-500/10">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-red-300">{topAlert}</span>
+            {alertCount > 1 && (
+              <span className="rounded-full bg-white/5 px-2 py-0.5 text-xs text-slate-400">+{alertCount - 1} تنبيه آخر</span>
+            )}
+          </div>
+          <span className="text-xs text-slate-400">عرض الكل ←</span>
+        </Link>
+      )}
+
+      {/* بطاقات — المشاكل أولاً ثم الإحصائيات (الأهمّ على الجوال) */}
       <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         {[
-          { label: 'منتجات مُتتبَّعة', value: tracked.length,  icon: '📦', color: 'text-white' },
-          { label: 'نفد المخزون',      value: outOfStock,       icon: '🔴', color: 'text-red-400' },
           { label: 'قارب النفاد',      value: lowStock,         icon: '🟡', color: 'text-yellow-400' },
-          { label: 'قيمة المخزون',     value: `${totalValue.toLocaleString('ar')} ${store.currency_code}`, icon: '💰', color: 'text-emerald-400' },
-          { label: 'الأرباح المتوقعة', value: `${expectedProfit.toLocaleString('ar')} ${store.currency_code}`, icon: '📈', color: expectedProfit >= 0 ? 'text-sky-400' : 'text-red-400' },
+          { label: 'نفد المخزون',      value: outOfStock,       icon: '🔴', color: 'text-red-400' },
+          { label: 'منتجات مُتتبَّعة', value: tracked.length,  icon: '📦', color: 'text-white' },
+          { label: 'قيمة المخزون',     value: valueDisplay,     icon: '💰', color: 'text-emerald-400' },
+          { label: 'الأرباح المتوقعة', value: profitDisplay,    icon: '📈', color: hasCostData && expectedProfit < 0 ? 'text-red-400' : 'text-sky-400' },
         ].map(c => (
           <div key={c.label} className="rounded-2xl border border-white/5 bg-slate-900 p-4">
             <p className="text-xs text-slate-400">{c.icon} {c.label}</p>
@@ -117,8 +144,9 @@ export default async function InventoryPage({ searchParams }: Props) {
               {missingCostCount} {missingCostCount === 1 ? 'منتج' : 'منتجات'} بدون سعر تكلفة
             </p>
             <p className="mt-0.5 text-xs text-slate-400">
-              قيمة المخزون والأرباح المتوقعة تشمل فقط المنتجات ذات سعر تكلفة محدد.
-              أضف سعر التكلفة للمنتجات المتبقية للحصول على أرقام دقيقة.
+              {hasCostData
+                ? 'قيمة المخزون والأرباح المتوقعة تشمل فقط المنتجات ذات سعر تكلفة محدد. أضف سعر التكلفة للمنتجات المتبقية للحصول على أرقام دقيقة.'
+                : 'لا يمكن حساب قيمة المخزون أو الأرباح بعد — لم يُحدَّد سعر تكلفة لأي منتج. أضف سعر التكلفة لتظهر الأرقام.'}
             </p>
           </div>
         </div>

@@ -110,7 +110,7 @@ export default async function AdminPlansPage() {
                   </div>
                   <div className="flex items-center gap-4 text-xs text-slate-500">
                     {s.plan_expires_at && (
-                      <span>ينتهي {new Date(s.plan_expires_at).toLocaleDateString('ar', { month: 'short', day: 'numeric' })}</span>
+                      <span>ينتهي {new Date(s.plan_expires_at).toLocaleDateString('ar-u-nu-latn', { month: 'short', day: 'numeric' })}</span>
                     )}
                     <Link href={`/admin/stores/${s.id}`} className="text-slate-400 hover:text-white">إدارة</Link>
                   </div>

@@ -139,7 +139,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
   const paidOrders = ordersArr.filter(o => o.payment_status === 'paid').length
   const avgOrder   = ordersArr.length > 0 ? sales / ordersArr.length : 0
 
-  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
+  const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 0 })
   const cc  = store.currency_code
 
   const flowCards = [

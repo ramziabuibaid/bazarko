@@ -178,7 +178,7 @@ export default function RepairKanban({ jobs, currencyCode }: Props) {
                           </div>
                           {job.estimated_done && (
                             <p className={`text-xs ${overdue ? 'text-red-400' : 'text-slate-500'}`}>
-                              📅 {new Date(job.estimated_done).toLocaleDateString('ar', { month: 'short', day: 'numeric' })}
+                              📅 {new Date(job.estimated_done).toLocaleDateString('ar-u-nu-latn', { month: 'short', day: 'numeric' })}
                             </p>
                           )}
                         </div>

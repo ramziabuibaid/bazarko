@@ -64,7 +64,7 @@ function exportCSV(customers: Customer[], currencyCode: string, lastOrderDates: 
     TYPE_LABELS[c.customer_type]?.label ?? c.customer_type,
     c.total_orders,
     c.balance > 0 ? `${c.balance} ${currencyCode}` : '',
-    lastOrderDates[c.id] ? new Date(lastOrderDates[c.id]).toLocaleDateString('ar') : '',
+    lastOrderDates[c.id] ? new Date(lastOrderDates[c.id]).toLocaleDateString('ar-u-nu-latn') : '',
   ])
   const csv = [headers, ...rows]
     .map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
@@ -302,7 +302,7 @@ export default function CustomersTable({
                     <td className="px-4 py-3">
                       {c.balance > 0 ? (
                         <span className="text-sm font-semibold text-red-400" dir="ltr">
-                          {c.balance.toLocaleString('ar')} {currencyCode}
+                          {c.balance.toLocaleString('ar-u-nu-latn')} {currencyCode}
                         </span>
                       ) : (
                         <span className="text-sm text-emerald-400">✓ مسدد</span>

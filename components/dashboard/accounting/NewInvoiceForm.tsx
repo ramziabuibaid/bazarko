@@ -107,7 +107,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
 
   const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0)
   const total    = Math.max(0, subtotal - discountAmount)
-  const fmt      = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 2 })
+  const fmt      = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })
 
   // ── Debounced searches ────────────────────────────────────────
 

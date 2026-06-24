@@ -176,8 +176,8 @@ export default async function AccountingPage() {
   const chartMax = Math.max(1, ...chart.map(c => Math.max(c.in, c.out)))
 
   const cur = store.currency_code
-  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
-  const monthLabel = now.toLocaleDateString('ar', { month: 'long', year: 'numeric' })
+  const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 0 })
+  const monthLabel = now.toLocaleDateString('ar-u-nu-latn', { month: 'long', year: 'numeric' })
 
   // ── أفضل العملاء هذا الشهر ────────────────────────────────────
   const custTotals = new Map<string, { total: number; count: number }>()
@@ -368,7 +368,7 @@ export default async function AccountingPage() {
                       <span className="text-base">{m.icon}</span>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-white">{m.label} {e.number}</p>
-                        <p className="text-[11px] text-slate-500">{new Date(e.at).toLocaleDateString('ar', { day: 'numeric', month: 'short' })}</p>
+                        <p className="text-[11px] text-slate-500">{new Date(e.at).toLocaleDateString('ar-u-nu-latn', { day: 'numeric', month: 'short' })}</p>
                       </div>
                       <p dir="ltr" className={`shrink-0 text-sm font-bold tabular-nums ${m.color}`}>{m.sign}{fmt(e.amount)} <span className="text-[11px] font-normal text-slate-500">{cur}</span></p>
                     </Link>
@@ -396,7 +396,7 @@ export default async function AccountingPage() {
                 <div className="w-1/2 rounded-t bg-emerald-500/70" style={{ height: `${(c.in / chartMax) * 100}%`, minHeight: c.in > 0 ? 3 : 0 }} title={`داخل ${fmt(c.in)}`} />
                 <div className="w-1/2 rounded-t bg-red-500/70" style={{ height: `${(c.out / chartMax) * 100}%`, minHeight: c.out > 0 ? 3 : 0 }} title={`خارج ${fmt(c.out)}`} />
               </div>
-              <span className="text-[10px] text-slate-500">{new Date(c.date).toLocaleDateString('ar', { weekday: 'short' })}</span>
+              <span className="text-[10px] text-slate-500">{new Date(c.date).toLocaleDateString('ar-u-nu-latn', { weekday: 'short' })}</span>
             </div>
           ))}
         </div>

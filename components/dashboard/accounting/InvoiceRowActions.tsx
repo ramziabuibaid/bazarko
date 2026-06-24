@@ -27,13 +27,13 @@ export default function InvoiceRowActions({
   const confirm = useConfirm()
   const [busy, setBusy] = useState(false)
 
-  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
+  const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 0 })
   const open = status !== 'paid' && status !== 'cancelled' && remaining > 0
   const phone = (customerPhone ?? '').replace(/[^\d]/g, '')
 
   function reminderUrl() {
     const msg = `مرحباً ${customerName ?? ''}،\nنذكّركم بفاتورة رقم ${invoiceNumber}.\nالمتبقّي: ${fmt(remaining)} ${currencyCode}` +
-      (dueDate ? `\nتاريخ الاستحقاق: ${new Date(dueDate).toLocaleDateString('ar')}` : '') +
+      (dueDate ? `\nتاريخ الاستحقاق: ${new Date(dueDate).toLocaleDateString('ar-u-nu-latn')}` : '') +
       `\n\n${storeName}`
     return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
   }

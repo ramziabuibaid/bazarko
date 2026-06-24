@@ -106,7 +106,7 @@ export default async function MovementsPage({ searchParams }: Props) {
                 return (
                   <tr key={m.id} className="hover:bg-white/3">
                     <td className="px-4 py-3 text-xs text-slate-500">
-                      {new Date(m.created_at).toLocaleDateString('ar', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      {new Date(m.created_at).toLocaleDateString('ar-u-nu-latn', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </td>
                     <td className="px-4 py-3">
                       <p className="font-medium text-white">{m.products?.name ?? '—'}</p>

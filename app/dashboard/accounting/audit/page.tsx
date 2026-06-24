@@ -105,7 +105,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Search
                     {detail && <span className="text-xs text-slate-500" dir="ltr">— {detail}</span>}
                   </div>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    {log.actor_name ?? 'مستخدم'} · {new Date(log.created_at).toLocaleString('ar')}
+                    {log.actor_name ?? 'مستخدم'} · {new Date(log.created_at).toLocaleString('ar-u-nu-latn')}
                   </p>
                 </div>
               </div>

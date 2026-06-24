@@ -349,7 +349,7 @@ export default function CheckoutPage() {
                       {isFreeShipping ? (
                         <><span>🎉</span> أهلاً! طلبيتك تستحق شحناً مجانياً</>
                       ) : (
-                        <><span>🚚</span> أضف {(freeThreshold - subtotal).toLocaleString('ar')} {currencyCode} للحصول على شحن مجاني</>
+                        <><span>🚚</span> أضف {(freeThreshold - subtotal).toLocaleString('ar-u-nu-latn')} {currencyCode} للحصول على شحن مجاني</>
                       )}
                     </div>
                   )}
@@ -394,7 +394,7 @@ export default function CheckoutPage() {
                                 )}
                               </div>
                               <span className={`text-sm font-semibold ${cost === 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-900 dark:text-white'}`}>
-                                {cost === 0 ? 'مجاني' : `${cost.toLocaleString('ar')} ${currencyCode}`}
+                                {cost === 0 ? 'مجاني' : `${cost.toLocaleString('ar-u-nu-latn')} ${currencyCode}`}
                               </span>
                             </label>
                           )
@@ -413,7 +413,7 @@ export default function CheckoutPage() {
                         )}
                       </div>
                       <span className={`text-sm font-semibold ${shippingCost === 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-900 dark:text-white'}`}>
-                        {shippingCost === 0 ? 'مجاني' : `${shippingCost.toLocaleString('ar')} ${currencyCode}`}
+                        {shippingCost === 0 ? 'مجاني' : `${shippingCost.toLocaleString('ar-u-nu-latn')} ${currencyCode}`}
                       </span>
                     </div>
                   )}
@@ -474,7 +474,7 @@ export default function CheckoutPage() {
               {items.map(item => (
                 <div key={item.productId} className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
                   <span>{item.name} × {item.quantity}</span>
-                  <span dir="ltr">{(item.price * item.quantity).toLocaleString('ar')} {currencyCode}</span>
+                  <span dir="ltr">{(item.price * item.quantity).toLocaleString('ar-u-nu-latn')} {currencyCode}</span>
                 </div>
               ))}
             </div>
@@ -482,7 +482,7 @@ export default function CheckoutPage() {
             <div className="mt-3 space-y-2 border-t border-gray-100 dark:border-gray-800 pt-3">
               <div className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
                 <span>المجموع الفرعي</span>
-                <span dir="ltr">{subtotal.toLocaleString('ar')} {currencyCode}</span>
+                <span dir="ltr">{subtotal.toLocaleString('ar-u-nu-latn')} {currencyCode}</span>
               </div>
               {showShipping && (selectedZoneId || zones.length === 0) && (
                 <div className="flex justify-between text-sm">
@@ -496,7 +496,7 @@ export default function CheckoutPage() {
                       ? 'يحدد لاحقاً'
                       : shippingCost === 0
                         ? 'مجاني'
-                        : `${shippingCost.toLocaleString('ar')} ${currencyCode}`}
+                        : `${shippingCost.toLocaleString('ar-u-nu-latn')} ${currencyCode}`}
                   </span>
                 </div>
               )}
@@ -507,7 +507,7 @@ export default function CheckoutPage() {
               )}
               <div className="flex justify-between border-t border-gray-100 dark:border-gray-800 pt-2 font-semibold text-gray-900 dark:text-white">
                 <span>الإجمالي</span>
-                <span dir="ltr">{grandTotal.toLocaleString('ar')} {currencyCode}</span>
+                <span dir="ltr">{grandTotal.toLocaleString('ar-u-nu-latn')} {currencyCode}</span>
               </div>
             </div>
           </div>
@@ -521,7 +521,7 @@ export default function CheckoutPage() {
             disabled={loading}
             className="w-full rounded-xl bg-gray-900 py-4 text-sm font-semibold text-white hover:bg-gray-700 dark:bg-sky-500 dark:hover:bg-sky-400 dark:text-white disabled:opacity-50 transition-colors"
           >
-            {loading ? 'جاري الإرسال...' : `تأكيد الطلب — ${grandTotal.toLocaleString('ar')} ${currencyCode}`}
+            {loading ? 'جاري الإرسال...' : `تأكيد الطلب — ${grandTotal.toLocaleString('ar-u-nu-latn')} ${currencyCode}`}
           </button>
         </form>
       </main>

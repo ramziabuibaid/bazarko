@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useCart } from '@/lib/store/cart'
 import { useWishlist } from '@/lib/store/wishlist'
 import Link from 'next/link'
@@ -26,6 +27,7 @@ export default function StoreHeader({ store, country, subdomain }: Props) {
   const count         = useCart(s => s.count())
   const wishlistCount = useWishlist(s => s.count())
   const theme = getHeaderTheme(store.header_theme)
+  const [menuOpen, setMenuOpen] = useState(false)
 
   return (
     <header
@@ -50,39 +52,7 @@ export default function StoreHeader({ store, country, subdomain }: Props) {
         </Link>
 
         <div className="flex items-center gap-2 sm:gap-3">
-          <ThemeToggle className={theme.toggleBtn} />
-
-          {store.whatsapp && (
-            <a
-              href={`https://wa.me/${store.whatsapp.replace(/\D/g, '')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`hidden items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-medium transition sm:flex ${theme.whatsappBtn}`}
-            >
-              <WhatsAppIcon />
-              واتساب
-            </a>
-          )}
-
-          <Link
-            href={`/store/${country}/${subdomain}/wishlist`}
-            className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition ${theme.cartBtn}`}
-            aria-label="المفضلة"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24"
-              fill={wishlistCount > 0 ? 'currentColor' : 'none'}
-              stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
-              className={wishlistCount > 0 ? 'text-red-400' : ''}
-            >
-              <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
-            </svg>
-            {wishlistCount > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
-                {wishlistCount}
-              </span>
-            )}
-          </Link>
-
+          {/* السلة — العنصر الأساسي، يبقى ظاهراً دائماً */}
           <Link
             href={`/store/${country}/${subdomain}/cart`}
             className={`relative flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition ${theme.cartBtn}`}
@@ -94,6 +64,60 @@ export default function StoreHeader({ store, country, subdomain }: Props) {
               </span>
             )}
           </Link>
+
+          {/* قائمة منسدلة لبقية الإجراءات (تبسيط الهيدر) */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setMenuOpen(o => !o)}
+              aria-label="المزيد"
+              className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition ${theme.cartBtn}`}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+                <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+              {wishlistCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+                  {wishlistCount}
+                </span>
+              )}
+            </button>
+
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+                <div className="absolute left-0 top-12 z-50 w-52 overflow-hidden rounded-2xl border border-gray-100 bg-white py-1 shadow-xl dark:border-gray-800 dark:bg-gray-900" dir="rtl">
+                  <Link
+                    href={`/store/${country}/${subdomain}/wishlist`}
+                    onClick={() => setMenuOpen(false)}
+                    className="flex items-center justify-between px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+                  >
+                    <span className="flex items-center gap-2">❤️ المفضلة</span>
+                    {wishlistCount > 0 && (
+                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-bold text-white">{wishlistCount}</span>
+                    )}
+                  </Link>
+
+                  {store.whatsapp && (
+                    <a
+                      href={`https://wa.me/${store.whatsapp.replace(/\D/g, '')}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setMenuOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+                    >
+                      <span className="text-green-600 dark:text-green-400"><WhatsAppIcon /></span> تواصل عبر واتساب
+                    </a>
+                  )}
+
+                  <div className="flex items-center justify-between border-t border-gray-100 px-4 py-2.5 dark:border-gray-800">
+                    <span className="text-sm text-gray-700 dark:text-gray-200">🌙 الوضع الليلي</span>
+                    <ThemeToggle className="rounded-lg bg-gray-100 p-1.5 text-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </header>

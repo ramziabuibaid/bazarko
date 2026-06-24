@@ -276,7 +276,7 @@ export default function NewOrderForm({ storeId, currencyCode }: Props) {
                       </div>
                       <div className="shrink-0 text-left">
                         <p className="text-sm font-semibold text-white" dir="ltr">
-                          {p.price.toLocaleString('ar')} {currencyCode}
+                          {p.price.toLocaleString('ar-u-nu-latn')} {currencyCode}
                         </p>
                         {p.track_stock && (
                           <p className={`text-xs ${(p.stock_available ?? 0) > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -331,7 +331,7 @@ export default function NewOrderForm({ storeId, currencyCode }: Props) {
                     </div>
                     <div className="col-span-2 flex items-center justify-between">
                       <span className="text-sm font-semibold text-white" dir="ltr">
-                        {(item.unitPrice * item.quantity).toLocaleString('ar')}
+                        {(item.unitPrice * item.quantity).toLocaleString('ar-u-nu-latn')}
                       </span>
                       <button
                         type="button"
@@ -436,7 +436,7 @@ export default function NewOrderForm({ storeId, currencyCode }: Props) {
                         </div>
                         {c.balance > 0 && (
                           <span className="mt-0.5 text-xs font-medium text-red-400">
-                            ذمة: {c.balance.toLocaleString('ar')}
+                            ذمة: {c.balance.toLocaleString('ar-u-nu-latn')}
                           </span>
                         )}
                       </button>
@@ -451,7 +451,7 @@ export default function NewOrderForm({ storeId, currencyCode }: Props) {
                     )}
                     {selectedCustomer.balance > 0 && (
                       <p className="mt-1 text-xs text-red-400">
-                        ذمة حالية: {selectedCustomer.balance.toLocaleString('ar')} {currencyCode}
+                        ذمة حالية: {selectedCustomer.balance.toLocaleString('ar-u-nu-latn')} {currencyCode}
                       </p>
                     )}
                   </div>
@@ -517,25 +517,25 @@ export default function NewOrderForm({ storeId, currencyCode }: Props) {
             <div className="space-y-2 text-sm">
               <div className="flex justify-between text-slate-400">
                 <span>المجموع</span>
-                <span dir="ltr">{subtotal.toLocaleString('ar')} {currencyCode}</span>
+                <span dir="ltr">{subtotal.toLocaleString('ar-u-nu-latn')} {currencyCode}</span>
               </div>
               {mode === 'account' && (
                 <>
                   <div className="flex justify-between text-slate-400">
                     <span>المدفوع</span>
-                    <span dir="ltr" className="text-emerald-400">{effectiveAmountPaid.toLocaleString('ar')} {currencyCode}</span>
+                    <span dir="ltr" className="text-emerald-400">{effectiveAmountPaid.toLocaleString('ar-u-nu-latn')} {currencyCode}</span>
                   </div>
                   {amountRemaining > 0 && (
                     <div className="flex justify-between text-slate-400">
                       <span>يُضاف للذمة</span>
-                      <span dir="ltr" className="text-red-400">{amountRemaining.toLocaleString('ar')} {currencyCode}</span>
+                      <span dir="ltr" className="text-red-400">{amountRemaining.toLocaleString('ar-u-nu-latn')} {currencyCode}</span>
                     </div>
                   )}
                 </>
               )}
               <div className="border-t border-white/10 pt-2 flex justify-between font-bold text-white">
                 <span>الإجمالي</span>
-                <span dir="ltr">{totalAmount.toLocaleString('ar')} {currencyCode}</span>
+                <span dir="ltr">{totalAmount.toLocaleString('ar-u-nu-latn')} {currencyCode}</span>
               </div>
             </div>
 

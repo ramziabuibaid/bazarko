@@ -20,7 +20,7 @@ export default async function SettingsPage() {
       instagram, facebook, tiktok, telegram,
       business_hours, is_verified,
       secondary_currency_code, exchange_rate, prefer_secondary,
-      map_url, header_theme, footer_settings
+      map_url, header_theme, footer_settings, modules
     `)
     .eq('id', storeId)
     .single()

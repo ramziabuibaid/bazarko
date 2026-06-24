@@ -75,7 +75,7 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
   const [paying, setPaying] = useState(false)
   const [payError, setPayError] = useState('')
 
-  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 2 })
+  const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })
   const remaining = Math.max(0, invoice.total - invoice.amount_paid)
   const sl = STATUS_LABELS[status] ?? { label: status, cls: 'bg-white/5 text-white' }
 
@@ -114,7 +114,7 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
   function paymentReminderUrl() {
     const phone = (invoice.customer_phone ?? '').replace(/[^\d]/g, '')
     const msg = `مرحباً ${invoice.customer_name ?? ''}،\nنذكّركم بفاتورة رقم ${invoice.invoice_number}.\nالمتبقّي: ${fmt(remaining)} ${currencyCode}` +
-      (invoice.due_date ? `\nتاريخ الاستحقاق: ${new Date(invoice.due_date).toLocaleDateString('ar')}` : '') +
+      (invoice.due_date ? `\nتاريخ الاستحقاق: ${new Date(invoice.due_date).toLocaleDateString('ar-u-nu-latn')}` : '') +
       `\n\n${storeName}`
     return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
   }
@@ -339,12 +339,12 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
             <div className="space-y-1 text-sm">
               <div className="flex justify-between gap-8">
                 <span className="text-slate-400 print:text-gray-500">تاريخ الإصدار</span>
-                <span className="text-white print:text-black">{new Date(invoice.issue_date).toLocaleDateString('ar', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                <span className="text-white print:text-black">{new Date(invoice.issue_date).toLocaleDateString('ar-u-nu-latn', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
               </div>
               {invoice.due_date && (
                 <div className="flex justify-between gap-8">
                   <span className="text-slate-400 print:text-gray-500">تاريخ الاستحقاق</span>
-                  <span className="text-white print:text-black">{new Date(invoice.due_date).toLocaleDateString('ar', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                  <span className="text-white print:text-black">{new Date(invoice.due_date).toLocaleDateString('ar-u-nu-latn', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
                 </div>
               )}
               <div className="flex justify-between gap-8">

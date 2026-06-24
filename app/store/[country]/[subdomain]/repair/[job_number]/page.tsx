@@ -58,7 +58,7 @@ export default async function RepairTrackingPage({ params }: Props) {
   const isCancelled  = job.status === 'cancelled'
   const isReady      = job.status === 'ready'
   const balance      = Math.max(0, (job.final_cost ?? 0) - (job.deposit_paid ?? 0))
-  const fmt          = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
+  const fmt          = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 0 })
 
   return (
     <div className="min-h-screen bg-slate-950 text-white" dir="rtl">
@@ -159,14 +159,14 @@ export default async function RepairTrackingPage({ params }: Props) {
           <div className="rounded-xl border border-white/5 bg-slate-900 p-4 text-center">
             <p className="text-xs text-slate-500 mb-1">تاريخ الاستلام</p>
             <p className="text-sm font-medium text-white">
-              {new Date(job.received_at).toLocaleDateString('ar', { year: 'numeric', month: 'long', day: 'numeric' })}
+              {new Date(job.received_at).toLocaleDateString('ar-u-nu-latn', { year: 'numeric', month: 'long', day: 'numeric' })}
             </p>
           </div>
           {job.estimated_done && (
             <div className="rounded-xl border border-white/5 bg-slate-900 p-4 text-center">
               <p className="text-xs text-slate-500 mb-1">الموعد المتوقع</p>
               <p className="text-sm font-medium text-white">
-                {new Date(job.estimated_done).toLocaleDateString('ar', { year: 'numeric', month: 'long', day: 'numeric' })}
+                {new Date(job.estimated_done).toLocaleDateString('ar-u-nu-latn', { year: 'numeric', month: 'long', day: 'numeric' })}
               </p>
             </div>
           )}

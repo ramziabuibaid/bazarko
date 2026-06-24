@@ -74,7 +74,7 @@ function fmtDuration(seconds: number): string {
 }
 
 function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleString('ar', {
+  return new Date(iso).toLocaleString('ar-u-nu-latn', {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
   })
 }

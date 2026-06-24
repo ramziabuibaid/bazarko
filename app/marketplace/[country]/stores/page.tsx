@@ -82,7 +82,7 @@ export default async function MarketplaceStoresPage({ params }: Props) {
               </div>
 
               <p className="text-xs text-slate-600 mt-2">
-                منذ {new Date(store.created_at).toLocaleDateString('ar', { year: 'numeric', month: 'short' })}
+                منذ {new Date(store.created_at).toLocaleDateString('ar-u-nu-latn', { year: 'numeric', month: 'short' })}
               </p>
             </Link>
           ))}

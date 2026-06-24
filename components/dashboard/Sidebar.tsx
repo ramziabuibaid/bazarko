@@ -15,7 +15,7 @@ interface Store {
 }
 
 interface NavItem { href: string; label: string; icon: string }
-interface NavGroup { title?: string; items: NavItem[] }
+interface NavGroup { title?: string; items: NavItem[]; module?: string }
 
 const navGroups: NavGroup[] = [
   {
@@ -30,6 +30,7 @@ const navGroups: NavGroup[] = [
       { href: '/dashboard/categories', label: 'الفئات', icon: '📂' },
       { href: '/dashboard/offers', label: 'العروض الحصرية', icon: '🏷️' },
       { href: '/dashboard/orders', label: 'الطلبيات', icon: '📦' },
+      { href: '/dashboard/reviews', label: 'التقييمات', icon: '⭐' },
       { href: '/dashboard/delivery', label: 'التوصيل', icon: '🚚' },
       { href: '/dashboard/analytics', label: 'تحليلات الزوار', icon: '📡' },
     ],
@@ -65,6 +66,7 @@ const navGroups: NavGroup[] = [
   },
   {
     title: 'الصيانة',
+    module: 'maintenance',
     items: [
       { href: '/dashboard/maintenance', label: 'لوحة الصيانة', icon: '🔧' },
       { href: '/dashboard/maintenance/new', label: 'استلام جهاز جديد', icon: '➕' },
@@ -181,7 +183,9 @@ function NavContent({
 
       {/* القائمة الرئيسية */}
       <nav className="flex-1 overflow-y-auto px-3 py-4">
-        {navGroups.map((group, gi) => (
+        {navGroups
+          .filter(group => !group.module || store.modules?.[group.module])
+          .map((group, gi) => (
           <div key={gi} className={gi > 0 ? 'mt-6' : ''}>
             {group.title && (
               <p className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-widest text-slate-600">

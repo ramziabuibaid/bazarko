@@ -12,6 +12,15 @@
 
 ---
 
+## ⚖️ قواعد ثابتة (الدستور) — لا تُكسر أبداً
+
+1. **كل الأرقام في التطبيق أرقام إنجليزية (لاتينية) `0123456789` — وليست عربية-هندية `٠١٢٣`. الآن وفي كل ميزة مستقبلية.**
+   - عند تنسيق أي رقم أو تاريخ استخدم اللوكال **`'ar-u-nu-latn'`** — يحافظ على أسماء الأشهر العربية (يونيو، الخ) مع أرقام لاتينية وفاصلة آلاف لاتينية.
+   - **ممنوع** استخدام `'ar'` أو `'ar-SA'` في `toLocaleString` / `toLocaleDateString` / `toLocaleTimeString` — لأنها تُنتج أرقاماً عربية-هندية.
+   - مثال صحيح: `n.toLocaleString('ar-u-nu-latn')` و `new Date(d).toLocaleDateString('ar-u-nu-latn', { month: 'long', day: 'numeric' })`.
+
+---
+
 ## Stack التقني
 
 | الأداة | الاستخدام |
@@ -185,6 +194,8 @@ db/
     ├── 023_audit_invoices.sql                 ⚠️ يجب تطبيقه — سجل العمليات + حالة فاتورة partial + paid_at
     └── 024_support_tickets.sql                ⚠️ يجب تطبيقه — تذاكر دعم الزبائن + محادثة
     └── 025_staff_activity.sql                 ⚠️ يجب تطبيقه — تتبّع نشاط الموظفين (وقت فعلي + تحركات + لصق) + RPC
+    └── 026_ticket_rating.sql                  ⚠️ يجب تطبيقه — تقييم خدمة الدعم (نجوم 1..5 + ملاحظة) على support_tickets
+    └── 027_product_reviews.sql                ⚠️ يجب تطبيقه — تقييمات المنتجات (نجوم+تعليق+صور+مراجعة) + bucket review-photos العام
 ```
 
 ### تتبّع نشاط الموظفين (migration 025)
@@ -401,6 +412,20 @@ record_offer_sale(store_id, product_id, qty)  -- يزيد sold_quantity للعر
 - التواريخ: `datetime-local` محلياً → تُحفظ ISO/UTC
 
 ---
+
+## تقييمات المنتجات (Product Reviews)
+
+- جدول `product_reviews` (migration 027): `store_id, product_id, customer_name, rating(1..5), comment, photos[], status(pending/approved/rejected)`.
+- **RLS**: الزبون (anon) يقرأ `approved` فقط ويضيف تقييماً بحالة `pending`؛ التاجر إدارة كاملة عبر `is_store_member`.
+- **الصور**: bucket عام منفصل `review-photos` (الزبون غير مسجّل، لذلك سياسة رفع عامة) — `uploadReviewPhoto` في `lib/supabase/storage.ts`.
+- **صفحة المنتج**: `ProductReviews.tsx` — ملخص (متوسط + عدد) + نجوم تحت الاسم + قائمة التقييمات المعتمدة + نموذج إضافة (نجوم + اسم + تعليق + حتى 4 صور). التقييم الجديد يُحفظ `pending`.
+- **لوحة التاجر**: `/dashboard/reviews` — تبويبات (بانتظار/معتمدة/مخفية/الكل) + اعتماد/إخفاء/حذف لكل تقييم (`ReviewsModeration.tsx`). رابط "التقييمات ⭐" في الـ Sidebar.
+
+## الوحدات (modules) والقائمة الجانبية
+
+- لكل متجر حقل `stores.modules` (JSONB): `store/accounting/inventory/maintenance/marketplace`.
+- الـ Sidebar يُخفي أي مجموعة لها `module` إذا كانت القيمة false. **وحدة الصيانة `maintenance` افتراضياً false** — تظهر فقط لمحلات التصليح التي تفعّلها.
+- التفعيل/الإيقاف من الإعدادات (قسم "الوحدات").
 
 ## الإيميل (Resend)
 

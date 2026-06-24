@@ -167,7 +167,7 @@ export default function RepairJobDetail({
     )
   }, [storeCountryCode, storeSubdomain, job.job_number])
 
-  const fmt          = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
+  const fmt          = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 0 })
   const nextStatus   = STATUS_FLOW[status]
   const sm           = STATUS_META[status] ?? STATUS_META.received
   const partsTotal   = parts.reduce((s, p) => s + p.total, 0)
@@ -505,8 +505,8 @@ export default function RepairJobDetail({
                 {history.map((h, i) => {
                   const meta    = STATUS_META[h.to_status]
                   const date    = new Date(h.changed_at)
-                  const timeStr = date.toLocaleTimeString('ar', { hour: '2-digit', minute: '2-digit', hour12: false })
-                  const dateStr = date.toLocaleDateString('ar', { month: 'short', day: 'numeric' })
+                  const timeStr = date.toLocaleTimeString('ar-u-nu-latn', { hour: '2-digit', minute: '2-digit', hour12: false })
+                  const dateStr = date.toLocaleDateString('ar-u-nu-latn', { month: 'short', day: 'numeric' })
                   return (
                     <div key={h.id} className="flex gap-3">
                       {/* Timestamp column */}
@@ -755,8 +755,8 @@ export default function RepairJobDetail({
               <p className="text-lg font-mono mt-1">{job.job_number}</p>
             </div>
             <div className="text-left text-sm">
-              <p>تاريخ الاستلام: {new Date(job.received_at).toLocaleDateString('ar')}</p>
-              {job.estimated_done && <p>الموعد المتوقع: {new Date(job.estimated_done).toLocaleDateString('ar')}</p>}
+              <p>تاريخ الاستلام: {new Date(job.received_at).toLocaleDateString('ar-u-nu-latn')}</p>
+              {job.estimated_done && <p>الموعد المتوقع: {new Date(job.estimated_done).toLocaleDateString('ar-u-nu-latn')}</p>}
             </div>
           </div>
           <hr className="border-black mb-4" />

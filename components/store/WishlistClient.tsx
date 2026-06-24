@@ -96,20 +96,20 @@ export default function WishlistClient({
                   {preferSecondary && sec !== null ? (
                     <>
                       <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                        {sec.toLocaleString('ar')} {secondaryCurrencyCode}
+                        {sec.toLocaleString('ar-u-nu-latn')} {secondaryCurrencyCode}
                       </span>
                       <span className="mr-1.5 text-xs text-gray-400 dark:text-gray-500">
-                        ≈ {item.price.toLocaleString('ar')} {currencyCode}
+                        ≈ {item.price.toLocaleString('ar-u-nu-latn')} {currencyCode}
                       </span>
                     </>
                   ) : (
                     <>
                       <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                        {item.price.toLocaleString('ar')} {currencyCode}
+                        {item.price.toLocaleString('ar-u-nu-latn')} {currencyCode}
                       </span>
                       {sec !== null && (
                         <span className="mr-1.5 text-xs text-gray-400 dark:text-gray-500">
-                          ≈ {sec.toLocaleString('ar')} {secondaryCurrencyCode}
+                          ≈ {sec.toLocaleString('ar-u-nu-latn')} {secondaryCurrencyCode}
                         </span>
                       )}
                     </>

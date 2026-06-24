@@ -51,7 +51,7 @@ export default async function TreasuryPage() {
   const todayNet = todayIn - todayOut
 
   const cur = store.currency_code
-  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 2 })
+  const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })
 
   return (
     <div className="space-y-5 p-4 sm:p-6">
@@ -115,7 +115,7 @@ export default async function TreasuryPage() {
             {(sessions ?? []).map(s => (
               <div key={s.id} className="flex items-center justify-between rounded-xl border border-white/5 bg-slate-900 px-4 py-3 text-sm">
                 <div>
-                  <p className="text-slate-300">{s.closed_at ? new Date(s.closed_at).toLocaleString('ar') : '—'}</p>
+                  <p className="text-slate-300">{s.closed_at ? new Date(s.closed_at).toLocaleString('ar-u-nu-latn') : '—'}</p>
                   {s.notes && <p className="mt-0.5 text-xs text-slate-500">{s.notes}</p>}
                 </div>
                 <div className="flex items-center gap-4 text-xs" dir="ltr">

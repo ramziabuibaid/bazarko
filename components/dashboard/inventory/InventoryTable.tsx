@@ -299,10 +299,10 @@ export default function InventoryTable({ products, currencyCode, storeId, userId
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-300" dir="ltr">
-                      {p.cost_price ? `${p.cost_price.toLocaleString('ar')} ${currencyCode}` : '—'}
+                      {p.cost_price ? `${p.cost_price.toLocaleString('ar-u-nu-latn')} ${currencyCode}` : '—'}
                     </td>
                     <td className="px-4 py-3 text-sm font-medium text-white" dir="ltr">
-                      {value > 0 ? `${value.toLocaleString('ar')} ${currencyCode}` : '—'}
+                      {value > 0 ? `${value.toLocaleString('ar-u-nu-latn')} ${currencyCode}` : '—'}
                     </td>
                     <td className="px-4 py-3">
                       <button

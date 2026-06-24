@@ -19,6 +19,8 @@ interface Ticket {
   assigned_to: string | null
   created_at: string
   resolved_at: string | null
+  rating: number | null
+  rating_note: string | null
 }
 interface Message { id: string; sender: string; body: string; created_at: string }
 
@@ -50,6 +52,24 @@ export default function SupportTicketDetail({
   const [reply, setReply] = useState('')
   const [sender, setSender] = useState<'staff' | 'customer'>('staff')
   const [sending, setSending] = useState(false)
+  const [rating, setRating] = useState<number>(ticket.rating ?? 0)
+  const [ratingNote, setRatingNote] = useState(ticket.rating_note ?? '')
+  const [hoverStar, setHoverStar] = useState(0)
+  const [savingRating, setSavingRating] = useState(false)
+  const [ratingSaved, setRatingSaved] = useState(false)
+
+  async function saveRating(stars: number) {
+    setRating(stars)
+    setSavingRating(true)
+    await supabase.from('support_tickets').update({
+      rating: stars,
+      rating_note: ratingNote.trim() || null,
+      rated_at: new Date().toISOString(),
+    }).eq('id', ticket.id)
+    setSavingRating(false)
+    setRatingSaved(true)
+    router.refresh()
+  }
 
   const sm = STATUS_META[status] ?? { label: status, cls: 'bg-white/5 text-white' }
 
@@ -97,7 +117,7 @@ export default function SupportTicketDetail({
                 {ticket.subject}
               </h2>
               <p className="mt-1 text-xs text-slate-500">
-                {CATEGORY_LABELS[ticket.category]} · {CHANNEL_LABELS[ticket.channel]} · {new Date(ticket.created_at).toLocaleString('ar')}
+                {CATEGORY_LABELS[ticket.category]} · {CHANNEL_LABELS[ticket.channel]} · {new Date(ticket.created_at).toLocaleString('ar-u-nu-latn')}
               </p>
             </div>
             <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium ${sm.cls}`}>{sm.label}</span>
@@ -115,7 +135,7 @@ export default function SupportTicketDetail({
               }`}>
                 <p className="text-[10px] font-semibold text-slate-400">{m.sender === 'staff' ? 'الموظف' : 'الزبون'}</p>
                 <p className="mt-0.5 whitespace-pre-wrap text-sm">{m.body}</p>
-                <p className="mt-1 text-[10px] text-slate-500" dir="ltr">{new Date(m.created_at).toLocaleString('ar')}</p>
+                <p className="mt-1 text-[10px] text-slate-500" dir="ltr">{new Date(m.created_at).toLocaleString('ar-u-nu-latn')}</p>
               </div>
             </div>
           ))}
@@ -173,6 +193,46 @@ export default function SupportTicketDetail({
             ))}
           </div>
         </div>
+
+        {/* تقييم الخدمة — يظهر بعد حلّ/إغلاق التذكرة */}
+        {(status === 'resolved' || status === 'closed') && (
+          <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-slate-500">تقييم الخدمة</p>
+            <p className="mb-3 text-sm text-slate-300">كيف كانت الخدمة؟</p>
+            <div className="flex gap-1" onMouseLeave={() => setHoverStar(0)}>
+              {[1, 2, 3, 4, 5].map(n => (
+                <button
+                  key={n}
+                  type="button"
+                  disabled={savingRating}
+                  onMouseEnter={() => setHoverStar(n)}
+                  onClick={() => saveRating(n)}
+                  className="text-2xl transition-transform hover:scale-110 disabled:opacity-50"
+                  aria-label={`${n} نجوم`}
+                >
+                  <span className={(hoverStar || rating) >= n ? 'text-amber-400' : 'text-slate-600'}>★</span>
+                </button>
+              ))}
+            </div>
+            <textarea
+              value={ratingNote}
+              onChange={e => { setRatingNote(e.target.value); setRatingSaved(false) }}
+              rows={2}
+              placeholder="ملاحظة الزبون (اختياري)..."
+              className="mt-3 w-full rounded-xl border border-white/10 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500/40"
+            />
+            {rating > 0 && (
+              <button
+                type="button"
+                onClick={() => saveRating(rating)}
+                disabled={savingRating}
+                className="mt-2 w-full rounded-xl bg-amber-500/15 py-2 text-sm font-medium text-amber-400 hover:bg-amber-500/25 disabled:opacity-50"
+              >
+                {savingRating ? '...' : ratingSaved ? '✓ تم الحفظ' : 'حفظ التقييم'}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

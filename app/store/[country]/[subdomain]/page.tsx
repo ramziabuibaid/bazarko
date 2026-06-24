@@ -156,6 +156,30 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
           </div>
         )}
 
+        {/* شريط البحث — في الأعلى ليكون ظاهراً دائماً */}
+        <form action={`/store/${params.country}/${params.subdomain}`} className="mb-8 flex gap-2">
+          <div className="relative flex-1">
+            <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
+            <input
+              name="q"
+              defaultValue={searchParams.q}
+              placeholder="ابحث عن منتج..."
+              className="w-full rounded-xl border border-gray-200 bg-gray-50 py-3 pr-11 pl-4 text-right text-sm text-gray-900 outline-none focus:border-gray-400 dark:border-gray-800 dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-gray-600"
+            />
+          </div>
+          <button type="submit" className="rounded-xl bg-gray-900 px-5 py-3 text-sm font-medium text-white dark:bg-white dark:text-gray-900">
+            بحث
+          </button>
+          {searchParams.q && (
+            <Link
+              href={`/store/${params.country}/${params.subdomain}`}
+              className="flex items-center rounded-xl border border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400"
+            >
+              ✕
+            </Link>
+          )}
+        </form>
+
         {showOffers && (
           <section className="mb-10">
             <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">🔥 العروض الحصرية</h2>
@@ -243,26 +267,6 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
             q={searchParams.q}
           />
         </div>
-
-        <form action={`/store/${params.country}/${params.subdomain}`} className="mt-2 flex gap-2">
-          <input
-            name="q"
-            defaultValue={searchParams.q}
-            placeholder="ابحث عن منتج..."
-            className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-right text-sm text-gray-900 outline-none focus:border-gray-400 dark:border-gray-800 dark:bg-gray-900 dark:text-white dark:placeholder-gray-500 dark:focus:border-gray-600"
-          />
-          <button type="submit" className="rounded-xl bg-gray-900 px-5 py-2.5 text-sm font-medium text-white dark:bg-white dark:text-gray-900">
-            بحث
-          </button>
-          {searchParams.q && (
-            <Link
-              href={`/store/${params.country}/${params.subdomain}`}
-              className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm text-gray-500 dark:border-gray-800 dark:text-gray-400"
-            >
-              ✕
-            </Link>
-          )}
-        </form>
 
         <section className="mt-6">
           <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">

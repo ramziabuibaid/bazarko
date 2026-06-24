@@ -65,7 +65,7 @@ function sortOffers(offers: OfferRow[]): OfferRow[] {
 }
 
 const dateFmt = (iso: string) =>
-  new Date(iso).toLocaleDateString('ar', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+  new Date(iso).toLocaleDateString('ar-u-nu-latn', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
 function timeRemaining(endsAt: string): string {
   const diff = new Date(endsAt).getTime() - Date.now()

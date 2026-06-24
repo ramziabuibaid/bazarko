@@ -37,8 +37,8 @@ function buildEmailHtml(p: SendOrderEmailParams): string {
     <tr>
       <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#374151">${item.product_name}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#374151;text-align:center">${item.quantity}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#374151;text-align:left" dir="ltr">${item.unit_price.toLocaleString('ar')} ${p.currencyCode}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:14px;font-weight:600;color:#111827;text-align:left" dir="ltr">${item.total_price.toLocaleString('ar')} ${p.currencyCode}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#374151;text-align:left" dir="ltr">${item.unit_price.toLocaleString('ar-u-nu-latn')} ${p.currencyCode}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:14px;font-weight:600;color:#111827;text-align:left" dir="ltr">${item.total_price.toLocaleString('ar-u-nu-latn')} ${p.currencyCode}</td>
     </tr>
   `).join('')
 
@@ -88,11 +88,11 @@ function buildEmailHtml(p: SendOrderEmailParams): string {
     <div style="margin-top:16px;padding:16px;background:#f9fafb;border-radius:12px;text-align:left" dir="ltr">
       <div style="display:flex;justify-content:space-between;margin-bottom:8px">
         <span style="font-size:13px;color:#6b7280">المجموع الجزئي</span>
-        <span style="font-size:13px;color:#374151">${p.subtotal.toLocaleString('ar')} ${p.currencyCode}</span>
+        <span style="font-size:13px;color:#374151">${p.subtotal.toLocaleString('ar-u-nu-latn')} ${p.currencyCode}</span>
       </div>
       <div style="padding-top:10px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between">
         <span style="font-size:16px;font-weight:700;color:#111827">الإجمالي</span>
-        <span style="font-size:16px;font-weight:700;color:#111827">${p.totalAmount.toLocaleString('ar')} ${p.currencyCode}</span>
+        <span style="font-size:16px;font-weight:700;color:#111827">${p.totalAmount.toLocaleString('ar-u-nu-latn')} ${p.currencyCode}</span>
       </div>
     </div>
 

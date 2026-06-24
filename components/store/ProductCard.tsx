@@ -37,6 +37,14 @@ export default function ProductCard({ product, currencyCode, storeId, country, s
   const inCart = items.find(i => i.productId === product.id)
   const outOfStock = (product.stock_available ?? 1) <= 0
 
+  // شارة التوفّر: لا يتتبّع المخزون (null) → حسب الطلب، ≤0 → غير متوفر، وإلا متوفر
+  const availability =
+    product.stock_available == null
+      ? { label: '🟡 حسب الطلب', cls: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400' }
+      : product.stock_available <= 0
+        ? { label: '🔴 غير متوفر', cls: 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400' }
+        : { label: '🟢 متوفر', cls: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400' }
+
   const discount = product.compare_price
     ? Math.round((1 - product.price / product.compare_price) * 100)
     : null
@@ -101,6 +109,9 @@ export default function ProductCard({ product, currencyCode, storeId, country, s
 
       {/* المعلومات */}
       <div className="flex flex-1 flex-col p-3">
+        <span className={`mb-1.5 inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${availability.cls}`}>
+          {availability.label}
+        </span>
         <p className="line-clamp-2 text-sm font-medium text-gray-900 dark:text-gray-100">{product.name}</p>
 
         <div className="mt-2">
@@ -108,33 +119,33 @@ export default function ProductCard({ product, currencyCode, storeId, country, s
             <>
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-gray-900 dark:text-white">
-                  {secondaryPrice.toLocaleString('ar')} {secondaryCurrencyCode}
+                  {secondaryPrice.toLocaleString('ar-u-nu-latn')} {secondaryCurrencyCode}
                 </span>
                 {product.compare_price && (
                   <span className="text-xs text-gray-400 line-through dark:text-gray-500">
-                    {product.compare_price.toLocaleString('ar')}
+                    {product.compare_price.toLocaleString('ar-u-nu-latn')}
                   </span>
                 )}
               </div>
               <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
-                ≈ {product.price.toLocaleString('ar')} {currencyCode}
+                ≈ {product.price.toLocaleString('ar-u-nu-latn')} {currencyCode}
               </p>
             </>
           ) : (
             <>
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-gray-900 dark:text-white">
-                  {product.price.toLocaleString('ar')} {currencyCode}
+                  {product.price.toLocaleString('ar-u-nu-latn')} {currencyCode}
                 </span>
                 {product.compare_price && (
                   <span className="text-xs text-gray-400 line-through dark:text-gray-500">
-                    {product.compare_price.toLocaleString('ar')}
+                    {product.compare_price.toLocaleString('ar-u-nu-latn')}
                   </span>
                 )}
               </div>
               {secondaryPrice !== null && (
                 <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
-                  ≈ {secondaryPrice.toLocaleString('ar')} {secondaryCurrencyCode}
+                  ≈ {secondaryPrice.toLocaleString('ar-u-nu-latn')} {secondaryCurrencyCode}
                 </p>
               )}
             </>

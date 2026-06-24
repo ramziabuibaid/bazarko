@@ -93,9 +93,9 @@ export default async function EditOfferPage({ params }: { params: { id: string }
       {/* تحليلات العرض */}
       <div className="mb-6 grid grid-cols-3 gap-3">
         {[
-          { label: 'مشاهدات الصفحة', value: (offer.view_count ?? 0).toLocaleString('ar'), icon: '👁️' },
-          { label: 'قطع مبيعة خلال العرض', value: orderedQty.toLocaleString('ar'), icon: '🛒' },
-          { label: 'إيراد العرض', value: `${offerRevenue.toLocaleString('ar')} ${store.currency_code}`, icon: '💰' },
+          { label: 'مشاهدات الصفحة', value: (offer.view_count ?? 0).toLocaleString('ar-u-nu-latn'), icon: '👁️' },
+          { label: 'قطع مبيعة خلال العرض', value: orderedQty.toLocaleString('ar-u-nu-latn'), icon: '🛒' },
+          { label: 'إيراد العرض', value: `${offerRevenue.toLocaleString('ar-u-nu-latn')} ${store.currency_code}`, icon: '💰' },
         ].map(s => (
           <div key={s.label} className="rounded-xl border border-white/5 bg-slate-900 p-4">
             <p className="text-xs text-slate-500">{s.icon} {s.label}</p>

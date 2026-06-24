@@ -235,8 +235,8 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
           <div className="space-y-3">
             {[
               { label: 'إجمالي الطلبيات', value: customer.total_orders, unit: 'طلبية' },
-              { label: 'إجمالي المشتريات', value: `${(customer.total_invoiced ?? 0).toLocaleString('ar')}`, unit: currencyCode },
-              { label: 'إجمالي المدفوع', value: `${(customer.total_paid ?? 0).toLocaleString('ar')}`, unit: currencyCode, color: 'text-emerald-400' },
+              { label: 'إجمالي المشتريات', value: `${(customer.total_invoiced ?? 0).toLocaleString('ar-u-nu-latn')}`, unit: currencyCode },
+              { label: 'إجمالي المدفوع', value: `${(customer.total_paid ?? 0).toLocaleString('ar-u-nu-latn')}`, unit: currencyCode, color: 'text-emerald-400' },
             ].map(item => (
               <div key={item.label} className="flex justify-between text-sm">
                 <span className="text-slate-400">{item.label}</span>
@@ -246,7 +246,7 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
             <div className="border-t border-white/10 pt-3 flex justify-between font-semibold">
               <span className="text-slate-300">الذمة الحالية</span>
               <span className={customer.balance > 0 ? 'text-red-400' : 'text-emerald-400'} dir="ltr">
-                {customer.balance > 0 ? `${customer.balance.toLocaleString('ar')} ${currencyCode}` : '✓ مسدد'}
+                {customer.balance > 0 ? `${customer.balance.toLocaleString('ar-u-nu-latn')} ${currencyCode}` : '✓ مسدد'}
               </span>
             </div>
           </div>
@@ -260,12 +260,32 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
             </button>
           )}
 
-          <button
-            onClick={handlePrint}
-            className="mt-2 w-full rounded-xl border border-white/10 py-2.5 text-sm text-slate-300 hover:bg-white/5"
-          >
-            🖨️ طباعة كشف الحساب
-          </button>
+          {/* إجراءات سريعة */}
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {customer.balance > 0 && customer.phone && (
+              <a
+                href={`https://wa.me/${customer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(
+                  `مرحباً ${customer.name}،\nنذكّركم بأن الذمة المستحقة لدينا هي ${customer.balance.toLocaleString('ar-u-nu-latn')} ${currencyCode}.\nشكراً لتعاونكم 🙏`
+                )}`}
+                target="_blank" rel="noopener noreferrer"
+                className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-500/15 py-2.5 text-sm text-emerald-400 hover:bg-emerald-500/25"
+              >
+                💬 تذكير واتساب
+              </a>
+            )}
+            <Link
+              href={`/dashboard/accounting/invoices?customer=${customer.id}`}
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 py-2.5 text-sm text-slate-300 hover:bg-white/5"
+            >
+              📄 عرض الفواتير
+            </Link>
+            <button
+              onClick={handlePrint}
+              className="flex items-center justify-center gap-1.5 rounded-xl border border-white/10 py-2.5 text-sm text-slate-300 hover:bg-white/5"
+            >
+              🖨️ كشف الحساب
+            </button>
+          </div>
         </div>
       </div>
 
@@ -297,7 +317,7 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
               <h2 className="text-xl font-bold">كشف حساب الزبون</h2>
               <p className="text-lg font-semibold mt-1">{customer.name}</p>
               {customer.phone && <p dir="ltr">{customer.phone}</p>}
-              <p className="mt-2 text-sm text-gray-500">تاريخ الطباعة: {new Date().toLocaleDateString('ar')}</p>
+              <p className="mt-2 text-sm text-gray-500">تاريخ الطباعة: {new Date().toLocaleDateString('ar-u-nu-latn')}</p>
             </div>
 
             {ledger.length === 0 ? (
@@ -320,20 +340,20 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
                     return (
                       <tr key={entry.id} className="hover:bg-white/3 print:hover:bg-transparent">
                         <td className="px-4 py-3 text-slate-400 print:text-gray-600">
-                          {new Date(entry.date).toLocaleDateString('ar')}
+                          {new Date(entry.date).toLocaleDateString('ar-u-nu-latn')}
                         </td>
                         <td className="px-4 py-3">
                           <p className="text-white print:text-gray-900">{entry.description}</p>
                           <span className={`text-xs ${lt.color}`}>{lt.label}</span>
                         </td>
                         <td className="px-4 py-3 text-left font-medium text-red-400 print:text-red-600" dir="ltr">
-                          {entry.debit > 0 ? entry.debit.toLocaleString('ar') : '—'}
+                          {entry.debit > 0 ? entry.debit.toLocaleString('ar-u-nu-latn') : '—'}
                         </td>
                         <td className="px-4 py-3 text-left font-medium text-emerald-400 print:text-emerald-600" dir="ltr">
-                          {entry.credit > 0 ? entry.credit.toLocaleString('ar') : '—'}
+                          {entry.credit > 0 ? entry.credit.toLocaleString('ar-u-nu-latn') : '—'}
                         </td>
                         <td className="px-4 py-3 text-left font-semibold text-white print:text-gray-900" dir="ltr">
-                          {entry.balance.toLocaleString('ar')} {currencyCode}
+                          {entry.balance.toLocaleString('ar-u-nu-latn')} {currencyCode}
                         </td>
                       </tr>
                     )
@@ -345,7 +365,7 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
                       الرصيد الحالي
                     </td>
                     <td className={`px-4 py-3 text-left font-bold text-lg ${customer.balance > 0 ? 'text-red-400' : 'text-emerald-400'}`} dir="ltr">
-                      {customer.balance.toLocaleString('ar')} {currencyCode}
+                      {customer.balance.toLocaleString('ar-u-nu-latn')} {currencyCode}
                     </td>
                   </tr>
                 </tfoot>
@@ -379,13 +399,13 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
                       <td className="px-4 py-3 font-mono text-white" dir="ltr">{order.order_number}</td>
                       <td className="px-4 py-3 text-slate-300">{ORDER_STATUS[order.status] ?? order.status}</td>
                       <td className="px-4 py-3 text-left text-white" dir="ltr">
-                        {order.total_amount.toLocaleString('ar')} {currencyCode}
+                        {order.total_amount.toLocaleString('ar-u-nu-latn')} {currencyCode}
                       </td>
                       <td className="px-4 py-3 text-left text-emerald-400" dir="ltr">
-                        {order.amount_paid.toLocaleString('ar')}
+                        {order.amount_paid.toLocaleString('ar-u-nu-latn')}
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-500">
-                        {new Date(order.created_at).toLocaleDateString('ar')}
+                        {new Date(order.created_at).toLocaleDateString('ar-u-nu-latn')}
                       </td>
                       <td className="px-4 py-3">
                         <Link href={`/dashboard/orders/${order.id}`} className="text-xs text-sky-400 hover:underline">
@@ -408,7 +428,7 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
           <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900 p-6" onClick={e => e.stopPropagation()}>
             <h2 className="mb-1 text-lg font-semibold text-white">تسجيل دفعة</h2>
             <p className="mb-5 text-sm text-slate-400">
-              الذمة الحالية: <span className="text-red-400 font-semibold">{customer.balance.toLocaleString('ar')} {currencyCode}</span>
+              الذمة الحالية: <span className="text-red-400 font-semibold">{customer.balance.toLocaleString('ar-u-nu-latn')} {currencyCode}</span>
             </p>
             <form onSubmit={recordPayment} className="space-y-4">
               <div>
@@ -420,7 +440,7 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
                   min="0.01"
                   step="0.01"
                   max={customer.balance}
-                  placeholder={`0 — ${customer.balance.toLocaleString('ar')}`}
+                  placeholder={`0 — ${customer.balance.toLocaleString('ar-u-nu-latn')}`}
                   dir="ltr"
                   required
                   className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-emerald-500/50"

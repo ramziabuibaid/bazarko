@@ -69,7 +69,7 @@ export default async function CustomerLedgerPage() {
         <div className="rounded-2xl border border-white/5 bg-slate-900 p-4">
           <p className="text-xs text-slate-400">💳 إجمالي الذمم</p>
           <p className="mt-1.5 text-xl font-bold text-red-400" dir="ltr">
-            {totalDebt.toLocaleString('ar')} {store.currency_code}
+            {totalDebt.toLocaleString('ar-u-nu-latn')} {store.currency_code}
           </p>
         </div>
         <div className="rounded-2xl border border-white/5 bg-slate-900 p-4">
@@ -133,7 +133,7 @@ export default async function CustomerLedgerPage() {
                     <td className="px-4 py-3 text-slate-300">{c.total_orders}</td>
                     <td className="px-4 py-3 text-left">
                       <span className="font-semibold text-red-400" dir="ltr">
-                        {c.balance.toLocaleString('ar')} {store.currency_code}
+                        {c.balance.toLocaleString('ar-u-nu-latn')} {store.currency_code}
                       </span>
                     </td>
                     <td className="px-4 py-3">
@@ -151,7 +151,7 @@ export default async function CustomerLedgerPage() {
                 <tr className="border-t-2 border-white/10 bg-white/3">
                   <td colSpan={4} className="px-4 py-3 font-bold text-white">الإجمالي</td>
                   <td className="px-4 py-3 text-left font-bold text-red-400 text-base" dir="ltr">
-                    {totalDebt.toLocaleString('ar')} {store.currency_code}
+                    {totalDebt.toLocaleString('ar-u-nu-latn')} {store.currency_code}
                   </td>
                   <td />
                 </tr>
@@ -190,7 +190,7 @@ export default async function CustomerLedgerPage() {
                     </td>
                     <td className="px-4 py-3 text-slate-300">{c.total_orders}</td>
                     <td className="px-4 py-3 text-left text-emerald-400" dir="ltr">
-                      {(c.total_paid ?? 0).toLocaleString('ar')} {store.currency_code}
+                      {(c.total_paid ?? 0).toLocaleString('ar-u-nu-latn')} {store.currency_code}
                     </td>
                     <td className="px-4 py-3">
                       <Link

@@ -96,7 +96,7 @@ export default async function MarketplaceHomePage({ params }: Props) {
     }
   }).filter(d => d.itemCount > 0)
 
-  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
+  const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 0 })
   const countryLower = params.country.toLowerCase()
 
   return (

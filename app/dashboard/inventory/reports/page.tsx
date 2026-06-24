@@ -83,7 +83,7 @@ export default async function InventoryReportsPage() {
   const daily     = (recentMovements  ?? []) as DailyMove[]
   const cats      = (categories ?? []) as Category[]
 
-  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
+  const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 0 })
 
   // مجمّع المبيعات لكل منتج
   const salesMap: Record<string, number> = {}
@@ -136,7 +136,7 @@ export default async function InventoryReportsPage() {
   for (let i = 6; i >= 0; i--) {
     const d = new Date(Date.now() - i * 86400000)
     const dateStr = d.toISOString().slice(0, 10)
-    dayLabels.push(d.toLocaleDateString('ar', { weekday: 'short', day: 'numeric' }))
+    dayLabels.push(d.toLocaleDateString('ar-u-nu-latn', { weekday: 'short', day: 'numeric' }))
     const dayMovements = daily.filter(m => m.created_at.slice(0, 10) === dateStr)
     daySales.push(dayMovements.filter(m => m.type === 'sale').reduce((s, m) => s + Math.abs(m.quantity), 0))
     dayBuys.push(dayMovements.filter(m => m.type === 'purchase').reduce((s, m) => s + Math.abs(m.quantity), 0))

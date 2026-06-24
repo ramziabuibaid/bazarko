@@ -107,6 +107,7 @@ interface Store {
   map_url: string | null
   header_theme: string | null
   footer_settings: FooterSettings | null
+  modules: Record<string, boolean> | null
 }
 
 interface Props {
@@ -155,6 +156,12 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
     show_hours: true, show_powered_by: true, copyright: '',
   }
   const [footer, setFooter] = useState<FooterSettings>({ ...defaultFooter, ...store.footer_settings })
+
+  const [modules, setModules] = useState<Record<string, boolean>>(store.modules ?? {})
+  function toggleModule(key: string) {
+    setModules(m => ({ ...m, [key]: !m[key] }))
+    setSuccess(false)
+  }
 
   function updateFooter(field: keyof FooterSettings, value: string | boolean) {
     setFooter(f => ({ ...f, [field]: value }))
@@ -268,6 +275,7 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
         exchange_rate:           exchangeRate ? parseFloat(exchangeRate) : null,
         prefer_secondary:        secondaryCurrency ? preferSecondary : false,
         footer_settings:         footer,
+        modules:                 modules,
         updated_at:              new Date().toISOString(),
       })
       .eq('id', store.id)
@@ -740,7 +748,7 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
               <div className="rounded-xl bg-sky-500/5 border border-sky-500/10 px-4 py-3 text-sm text-sky-400">
                 مثال: منتج بسعر 100 {store.currency_code} سيظهر بـ{' '}
                 <span className="font-semibold">
-                  {(100 * parseFloat(exchangeRate || '0')).toLocaleString('ar')} {secondaryCurrency}
+                  {(100 * parseFloat(exchangeRate || '0')).toLocaleString('ar-u-nu-latn')} {secondaryCurrency}
                 </span>
               </div>
             )}
@@ -769,6 +777,33 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
             </div>
           </div>
         )}
+      </div>
+
+      {/* ── الوحدات المُفعّلة ──────────────────────────────── */}
+      <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
+        <h2 className="font-semibold text-white">الوحدات</h2>
+        <p className="mt-0.5 mb-5 text-xs text-slate-500">
+          فعّل فقط ما يناسب نشاطك. وحدة الصيانة مخصّصة لمحلات تصليح الأجهزة — أوقفها إن كان متجرك للأثاث أو غيره.
+        </p>
+        <div className="space-y-3">
+          {[
+            { key: 'maintenance', label: 'وحدة الصيانة', sub: 'استلام أجهزة + لوحة صيانة + تتبّع للزبون' },
+          ].map(({ key, label, sub }) => (
+            <div key={key} className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-300">{label}</p>
+                <p className="text-xs text-slate-600">{sub}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => toggleModule(key)}
+                className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${modules[key] ? 'bg-sky-600' : 'bg-slate-700'}`}
+              >
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${modules[key] ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* ── إعدادات الـ Footer ──────────────────────────────── */}
@@ -830,6 +865,56 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
             <p className="mt-1 text-xs text-slate-600">
               اتركه فارغاً للنص التلقائي: © {new Date().getFullYear()} {form.name || 'اسم المتجر'}
             </p>
+          </div>
+        </div>
+
+        {/* معاينة حية للـ Footer */}
+        <div className="mt-5 border-t border-white/5 pt-4">
+          <p className="mb-2 text-xs font-medium text-slate-400">👁️ معاينة مباشرة</p>
+          <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950 p-5 text-right" dir="rtl">
+            <p className="text-base font-bold text-white">{form.name || 'اسم المتجر'}</p>
+            {(footer.tagline || form.description) && (
+              <p className="mt-1 text-xs text-slate-400">{footer.tagline || form.description}</p>
+            )}
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              {footer.show_contact && (
+                <div>
+                  <p className="mb-1 text-[11px] font-semibold text-slate-300">التواصل</p>
+                  <p className="text-[11px] text-slate-500" dir="ltr">{form.phone || '—'}</p>
+                  {form.city && <p className="text-[11px] text-slate-500">{form.city}</p>}
+                </div>
+              )}
+              {footer.show_hours && (
+                <div>
+                  <p className="mb-1 text-[11px] font-semibold text-slate-300">ساعات العمل</p>
+                  <p className="text-[11px] text-slate-500">السبت – الخميس</p>
+                </div>
+              )}
+              {footer.show_social && (
+                <div>
+                  <p className="mb-1 text-[11px] font-semibold text-slate-300">تابعنا</p>
+                  <div className="flex gap-1.5 text-sm">
+                    {form.instagram && <span>📷</span>}
+                    {form.facebook && <span>📘</span>}
+                    {form.tiktok && <span>🎵</span>}
+                    {form.telegram && <span>✈️</span>}
+                    {!form.instagram && !form.facebook && !form.tiktok && !form.telegram && (
+                      <span className="text-[11px] text-slate-600">لا روابط</span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 border-t border-white/5 pt-3">
+              <p className="text-[11px] text-slate-500">
+                {footer.copyright || `© ${new Date().getFullYear()} ${form.name || 'اسم المتجر'} — جميع الحقوق محفوظة`}
+              </p>
+              {footer.show_powered_by && (
+                <p className="mt-1 text-[10px] text-slate-600">مدعوم من Bazarko</p>
+              )}
+            </div>
           </div>
         </div>
       </div>

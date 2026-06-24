@@ -67,7 +67,7 @@ const DATE_PRESETS = [
 ]
 
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('ar', {
+  return new Date(iso).toLocaleDateString('ar-u-nu-latn', {
     month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
@@ -408,7 +408,7 @@ export default function OrdersTable({
                     <div>
                       <span className="text-xs text-slate-400">الإجمالي: </span>
                       <span className="font-bold text-white" dir="ltr">
-                        {order.total_amount.toLocaleString('ar')} {currencyCode}
+                        {order.total_amount.toLocaleString('ar-u-nu-latn')} {currencyCode}
                       </span>
                     </div>
                     <span className="text-xs text-slate-400">
@@ -468,7 +468,7 @@ export default function OrdersTable({
                       <td className="px-4 py-3 text-sm text-slate-300">{order.shipping_city ?? '—'}</td>
 
                       <td className="px-4 py-3 text-sm font-semibold text-white">
-                        {order.total_amount.toLocaleString('ar')}{' '}
+                        {order.total_amount.toLocaleString('ar-u-nu-latn')}{' '}
                         <span className="text-xs font-normal text-slate-400">{currencyCode}</span>
                       </td>
 

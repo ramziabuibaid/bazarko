@@ -122,17 +122,17 @@ export default async function OrderTrackingPage({ params }: Props) {
                   <div>
                     <p className="text-sm font-medium text-gray-900">{item.product_name}</p>
                     <p className="text-xs text-gray-400">
-                      {item.unit_price.toLocaleString('ar')} × {item.quantity}
+                      {item.unit_price.toLocaleString('ar-u-nu-latn')} × {item.quantity}
                     </p>
                   </div>
                   <span className="text-sm font-semibold text-gray-900">
-                    {item.total_price.toLocaleString('ar')} {store.currency_code}
+                    {item.total_price.toLocaleString('ar-u-nu-latn')} {store.currency_code}
                   </span>
                 </div>
               ))}
               <div className="flex justify-between px-5 py-3 font-bold text-gray-900">
                 <span>الإجمالي</span>
-                <span>{order.total_amount.toLocaleString('ar')} {store.currency_code}</span>
+                <span>{order.total_amount.toLocaleString('ar-u-nu-latn')} {store.currency_code}</span>
               </div>
             </div>
           </div>

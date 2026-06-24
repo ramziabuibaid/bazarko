@@ -14,7 +14,7 @@ export default async function SupportTicketPage({ params }: { params: { id: stri
 
   const { data: ticket } = await supabase
     .from('support_tickets')
-    .select('id, ticket_number, customer_id, customer_name, customer_phone, subject, category, status, priority, channel, assigned_to, created_at, resolved_at')
+    .select('id, ticket_number, customer_id, customer_name, customer_phone, subject, category, status, priority, channel, assigned_to, created_at, resolved_at, rating, rating_note')
     .eq('id', params.id)
     .eq('store_id', storeId)
     .single()

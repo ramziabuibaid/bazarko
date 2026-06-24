@@ -144,7 +144,7 @@ export default async function AdminStoresPage({ searchParams }: { searchParams: 
                   )}
                 </td>
                 <td className="px-4 py-3 text-slate-500 text-xs">
-                  {new Date(store.created_at).toLocaleDateString('ar', { year: 'numeric', month: 'short', day: 'numeric' })}
+                  {new Date(store.created_at).toLocaleDateString('ar-u-nu-latn', { year: 'numeric', month: 'short', day: 'numeric' })}
                 </td>
                 <td className="px-4 py-3">
                   <Link href={`/admin/stores/${store.id}`}

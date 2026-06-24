@@ -75,7 +75,7 @@ export default async function MaintenancePage() {
   const activeJobs     = activeJobsRes.data ?? []
   const revenue        = (monthRevenueRes.data ?? []).reduce((s: number, j: { final_cost: number | null }) => s + (j.final_cost ?? 0), 0)
   const recentReceived = recentReceivedRes.data ?? []
-  const fmt = (n: number) => n.toLocaleString('ar-SA', { maximumFractionDigits: 0 })
+  const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 0 })
 
   // الأجهزة المتأخرة عن موعد التسليم
   const overdueJobs = activeJobs.filter(j => j.estimated_done && new Date(j.estimated_done) < now)
@@ -182,7 +182,7 @@ export default async function MaintenancePage() {
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-300">{job.customer_name}</td>
                     <td className="px-4 py-3 text-xs text-slate-500 hidden sm:table-cell">
-                      {new Date(job.received_at).toLocaleDateString('ar', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      {new Date(job.received_at).toLocaleDateString('ar-u-nu-latn', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </td>
                     <td className="px-4 py-3">
                       <span className="rounded-full bg-white/5 px-2 py-0.5 text-xs text-slate-300">
