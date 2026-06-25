@@ -314,8 +314,8 @@ export default async function DashboardPage() {
                 <p className={`text-xl font-bold leading-none ${quickLowStock > 0 ? 'text-orange-400' : 'text-slate-400'}`}>
                   {quickLowStock}
                 </p>
-                <p className="mt-0.5 text-xs text-slate-300 truncate">
-                  {quickLowStock > 0 ? 'منتج قارب النفاد' : 'المخزون بخير'}
+                <p className="mt-0.5 text-xs text-slate-300">
+                  {quickLowStock > 0 ? 'قارب على النفاد' : 'المخزون بخير'}
                 </p>
               </div>
               {quickLowStock > 0 && (

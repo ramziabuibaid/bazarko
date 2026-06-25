@@ -320,7 +320,7 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
 
       {categories.length > 0 && (
         <p className="mt-6 text-center text-xs text-slate-600">
-          استخدم ↑↓ لترتيب الفئات · اضغط + لإضافة منتج مباشرة في الفئة
+          استخدم ↑↓ لترتيب الفئات · زر «+ منتج» يضيف منتجاً داخل الفئة · «+ فئة جديدة» بالأعلى لإنشاء فئة
         </p>
       )}
 
@@ -576,16 +576,17 @@ function CategoryRow({
           {cat.is_active ? 'نشط' : 'مخفي'}
         </span>
 
-        {/* إضافة منتج */}
+        {/* إضافة منتج داخل هذه الفئة (ليس فئة جديدة) */}
         <Link
           href={`/dashboard/products/new?category_id=${cat.id}`}
-          className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-sky-500/10 hover:text-sky-400"
+          className="flex items-center gap-1 rounded-lg border border-sky-500/20 bg-sky-500/5 px-2 py-1 text-xs font-medium text-sky-400 transition-colors hover:bg-sky-500/15"
           title={`إضافة منتج في "${cat.name}"`}
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
             <line x1="7" y1="1.5" x2="7" y2="12.5" />
             <line x1="1.5" y1="7" x2="12.5" y2="7" />
           </svg>
+          منتج
         </Link>
 
         {/* تفعيل / إخفاء */}
