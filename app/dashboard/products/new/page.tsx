@@ -30,6 +30,15 @@ export default async function NewProductPage({
     .eq('is_active', true)
     .order('name')
 
+  const [{ data: attrDefs }, { data: attrValues }] = await Promise.all([
+    supabase.from('product_attributes').select('id, name, sort_order').eq('store_id', store.id).order('sort_order'),
+    supabase.from('product_attribute_values').select('id, attribute_id, value, sort_order').eq('store_id', store.id).order('sort_order'),
+  ])
+  const attributes = (attrDefs ?? []).map(a => ({
+    id: a.id, name: a.name,
+    values: (attrValues ?? []).filter(v => v.attribute_id === a.id).map(v => ({ id: v.id, value: v.value })),
+  }))
+
   const preselectedCategory = searchParams.category_id ?? ''
 
   return (
@@ -44,6 +53,7 @@ export default async function NewProductPage({
         secondaryCurrencyCode={store.secondary_currency_code}
         exchangeRate={store.exchange_rate}
         categories={categories ?? []}
+        attributes={attributes}
         initialData={preselectedCategory ? { category_id: preselectedCategory } : undefined}
       />
     </div>

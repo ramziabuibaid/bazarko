@@ -36,13 +36,16 @@ interface ProductData {
   specifications: Spec[]
 }
 
+interface AttributeDef { id: string; name: string; values: { id: string; value: string }[] }
+
 interface Props {
   storeId: string
   currencyCode: string
   secondaryCurrencyCode?: string | null
   exchangeRate?: number | null
   categories: Category[]
-  initialData?: Partial<ProductData> & { id?: string }
+  attributes?: AttributeDef[]
+  initialData?: Partial<ProductData> & { id?: string; attributeValueIds?: string[] }
 }
 
 const EMPTY: ProductData = {
@@ -56,12 +59,21 @@ const EMPTY: ProductData = {
   specifications: [],
 }
 
-export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCode, exchangeRate, categories, initialData }: Props) {
+export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCode, exchangeRate, categories, attributes = [], initialData }: Props) {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
   const isEditing = !!initialData?.id
 
   const [form, setForm] = useState<ProductData>({ ...EMPTY, ...initialData })
+  const [selectedValues, setSelectedValues] = useState<Set<string>>(new Set(initialData?.attributeValueIds ?? []))
+
+  function toggleValue(id: string) {
+    setSelectedValues(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
@@ -198,6 +210,8 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
       specifications: form.specifications.filter(s => s.name.trim()),
     }
 
+    let productId = initialData?.id ?? null
+
     if (isEditing) {
       const { error: err } = await supabase
         .from('products')
@@ -218,11 +232,19 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
         setSaving(false)
         return
       }
+      productId = created?.id ?? null
       trackAction(storeId, {
         action: 'create', entityType: 'product',
         entityId: created?.id ?? null, entityLabel: payload.name,
         details: { price: payload.price, stock: payload.stock_quantity },
       })
+    }
+
+    // مزامنة خصائص المنتج (حذف ثم إدراج المختار)
+    if (productId && attributes.length > 0) {
+      await supabase.from('product_attribute_links').delete().eq('product_id', productId)
+      const rows = Array.from(selectedValues).map(value_id => ({ product_id: productId!, value_id, store_id: storeId }))
+      if (rows.length > 0) await supabase.from('product_attribute_links').insert(rows)
     }
 
     router.push('/dashboard/products')
@@ -586,6 +608,45 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
           إضافة مواصفة
         </button>
       </Section>
+
+      {/* ── الخصائص (للفلترة) ── */}
+      {attributes.length > 0 && (
+        <Section title="الخصائص (تظهر كفلاتر في المتجر)">
+          <p className="mb-3 text-xs text-slate-500">
+            اختر القيم المناسبة لهذا المنتج. تُدار الخصائص من صفحة «الخصائص والفلاتر».
+          </p>
+          <div className="space-y-4">
+            {attributes.map(attr => (
+              <div key={attr.id}>
+                <p className="mb-2 text-sm text-slate-300">{attr.name}</p>
+                {attr.values.length === 0 ? (
+                  <p className="text-xs text-slate-600">لا قيم لهذه الخاصية بعد</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {attr.values.map(v => {
+                      const active = selectedValues.has(v.id)
+                      return (
+                        <button
+                          key={v.id}
+                          type="button"
+                          onClick={() => toggleValue(v.id)}
+                          className={`rounded-full px-3 py-1.5 text-sm transition ${
+                            active
+                              ? 'bg-sky-500/20 text-sky-300 ring-1 ring-sky-500/40'
+                              : 'bg-white/5 text-slate-300 hover:bg-white/10'
+                          }`}
+                        >
+                          {active && '✓ '}{v.value}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
 
       {/* ── الوسوم والحالة ── */}
       <Section title="الوسوم والحالة">

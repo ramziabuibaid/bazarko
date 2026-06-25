@@ -28,6 +28,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: '/dashboard/products', label: 'المنتجات', icon: '🛍️' },
       { href: '/dashboard/categories', label: 'الفئات', icon: '📂' },
+      { href: '/dashboard/attributes', label: 'الخصائص والفلاتر', icon: '🎚️' },
       { href: '/dashboard/offers', label: 'العروض الحصرية', icon: '🏷️' },
       { href: '/dashboard/orders', label: 'الطلبيات', icon: '📦' },
       { href: '/dashboard/reviews', label: 'التقييمات', icon: '⭐' },

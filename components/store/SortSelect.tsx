@@ -15,15 +15,21 @@ interface Props {
   basePath: string
   category?: string
   q?: string
+  v?: string
+  min?: string
+  max?: string
 }
 
-export default function SortSelect({ current, basePath, category, q }: Props) {
+export default function SortSelect({ current, basePath, category, q, v, min, max }: Props) {
   const router = useRouter()
 
   function onChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const params = new URLSearchParams()
     if (category) params.set('category', category)
     if (q)        params.set('q', q)
+    if (v)        params.set('v', v)
+    if (min)      params.set('min', min)
+    if (max)      params.set('max', max)
     if (e.target.value !== 'newest') params.set('sort', e.target.value)
     const qs = params.toString()
     router.push(`${basePath}${qs ? `?${qs}` : ''}`)

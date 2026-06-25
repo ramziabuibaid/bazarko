@@ -4,6 +4,7 @@ import Link from 'next/link'
 import StoreHeader from '@/components/store/StoreHeader'
 import ProductCard from '@/components/store/ProductCard'
 import CategoryFilter from '@/components/store/CategoryFilter'
+import ProductFilters from '@/components/store/ProductFilters'
 import OfferCountdown from '@/components/store/OfferCountdown'
 import StoreFooter from '@/components/store/StoreFooter'
 import SortSelect from '@/components/store/SortSelect'
@@ -35,7 +36,7 @@ const SORT_ORDERS: Record<string, { column: string; ascending: boolean } | null>
 
 interface Props {
   params: { country: string; subdomain: string }
-  searchParams: { category?: string; q?: string; sort?: string }
+  searchParams: { category?: string; q?: string; sort?: string; v?: string; min?: string; max?: string }
 }
 
 export async function generateMetadata({ params }: Props) {
@@ -97,11 +98,55 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
     productQuery = productQuery.ilike('name', `%${searchParams.q}%`)
   }
 
+  // فلتر السعر
+  const minPrice = searchParams.min ? parseFloat(searchParams.min) : null
+  const maxPrice = searchParams.max ? parseFloat(searchParams.max) : null
+  if (minPrice != null && !isNaN(minPrice)) productQuery = productQuery.gte('price', minPrice)
+  if (maxPrice != null && !isNaN(maxPrice)) productQuery = productQuery.lte('price', maxPrice)
+
+  // ── الخصائص (للفلاتر) ──
+  const [{ data: attrDefs }, { data: attrValues }] = await Promise.all([
+    supabase.from('product_attributes').select('id, name, sort_order').eq('store_id', store.id).order('sort_order'),
+    supabase.from('product_attribute_values').select('id, attribute_id, value, sort_order').eq('store_id', store.id).order('sort_order'),
+  ])
+  const valueToAttr = new Map<string, string>((attrValues ?? []).map(v => [v.id, v.attribute_id]))
+  const filterAttributes = (attrDefs ?? []).map(a => ({
+    id: a.id, name: a.name,
+    values: (attrValues ?? []).filter(v => v.attribute_id === a.id).map(v => ({ id: v.id, value: v.value })),
+  })).filter(a => a.values.length > 0)
+
+  const selectedValueIds = (searchParams.v ?? '').split(',').map(s => s.trim()).filter(Boolean)
+
+  // فلترة حسب الخصائص: OR داخل الخاصية الواحدة، AND بين الخصائص المختلفة
+  if (selectedValueIds.length > 0) {
+    const { data: linkRows } = await supabase
+      .from('product_attribute_links')
+      .select('product_id, value_id')
+      .eq('store_id', store.id)
+      .in('value_id', selectedValueIds)
+
+    const selectedAttrGroups = new Set(selectedValueIds.map(id => valueToAttr.get(id)).filter(Boolean) as string[])
+    const productMatchedAttrs = new Map<string, Set<string>>()
+    for (const row of linkRows ?? []) {
+      const attrId = valueToAttr.get(row.value_id)
+      if (!attrId) continue
+      if (!productMatchedAttrs.has(row.product_id)) productMatchedAttrs.set(row.product_id, new Set())
+      productMatchedAttrs.get(row.product_id)!.add(attrId)
+    }
+    const matchingIds = [...productMatchedAttrs.entries()]
+      .filter(([, attrs]) => [...selectedAttrGroups].every(a => attrs.has(a)))
+      .map(([pid]) => pid)
+
+    productQuery = productQuery.in('id', matchingIds.length > 0 ? matchingIds : ['00000000-0000-0000-0000-000000000000'])
+  }
+
   const { data: rawProducts } = await productQuery
   const products = (rawProducts ?? []) as StoreProduct[]
 
+  const isFiltering = !!searchParams.category || !!searchParams.q || selectedValueIds.length > 0 || minPrice != null || maxPrice != null
+
   const featured = products.filter(p => p.is_featured)
-  const showFeatured = featured.length > 0 && !searchParams.category && !searchParams.q
+  const showFeatured = featured.length > 0 && !isFiltering
 
   // العروض الجارية حالياً
   const nowIso = new Date().toISOString()
@@ -133,7 +178,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
     }
   }).filter(o => o.itemCount > 0)
 
-  const showOffers = offers.length > 0 && !searchParams.category && !searchParams.q
+  const showOffers = offers.length > 0 && !isFiltering
 
   return (
     <div className="min-h-screen bg-white transition-colors dark:bg-gray-950" dir="rtl">
@@ -265,6 +310,20 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
             basePath={`/store/${params.country}/${params.subdomain}`}
             category={searchParams.category}
             q={searchParams.q}
+            v={searchParams.v}
+            min={searchParams.min}
+            max={searchParams.max}
+          />
+          <ProductFilters
+            attributes={filterAttributes}
+            selected={selectedValueIds}
+            min={searchParams.min ?? ''}
+            max={searchParams.max ?? ''}
+            basePath={`/store/${params.country}/${params.subdomain}`}
+            category={searchParams.category}
+            q={searchParams.q}
+            sort={searchParams.sort}
+            currencyCode={store.currency_code}
           />
         </div>
 

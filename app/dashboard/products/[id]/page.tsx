@@ -35,6 +35,17 @@ export default async function EditProductPage({ params }: { params: { id: string
     .eq('is_active', true)
     .order('name')
 
+  const [{ data: attrDefs }, { data: attrValues }, { data: links }] = await Promise.all([
+    supabase.from('product_attributes').select('id, name, sort_order').eq('store_id', store.id).order('sort_order'),
+    supabase.from('product_attribute_values').select('id, attribute_id, value, sort_order').eq('store_id', store.id).order('sort_order'),
+    supabase.from('product_attribute_links').select('value_id').eq('product_id', product.id),
+  ])
+  const attributes = (attrDefs ?? []).map(a => ({
+    id: a.id, name: a.name,
+    values: (attrValues ?? []).filter(v => v.attribute_id === a.id).map(v => ({ id: v.id, value: v.value })),
+  }))
+  const attributeValueIds = (links ?? []).map(l => l.value_id)
+
   const initialData = {
     id: product.id,
     name: product.name,
@@ -57,6 +68,7 @@ export default async function EditProductPage({ params }: { params: { id: string
     tags: (product.tags ?? []).join(', '),
     video_url: product.video_url ?? '',
     specifications: (product.specifications as Array<{ name: string; value: string }> | null) ?? [],
+    attributeValueIds,
   }
 
   return (
@@ -71,6 +83,7 @@ export default async function EditProductPage({ params }: { params: { id: string
         secondaryCurrencyCode={store.secondary_currency_code}
         exchangeRate={store.exchange_rate}
         categories={categories ?? []}
+        attributes={attributes}
         initialData={initialData}
       />
     </div>
