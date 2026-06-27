@@ -145,13 +145,13 @@ export default async function ProductPage({ params }: Props) {
           <ProductImageGallery images={images} name={product.name} />
 
           {/* التفاصيل */}
-          <div>
+          <div className="md:rounded-3xl md:border md:border-gray-100 md:bg-white md:p-6 md:shadow-sm dark:md:border-gray-800 dark:md:bg-gray-900/40">
             {(product.categories as unknown as { name: string } | null)?.name && (
-              <p className="mb-2 text-sm text-gray-400 dark:text-gray-500">
+              <span className="mb-3 inline-block rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
                 {(product.categories as unknown as { name: string }).name}
-              </p>
+              </span>
             )}
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{product.name}</h1>
+            <h1 className="text-2xl font-bold leading-snug text-gray-900 md:text-[1.75rem] dark:text-white">{product.name}</h1>
 
             {reviewCount > 0 && (
               <div className="mt-1.5 flex items-center gap-2" dir="ltr">
@@ -187,11 +187,11 @@ export default async function ProductPage({ params }: Props) {
               </Link>
             )}
 
-            <div className="mt-4">
+            <div className="mt-5 rounded-2xl border border-gray-100 bg-gradient-to-bl from-violet-50/60 to-transparent p-4 dark:border-gray-800 dark:from-violet-500/[0.07]">
               {store.prefer_secondary && secondaryPrice !== null ? (
                 <>
                   <div className="flex items-center gap-3">
-                    <span className={`text-2xl font-bold ${activeOffer ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                    <span className={`text-3xl font-bold tracking-tight ${activeOffer ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
                       {secondaryPrice.toLocaleString('ar-u-nu-latn')} {store.secondary_currency_code}
                     </span>
                     {effectiveCompare && (
@@ -212,7 +212,7 @@ export default async function ProductPage({ params }: Props) {
               ) : (
                 <>
                   <div className="flex items-center gap-3">
-                    <span className={`text-2xl font-bold ${activeOffer ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                    <span className={`text-3xl font-bold tracking-tight ${activeOffer ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
                       {effectivePrice.toLocaleString('ar-u-nu-latn')} {store.currency_code}
                     </span>
                     {effectiveCompare && (
@@ -266,7 +266,10 @@ export default async function ProductPage({ params }: Props) {
             )}
 
             {product.description && (
-              <p className="mt-4 leading-relaxed text-gray-600 dark:text-gray-300">{product.description}</p>
+              <div className="mt-6 border-t border-gray-100 pt-5 dark:border-gray-800">
+                <h2 className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">الوصف</h2>
+                <p className="whitespace-pre-line leading-relaxed text-gray-600 dark:text-gray-300">{product.description}</p>
+              </div>
             )}
 
             {/* المواصفات الفنية */}
@@ -344,19 +347,34 @@ export default async function ProductPage({ params }: Props) {
               )}
             </div>
 
-            {store.whatsapp && (
-              <a
-                href={`https://wa.me/${store.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`مرحبا، أريد الاستفسار عن: ${product.name}`)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-green-200 py-3 text-sm font-medium text-green-700 hover:bg-green-50 dark:border-green-500/25 dark:text-green-400 dark:hover:bg-green-500/10"
-              >
-                <span>📱</span> استفسر عبر واتساب
-              </a>
-            )}
+            {/* مزايا الشراء */}
+            <div className="mt-5 grid grid-cols-3 gap-2 border-t border-gray-100 pt-4 dark:border-gray-800">
+              <div className="flex flex-col items-center gap-1 text-center">
+                <span className="text-xl">🔒</span>
+                <span className="text-[11px] leading-tight text-gray-500 dark:text-gray-400">تسوّق آمن</span>
+              </div>
+              <div className="flex flex-col items-center gap-1 text-center">
+                <span className="text-xl">💬</span>
+                <span className="text-[11px] leading-tight text-gray-500 dark:text-gray-400">تواصل مباشر</span>
+              </div>
+              <div className="flex flex-col items-center gap-1 text-center">
+                <span className="text-xl">🏷️</span>
+                <span className="text-[11px] leading-tight text-gray-500 dark:text-gray-400">سعر واضح</span>
+              </div>
+            </div>
 
-            {/* مشاركة المنتج */}
-            <div className="mt-3">
+            {/* استفسار + مشاركة */}
+            <div className={`mt-4 grid gap-3 ${store.whatsapp ? 'sm:grid-cols-2' : ''}`}>
+              {store.whatsapp && (
+                <a
+                  href={`https://wa.me/${store.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`مرحبا، أريد الاستفسار عن: ${product.name}`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-green-200 py-3 text-sm font-medium text-green-700 hover:bg-green-50 dark:border-green-500/25 dark:text-green-400 dark:hover:bg-green-500/10"
+                >
+                  <span>📱</span> استفسر عبر واتساب
+                </a>
+              )}
               <ShareButton title={product.name} text={`شاهد ${product.name} في ${store.name}`} />
             </div>
 

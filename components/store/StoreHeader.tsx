@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useCart } from '@/lib/store/cart'
 import { useWishlist } from '@/lib/store/wishlist'
 import Link from 'next/link'
@@ -28,77 +28,60 @@ export default function StoreHeader({ store, country, subdomain }: Props) {
   const wishlistCount = useWishlist(s => s.count())
   const theme = getHeaderTheme(store.header_theme)
   const [menuOpen, setMenuOpen] = useState(false)
-  const btnRef = useRef<HTMLButtonElement>(null)
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
+  const base = `/store/${country}/${subdomain}`
+  const close = () => setMenuOpen(false)
 
-  // حساب موضع القائمة (fixed) من موضع الزر — يضمن ظهورها فوق أي عنصر مهما كان overflow الأب
-  function computePos() {
-    const r = btnRef.current?.getBoundingClientRect()
-    if (r) setPos({ top: r.bottom + 8, right: window.innerWidth - r.right })
-  }
-  function toggleMenu() {
-    if (!menuOpen) computePos()
-    setMenuOpen(o => !o)
-  }
+  // قفل تمرير الصفحة عند فتح القائمة الجانبية
   useEffect(() => {
-    if (!menuOpen) return
-    const onChange = () => computePos()
-    window.addEventListener('resize', onChange)
-    window.addEventListener('scroll', onChange, true)
-    return () => {
-      window.removeEventListener('resize', onChange)
-      window.removeEventListener('scroll', onChange, true)
-    }
+    document.body.style.overflow = menuOpen ? 'hidden' : ''
+    return () => { document.body.style.overflow = '' }
   }, [menuOpen])
 
   return (
-    <header
-      className={`sticky top-0 z-40 ${theme.header} relative`}
-    >
-      {/* طبقة اللمعان — معزولة بـ overflow-hidden حتى لا تقصّ القائمة المنبثقة */}
-      {theme.shine && (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 z-0 overflow-hidden animate-header-shine"
-        />
-      )}
-      <div className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        <Link href={`/store/${country}/${subdomain}`} className="flex items-center gap-2.5">
-          {store.logo_url ? (
-            <img
-              src={store.logo_url}
-              alt={store.name}
-              className={`h-9 w-9 rounded-full object-cover ${theme.logoRing}`}
-            />
-          ) : (
-            <div className={`flex h-9 w-9 items-center justify-center rounded-full text-base font-bold ${theme.logoFallback} ${theme.logoRing}`}>
-              {store.name[0]}
-            </div>
-          )}
-          <span className={`text-lg ${theme.name}`}>{store.name}</span>
-        </Link>
-
-        <div className="flex items-center gap-2 sm:gap-3">
-          {/* السلة — العنصر الأساسي، يبقى ظاهراً دائماً */}
-          <Link
-            href={`/store/${country}/${subdomain}/cart`}
-            className={`relative flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition ${theme.cartBtn}`}
-          >
-            🛒 السلة
-            {count > 0 && (
-              <span className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[11px] font-bold text-white shadow">
-                {count}
-              </span>
+    <>
+      <header className={`sticky top-0 z-40 ${theme.header} relative`}>
+        {/* طبقة اللمعان — معزولة بـ overflow-hidden حتى لا تقصّ المحتوى */}
+        {theme.shine && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-0 overflow-hidden animate-header-shine"
+          />
+        )}
+        <div className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+          <Link href={base} className="flex items-center gap-2.5">
+            {store.logo_url ? (
+              <img
+                src={store.logo_url}
+                alt={store.name}
+                className={`h-9 w-9 rounded-full object-cover ${theme.logoRing}`}
+              />
+            ) : (
+              <div className={`flex h-9 w-9 items-center justify-center rounded-full text-base font-bold ${theme.logoFallback} ${theme.logoRing}`}>
+                {store.name[0]}
+              </div>
             )}
+            <span className={`text-lg ${theme.name}`}>{store.name}</span>
           </Link>
 
-          {/* قائمة منسدلة لبقية الإجراءات (تبسيط الهيدر) */}
-          <div className="relative">
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* السلة — العنصر الأساسي، يبقى ظاهراً دائماً */}
+            <Link
+              href={`${base}/cart`}
+              className={`relative flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition ${theme.cartBtn}`}
+            >
+              🛒 السلة
+              {count > 0 && (
+                <span className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[11px] font-bold text-white shadow">
+                  {count}
+                </span>
+              )}
+            </Link>
+
+            {/* زر فتح القائمة الجانبية */}
             <button
-              ref={btnRef}
               type="button"
-              onClick={toggleMenu}
-              aria-label="المزيد"
+              onClick={() => setMenuOpen(true)}
+              aria-label="القائمة"
               className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition ${theme.cartBtn}`}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
@@ -110,49 +93,98 @@ export default function StoreHeader({ store, country, subdomain }: Props) {
                 </span>
               )}
             </button>
-
-            {menuOpen && pos && (
-              <>
-                <div className="fixed inset-0 z-[55]" onClick={() => setMenuOpen(false)} />
-                <div
-                  className="fixed z-[60] w-52 overflow-hidden rounded-2xl border border-gray-100 bg-white py-1 shadow-xl dark:border-gray-800 dark:bg-gray-900"
-                  style={{ top: pos.top, right: pos.right }}
-                  dir="rtl"
-                >
-                  <Link
-                    href={`/store/${country}/${subdomain}/wishlist`}
-                    onClick={() => setMenuOpen(false)}
-                    className="flex items-center justify-between px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
-                  >
-                    <span className="flex items-center gap-2">❤️ المفضلة</span>
-                    {wishlistCount > 0 && (
-                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-bold text-white">{wishlistCount}</span>
-                    )}
-                  </Link>
-
-                  {store.whatsapp && (
-                    <a
-                      href={`https://wa.me/${store.whatsapp.replace(/\D/g, '')}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={() => setMenuOpen(false)}
-                      className="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
-                    >
-                      <span className="text-green-600 dark:text-green-400"><WhatsAppIcon /></span> تواصل عبر واتساب
-                    </a>
-                  )}
-
-                  <div className="flex items-center justify-between border-t border-gray-100 px-4 py-2.5 dark:border-gray-800">
-                    <span className="text-sm text-gray-700 dark:text-gray-200">🌙 الوضع الليلي</span>
-                    <ThemeToggle className="rounded-lg bg-gray-100 p-1.5 text-gray-700 dark:bg-gray-800 dark:text-gray-200" />
-                  </div>
-                </div>
-              </>
-            )}
           </div>
         </div>
-      </div>
-    </header>
+      </header>
+
+      {/* ── القائمة الجانبية (drawer من اليمين) ── */}
+      {/* الخلفية المعتمة */}
+      <div
+        onClick={close}
+        aria-hidden="true"
+        className={`fixed inset-0 z-[90] bg-black/40 backdrop-blur-sm transition-opacity duration-300 ${
+          menuOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+      />
+      {/* اللوحة المنزلقة */}
+      <aside
+        dir="rtl"
+        className={`fixed inset-y-0 right-0 z-[100] flex w-72 max-w-[82%] flex-col bg-white shadow-2xl transition-transform duration-300 ease-out dark:bg-gray-900 ${
+          menuOpen ? 'translate-x-0' : 'translate-x-full'
+        }`}
+      >
+        {/* رأس القائمة */}
+        <div className="flex items-center justify-between border-b border-gray-100 px-4 py-4 dark:border-gray-800">
+          <span className="flex items-center gap-2.5 font-bold text-gray-900 dark:text-white">
+            {store.logo_url ? (
+              <img src={store.logo_url} alt={store.name} className="h-8 w-8 rounded-full object-cover" />
+            ) : (
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-sm dark:bg-gray-800">{store.name[0]}</span>
+            )}
+            <span className="truncate">{store.name}</span>
+          </span>
+          <button
+            onClick={close}
+            aria-label="إغلاق"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto py-2">
+          <p className="px-4 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">المتجر</p>
+
+          <DrawerLink href={base} onClick={close}>🏠 الرئيسية</DrawerLink>
+          <DrawerLink href={`${base}?q=`} onClick={close}>🛍️ جميع المنتجات</DrawerLink>
+          <DrawerLink href={`${base}/cart`} onClick={close} badge={count}>🛒 سلة التسوق</DrawerLink>
+          <DrawerLink href={`${base}/wishlist`} onClick={close} badge={wishlistCount}>❤️ المفضلة</DrawerLink>
+
+          {store.whatsapp && (
+            <>
+              <div className="my-2 border-t border-gray-100 dark:border-gray-800" />
+              <a
+                href={`https://wa.me/${store.whatsapp.replace(/\D/g, '')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={close}
+                className="flex items-center gap-2 px-4 py-3 text-sm text-gray-700 transition hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+              >
+                <span className="text-green-600 dark:text-green-400"><WhatsAppIcon /></span> تواصل عبر واتساب
+              </a>
+            </>
+          )}
+
+          <div className="my-2 border-t border-gray-100 dark:border-gray-800" />
+          <div className="flex items-center justify-between px-4 py-3">
+            <span className="text-sm text-gray-700 dark:text-gray-200">🌙 الوضع الليلي</span>
+            <ThemeToggle className="rounded-lg bg-gray-100 p-1.5 text-gray-700 dark:bg-gray-800 dark:text-gray-200" />
+          </div>
+        </nav>
+      </aside>
+    </>
+  )
+}
+
+function DrawerLink({ href, onClick, badge, children }: {
+  href: string
+  onClick: () => void
+  badge?: number
+  children: React.ReactNode
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={onClick}
+      className="flex items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+    >
+      <span className="flex items-center gap-2">{children}</span>
+      {badge != null && badge > 0 && (
+        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-bold text-white">{badge}</span>
+      )}
+    </Link>
   )
 }
 

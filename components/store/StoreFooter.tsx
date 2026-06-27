@@ -1,5 +1,3 @@
-import Link from 'next/link'
-
 type DayKey = 'sat' | 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri'
 interface DayHours { open: boolean; from: string; to: string }
 type BusinessHours = Partial<Record<DayKey, DayHours>>
@@ -58,7 +56,7 @@ function formatTime(t: string) {
   return `${hour}:${String(m).padStart(2, '0')} ${suffix}`
 }
 
-export default function StoreFooter({ store, country, subdomain }: Props) {
+export default function StoreFooter({ store }: Props) {
   const fs: FooterSettings = store.footer_settings ?? {}
   const showContact = fs.show_contact !== false
   const showSocial  = fs.show_social  !== false
@@ -85,7 +83,7 @@ export default function StoreFooter({ store, country, subdomain }: Props) {
       <div className="mx-auto max-w-6xl px-4 pt-12 pb-6">
 
         {/* ── القسم العلوي ── */}
-        <div className={`grid gap-10 ${activeCols === 3 ? 'sm:grid-cols-4' : activeCols === 2 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+        <div className={`grid gap-10 ${activeCols === 3 ? 'sm:grid-cols-3' : activeCols === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-1'}`}>
 
           {/* عمود الهوية */}
           <div className="sm:col-span-1">
@@ -228,27 +226,6 @@ export default function StoreFooter({ store, country, subdomain }: Props) {
             </div>
           )}
 
-          {/* عمود روابط سريعة */}
-          <div>
-            <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-gray-300">المتجر</h3>
-            <ul className="space-y-2 text-sm">
-              <li>
-                <Link href={`/store/${country}/${subdomain}`} className="transition hover:text-white">
-                  الرئيسية
-                </Link>
-              </li>
-              <li>
-                <Link href={`/store/${country}/${subdomain}?q=`} className="transition hover:text-white">
-                  جميع المنتجات
-                </Link>
-              </li>
-              <li>
-                <Link href={`/store/${country}/${subdomain}/cart`} className="transition hover:text-white">
-                  سلة التسوق
-                </Link>
-              </li>
-            </ul>
-          </div>
         </div>
 
         {/* ── الشريط السفلي ── */}
