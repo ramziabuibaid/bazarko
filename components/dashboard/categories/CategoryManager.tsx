@@ -249,8 +249,12 @@ export default function CategoryManager({ storeId, initialCategories }: Props) {
           />
         </div>
         <button onClick={openAdd}
-          className="shrink-0 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm font-medium text-sky-400 transition-colors hover:bg-sky-500/20">
-          + فئة جديدة
+          className="flex shrink-0 items-center gap-1.5 rounded-xl bg-sky-500 px-4 py-3 text-sm font-semibold text-slate-950 shadow-sm transition-colors hover:bg-sky-400">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <line x1="7" y1="1.5" x2="7" y2="12.5" />
+            <line x1="1.5" y1="7" x2="12.5" y2="7" />
+          </svg>
+          فئة جديدة
         </button>
       </div>
 

@@ -11,6 +11,7 @@ import CartToast from '@/components/store/CartToast'
 import WishlistButton from '@/components/store/WishlistButton'
 import ProductImageGallery from '@/components/store/ProductImageGallery'
 import StoreAnalyticsTracker from '@/components/store/StoreAnalyticsTracker'
+import ShareButton from '@/components/store/ShareButton'
 
 interface Props {
   params: { country: string; subdomain: string; slug: string }
@@ -31,7 +32,7 @@ export default async function ProductPage({ params }: Props) {
 
   const { data: product } = await supabase
     .from('products')
-    .select('id, name, description, price, compare_price, price_secondary, images, thumbnail_url, stock_available, track_stock, sku, video_url, specifications, categories(name)')
+    .select('id, name, description, price, compare_price, price_secondary, images, thumbnail_url, stock_available, track_stock, sku, video_url, specifications, view_count, categories(name)')
     .eq('store_id', store.id)
     .eq('slug', params.slug)
     .eq('is_active', true)
@@ -79,6 +80,21 @@ export default async function ProductPage({ params }: Props) {
     ? Math.max(0, offerItem.max_quantity - offerItem.sold_quantity)
     : null
   const activeOffer = offerItem && (offerRemaining === null || offerRemaining > 0) ? offerItem : null
+
+  // ── الإثبات الاجتماعي: مبيعات آخر 24 ساعة + المشاهدات ──
+  const last24hIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const { data: recentSales } = await supabase
+    .from('order_items')
+    .select('quantity, orders!inner(created_at, store_id)')
+    .eq('product_id', product.id)
+    .eq('orders.store_id', store.id)
+    .gte('orders.created_at', last24hIso)
+  const soldLast24h = (recentSales ?? []).reduce(
+    (s: number, r: { quantity: number | null }) => s + (r.quantity ?? 0), 0
+  )
+  const viewCount = (product as unknown as { view_count?: number | null }).view_count ?? 0
+  const stockLeft = product.track_stock ? (product.stock_available ?? 0) : null
+  const lowStockLeft = stockLeft !== null && stockLeft > 0 && stockLeft <= 5 ? stockLeft : null
 
   const effectivePrice = activeOffer ? activeOffer.offer_price : product.price
   const effectiveCompare = activeOffer ? product.price : product.compare_price
@@ -219,6 +235,36 @@ export default async function ProductPage({ params }: Props) {
               )}
             </div>
 
+            {/* ── بطاقة الإثبات الاجتماعي ── */}
+            {(soldLast24h > 0 || lowStockLeft !== null || viewCount > 0) && (
+              <div className="mt-4 space-y-2 rounded-2xl border border-violet-100 bg-violet-50/60 p-4 dark:border-violet-500/15 dark:bg-violet-500/5">
+                {soldLast24h > 0 && (
+                  <div className="flex items-center gap-2.5 text-sm">
+                    <span className="text-base">🔥</span>
+                    <span className="text-gray-700 dark:text-gray-200">
+                      تم شراء <span className="font-bold text-violet-700 dark:text-violet-300">{soldLast24h.toLocaleString('ar-u-nu-latn')}</span> قطعة خلال آخر 24 ساعة
+                    </span>
+                  </div>
+                )}
+                {lowStockLeft !== null && (
+                  <div className="flex items-center gap-2.5 text-sm">
+                    <span className="text-base">⚡</span>
+                    <span className="text-gray-700 dark:text-gray-200">
+                      بقي <span className="font-bold text-red-600 dark:text-red-400">{lowStockLeft.toLocaleString('ar-u-nu-latn')}</span> قطعة فقط — سارِع بالطلب قبل النفاد!
+                    </span>
+                  </div>
+                )}
+                {viewCount > 0 && (
+                  <div className="flex items-center gap-2.5 text-sm">
+                    <span className="text-base">👁️</span>
+                    <span className="text-gray-700 dark:text-gray-200">
+                      شاهد هذا المنتج <span className="font-bold text-violet-700 dark:text-violet-300">{viewCount.toLocaleString('ar-u-nu-latn')}</span> زبون
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
             {product.description && (
               <p className="mt-4 leading-relaxed text-gray-600 dark:text-gray-300">{product.description}</p>
             )}
@@ -308,6 +354,11 @@ export default async function ProductPage({ params }: Props) {
                 <span>📱</span> استفسر عبر واتساب
               </a>
             )}
+
+            {/* مشاركة المنتج */}
+            <div className="mt-3">
+              <ShareButton title={product.name} text={`شاهد ${product.name} في ${store.name}`} />
+            </div>
 
             {product.sku && (
               <p className="mt-4 text-xs text-gray-400 dark:text-gray-500" dir="ltr">SKU: {product.sku}</p>

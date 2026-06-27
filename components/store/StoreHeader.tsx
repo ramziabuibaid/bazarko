@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useCart } from '@/lib/store/cart'
 import { useWishlist } from '@/lib/store/wishlist'
 import Link from 'next/link'
@@ -28,14 +28,41 @@ export default function StoreHeader({ store, country, subdomain }: Props) {
   const wishlistCount = useWishlist(s => s.count())
   const theme = getHeaderTheme(store.header_theme)
   const [menuOpen, setMenuOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
+
+  // حساب موضع القائمة (fixed) من موضع الزر — يضمن ظهورها فوق أي عنصر مهما كان overflow الأب
+  function computePos() {
+    const r = btnRef.current?.getBoundingClientRect()
+    if (r) setPos({ top: r.bottom + 8, right: window.innerWidth - r.right })
+  }
+  function toggleMenu() {
+    if (!menuOpen) computePos()
+    setMenuOpen(o => !o)
+  }
+  useEffect(() => {
+    if (!menuOpen) return
+    const onChange = () => computePos()
+    window.addEventListener('resize', onChange)
+    window.addEventListener('scroll', onChange, true)
+    return () => {
+      window.removeEventListener('resize', onChange)
+      window.removeEventListener('scroll', onChange, true)
+    }
+  }, [menuOpen])
 
   return (
     <header
-      className={`sticky top-0 z-40 overflow-hidden ${theme.header} ${
-        theme.shine ? 'relative animate-header-shine' : ''
-      }`}
+      className={`sticky top-0 z-40 ${theme.header} relative`}
     >
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+      {/* طبقة اللمعان — معزولة بـ overflow-hidden حتى لا تقصّ القائمة المنبثقة */}
+      {theme.shine && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-0 overflow-hidden animate-header-shine"
+        />
+      )}
+      <div className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
         <Link href={`/store/${country}/${subdomain}`} className="flex items-center gap-2.5">
           {store.logo_url ? (
             <img
@@ -68,8 +95,9 @@ export default function StoreHeader({ store, country, subdomain }: Props) {
           {/* قائمة منسدلة لبقية الإجراءات (تبسيط الهيدر) */}
           <div className="relative">
             <button
+              ref={btnRef}
               type="button"
-              onClick={() => setMenuOpen(o => !o)}
+              onClick={toggleMenu}
               aria-label="المزيد"
               className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition ${theme.cartBtn}`}
             >
@@ -83,10 +111,14 @@ export default function StoreHeader({ store, country, subdomain }: Props) {
               )}
             </button>
 
-            {menuOpen && (
+            {menuOpen && pos && (
               <>
-                <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
-                <div className="absolute left-0 top-12 z-50 w-52 overflow-hidden rounded-2xl border border-gray-100 bg-white py-1 shadow-xl dark:border-gray-800 dark:bg-gray-900" dir="rtl">
+                <div className="fixed inset-0 z-[55]" onClick={() => setMenuOpen(false)} />
+                <div
+                  className="fixed z-[60] w-52 overflow-hidden rounded-2xl border border-gray-100 bg-white py-1 shadow-xl dark:border-gray-800 dark:bg-gray-900"
+                  style={{ top: pos.top, right: pos.right }}
+                  dir="rtl"
+                >
                   <Link
                     href={`/store/${country}/${subdomain}/wishlist`}
                     onClick={() => setMenuOpen(false)}

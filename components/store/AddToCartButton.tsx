@@ -50,7 +50,7 @@ export default function AddToCartButton({ productId, name, price, thumbnail, max
         </div>
         <button
           onClick={() => router.push(`/store/${country}/${subdomain}/cart`)}
-          className="w-full rounded-xl bg-gray-900 py-3 text-sm font-semibold text-white hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200"
+          className="w-full rounded-xl bg-violet-600 py-3 text-sm font-semibold text-white shadow-sm hover:bg-violet-500"
         >
           اذهب للسلة ({inCart.quantity} قطعة)
         </button>
@@ -61,11 +61,31 @@ export default function AddToCartButton({ productId, name, price, thumbnail, max
   return (
     <button
       onClick={handleAdd}
-      className={`w-full rounded-xl py-3 text-sm font-semibold transition ${
-        added ? 'bg-emerald-500 text-white' : 'bg-gray-900 text-white hover:bg-gray-700 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200'
+      className={`flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white shadow-sm transition ${
+        added
+          ? 'bg-emerald-500'
+          : 'bg-violet-600 hover:bg-violet-500 dark:bg-violet-600 dark:hover:bg-violet-500'
       }`}
     >
-      {added ? '✓ أُضيف للسلة' : 'أضف للسلة'}
+      {added ? (
+        <>✓ أُضيف للسلة</>
+      ) : (
+        <>
+          <CartIcon />
+          أضف للسلة
+        </>
+      )}
     </button>
+  )
+}
+
+function CartIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="9" cy="21" r="1" />
+      <circle cx="20" cy="21" r="1" />
+      <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+    </svg>
   )
 }

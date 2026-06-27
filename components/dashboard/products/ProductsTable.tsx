@@ -148,8 +148,8 @@ export default function ProductsTable({ products: initial, categories, storeId, 
 
   return (
     <>
-      {/* ── Filters ── */}
-      <div className="mb-4 space-y-2">
+      {/* ── Filters (ثابتة أعلى الصفحة عند التمرير) ── */}
+      <div className="sticky top-0 z-20 mb-4 -mx-4 space-y-2 border-b border-white/5 bg-slate-950/85 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-slate-950/70 sm:-mx-6 sm:px-6">
         {/* سطر البحث + الزر */}
         <div className="flex gap-2">
           <input
@@ -369,6 +369,19 @@ export default function ProductsTable({ products: initial, categories, storeId, 
           </div>
         </div>
       )}
+
+      {/* ── زر إضافة عائم ── */}
+      <Link
+        href="/dashboard/products/new"
+        title="منتج جديد"
+        aria-label="إضافة منتج جديد"
+        className="fixed bottom-6 left-6 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-sky-500 text-slate-950 shadow-lg shadow-sky-500/30 transition-transform hover:scale-105 hover:bg-sky-400"
+      >
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+      </Link>
     </>
   )
 }
