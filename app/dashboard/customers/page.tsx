@@ -5,7 +5,7 @@ import Link from 'next/link'
 import CustomersTable from '@/components/dashboard/customers/CustomersTable'
 
 interface Props {
-  searchParams: { q?: string; type?: string; sort?: string }
+  searchParams: { q?: string; type?: string; sort?: string; add?: string }
 }
 
 export default async function CustomersPage({ searchParams }: Props) {
