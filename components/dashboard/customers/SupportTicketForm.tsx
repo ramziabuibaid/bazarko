@@ -109,7 +109,15 @@ export default function SupportTicketForm({
       <div>
         <label className="mb-1 block text-xs text-slate-400">الموضوع</label>
         <input value={subject} onChange={e => setSubject(e.target.value)} placeholder="مثلاً: المنتج وصل تالفاً"
+          list="subject-suggestions"
           className="w-full rounded-xl border border-white/10 bg-slate-800 px-3 py-2 text-white" autoFocus />
+        <datalist id="subject-suggestions">
+          <option value="تأخر الطلب" />
+          <option value="مشكلة بالدفع" />
+          <option value="تعديل العنوان" />
+          <option value="منتج تالف" />
+          <option value="منتج ناقص" />
+        </datalist>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

@@ -181,7 +181,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
   const showOffers = offers.length > 0 && !isFiltering
 
   return (
-    <div className="min-h-screen bg-white transition-colors dark:bg-gray-950" dir="rtl">
+    <div className="min-h-screen overflow-x-hidden bg-white transition-colors dark:bg-gray-950" dir="rtl">
       <StoreAnalyticsTracker storeId={store.id} eventType="store_visit" pagePath={`/store/${params.country}/${params.subdomain}`} />
       <StoreHeader store={store} country={params.country} subdomain={params.subdomain} />
 
@@ -327,7 +327,7 @@ export default async function StorefrontPage({ params, searchParams }: Props) {
           />
         </div>
 
-        <section className="mt-6">
+        <section id="products" className="mt-6">
           <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
             {searchParams.q
               ? `نتائج البحث: "${searchParams.q}"`

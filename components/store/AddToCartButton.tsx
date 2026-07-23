@@ -22,11 +22,22 @@ export default function AddToCartButton({ productId, name, price, thumbnail, max
   const inCart = items.find(i => i.productId === productId)
   const [added, setAdded] = useState(false)
 
+  function ensureInCart() {
+    if (!inCart) {
+      addItem({ productId, name, price, thumbnail, max: maxQty })
+      if (storeId) trackEvent(storeId, 'add_to_cart', { productId })
+    }
+  }
+
   function handleAdd() {
-    addItem({ productId, name, price, thumbnail, max: maxQty })
+    ensureInCart()
     setAdded(true)
     setTimeout(() => setAdded(false), 1500)
-    if (storeId) trackEvent(storeId, 'add_to_cart', { productId })
+  }
+
+  function handleBuyNow() {
+    ensureInCart()
+    router.push(`/store/${country}/${subdomain}/checkout`)
   }
 
   if (inCart) {
@@ -48,34 +59,50 @@ export default function AddToCartButton({ productId, name, price, thumbnail, max
             +
           </button>
         </div>
-        <button
-          onClick={() => router.push(`/store/${country}/${subdomain}/cart`)}
-          className="w-full rounded-xl bg-violet-600 py-3 text-sm font-semibold text-white shadow-sm hover:bg-violet-500"
-        >
-          اذهب للسلة ({inCart.quantity} قطعة)
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => router.push(`/store/${country}/${subdomain}/cart`)}
+            className="flex-1 rounded-xl bg-gray-100 py-3 text-sm font-semibold text-gray-900 transition hover:bg-gray-200 dark:bg-gray-800 dark:text-white dark:hover:bg-gray-700"
+          >
+            السلة ({inCart.quantity})
+          </button>
+          <button
+            onClick={handleBuyNow}
+            className="flex-1 rounded-xl bg-gray-900 py-3 text-sm font-semibold text-white transition hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100"
+          >
+            ⚡ اشترِ الآن
+          </button>
+        </div>
       </div>
     )
   }
 
   return (
-    <button
-      onClick={handleAdd}
-      className={`flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white shadow-sm transition ${
-        added
-          ? 'bg-emerald-500'
-          : 'bg-violet-600 hover:bg-violet-500 dark:bg-violet-600 dark:hover:bg-violet-500'
-      }`}
-    >
-      {added ? (
-        <>✓ أُضيف للسلة</>
-      ) : (
-        <>
-          <CartIcon />
-          أضف للسلة
-        </>
-      )}
-    </button>
+    <div className="flex gap-2 w-full">
+      <button
+        onClick={handleAdd}
+        className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold transition ${
+          added
+            ? 'bg-emerald-500 text-white'
+            : 'bg-gray-100 text-gray-900 hover:bg-gray-200 dark:bg-gray-800 dark:text-white dark:hover:bg-gray-700'
+        }`}
+      >
+        {added ? (
+          <>✓ أُضيف</>
+        ) : (
+          <>
+            <CartIcon />
+            أضف للسلة
+          </>
+        )}
+      </button>
+      <button
+        onClick={handleBuyNow}
+        className="flex-1 rounded-xl bg-gray-900 py-3 text-sm font-semibold text-white transition hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100"
+      >
+        ⚡ اشترِ الآن
+      </button>
+    </div>
   )
 }
 

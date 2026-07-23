@@ -2,7 +2,6 @@ import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import AddToCartButton from '@/components/store/AddToCartButton'
-import StickyBuyBar from '@/components/store/StickyBuyBar'
 import ProductReviews from '@/components/store/ProductReviews'
 import StoreHeader from '@/components/store/StoreHeader'
 import OfferCountdown from '@/components/store/OfferCountdown'
@@ -428,19 +427,6 @@ export default async function ProductPage({ params }: Props) {
       </main>
       <StoreFooter store={store} country={params.country} subdomain={params.subdomain} />
       <CartToast country={params.country} subdomain={params.subdomain} />
-
-      <StickyBuyBar
-        productId={product.id}
-        name={product.name}
-        price={effectivePrice}
-        thumbnail={product.thumbnail_url}
-        maxQty={maxQty}
-        country={params.country}
-        subdomain={params.subdomain}
-        storeId={store.id}
-        currencyCode={store.currency_code}
-        outOfStock={!!outOfStock}
-      />
     </div>
   )
 }

@@ -108,6 +108,15 @@ export default function OfferForm({ storeId, currencyCode, products, categories,
     })
   }
 
+  // إزالة كل المنتجات المعروضة حالياً
+  function removeAllFiltered() {
+    setError('')
+    setForm(f => {
+      const filteredIds = new Set(filtered.map(p => p.id))
+      return { ...f, items: f.items.filter(i => !filteredIds.has(i.product_id)) }
+    })
+  }
+
   function setItemField(productId: string, field: 'offer_price' | 'max_quantity', value: string) {
     setError('')
     setForm(f => ({
@@ -345,19 +354,21 @@ export default function OfferForm({ storeId, currencyCode, products, categories,
             {selectedItems.map(({ item, product }) => {
               const pct = discountPct(item)
               return (
-                <div key={item.product_id} className="flex items-center gap-3 rounded-xl border border-white/5 bg-slate-950 p-3">
-                  {product.thumbnail_url ? (
-                    <img src={product.thumbnail_url} alt="" className="h-10 w-10 rounded-lg object-cover" />
-                  ) : (
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-lg">🛍️</div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm text-white">{product.name}</p>
-                    <p className="text-xs text-slate-500">
-                      السعر الأصلي: {product.price.toLocaleString('ar-u-nu-latn')} {currencyCode}
-                    </p>
+                <div key={item.product_id} className="flex flex-col gap-3 rounded-xl border border-white/5 bg-slate-950 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {product.thumbnail_url ? (
+                      <img src={product.thumbnail_url} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
+                    ) : (
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-lg">🛍️</div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm text-white">{product.name}</p>
+                      <p className="text-xs text-slate-500">
+                        السعر الأصلي: {product.price.toLocaleString('ar-u-nu-latn')} {currencyCode}
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <input
                       value={item.offer_price}
                       onChange={e => setItemField(item.product_id, 'offer_price', e.target.value)}
@@ -365,7 +376,7 @@ export default function OfferForm({ storeId, currencyCode, products, categories,
                       min="0"
                       step="0.01"
                       placeholder="سعر العرض"
-                      className="w-28 rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
+                      className="w-24 sm:w-28 rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
                     />
                     <input
                       value={item.max_quantity}
@@ -374,17 +385,17 @@ export default function OfferForm({ storeId, currencyCode, products, categories,
                       min="1"
                       placeholder="الكمية"
                       title="كمية محدودة للعرض — اتركها فارغة لغير محدود"
-                      className="w-20 rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
+                      className="flex-1 sm:w-20 sm:flex-none rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
                     />
                     {pct !== null && pct > 0 && pct < 100 && (
-                      <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-semibold text-red-400">
+                      <span className="shrink-0 rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-semibold text-red-400">
                         -{pct}%
                       </span>
                     )}
                     <button
                       type="button"
                       onClick={() => toggleProduct(product)}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-red-500/10 hover:text-red-400"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-red-500/10 hover:text-red-400"
                       aria-label="إزالة"
                     >
                       ✕
@@ -431,14 +442,24 @@ export default function OfferForm({ storeId, currencyCode, products, categories,
             className="flex-1 rounded-xl border border-white/10 bg-slate-950 px-4 py-2.5 text-sm text-white outline-none focus:border-sky-500"
           />
           {filtered.length > 0 && (
-            <button
-              type="button"
-              onClick={selectAllFiltered}
-              title="إضافة كل المنتجات المعروضة — مفيد لعرض على فئة كاملة"
-              className="shrink-0 rounded-xl border border-white/10 px-3 py-2.5 text-xs text-slate-300 hover:bg-white/5"
-            >
-              + إضافة الكل ({filtered.length})
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={selectAllFiltered}
+                title="إضافة كل المنتجات المعروضة"
+                className="shrink-0 rounded-xl border border-white/10 px-3 py-2.5 text-xs text-slate-300 hover:bg-white/5"
+              >
+                + إضافة الكل ({filtered.length})
+              </button>
+              <button
+                type="button"
+                onClick={removeAllFiltered}
+                title="إزالة كل المنتجات المعروضة من العرض"
+                className="shrink-0 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2.5 text-xs text-red-400 hover:bg-red-500/20"
+              >
+                - إزالة الكل
+              </button>
+            </div>
           )}
         </div>
         <div className="max-h-72 space-y-1 overflow-y-auto">
@@ -478,7 +499,7 @@ export default function OfferForm({ storeId, currencyCode, products, categories,
       </div>
 
       {/* الأزرار */}
-      <div className="flex items-center justify-between">
+      <div className="sticky bottom-4 z-10 flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/80 p-4 shadow-2xl backdrop-blur-xl">
         <button
           type="button"
           onClick={handleSave}

@@ -25,7 +25,7 @@ export default async function CustomersPage({ searchParams }: Props) {
 
   let query = supabase
     .from('customers')
-    .select('id, name, phone, email, city, balance, total_orders, customer_type, is_active, created_at', { count: 'exact' })
+    .select('id, name, phone, email, city, address, notes, credit_limit, social_url, balance, total_orders, customer_type, is_active, created_at', { count: 'exact' })
     .eq('store_id', store.id)
 
   if (searchParams.q) {
@@ -93,9 +93,19 @@ export default async function CustomersPage({ searchParams }: Props) {
 
   return (
     <div className="p-4 sm:p-6">
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-white">إدارة الزبائن</h1>
-        <p className="mt-1 text-sm text-slate-400">{count ?? 0} زبون مسجّل</p>
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold text-white">إدارة الزبائن</h1>
+          <p className="mt-1 text-sm text-slate-400">{count ?? 0} زبون مسجّل</p>
+        </div>
+        <Link
+          href="?add=true"
+          className="flex items-center gap-1.5 rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-500"
+        >
+          <span className="text-lg leading-none">+</span>
+          <span className="hidden sm:inline">زبون جديد</span>
+          <span className="sm:hidden">جديد</span>
+        </Link>
       </div>
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -185,6 +195,7 @@ export default async function CustomersPage({ searchParams }: Props) {
         searchQuery={searchParams.q ?? ''}
         sort={searchParams.sort ?? 'created_at'}
         lastOrderDates={lastOrderMap}
+        initShowAdd={searchParams.add === 'true'}
       />
     </div>
   )

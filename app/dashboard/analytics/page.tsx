@@ -357,16 +357,6 @@ export default async function AnalyticsPage() {
 
       </div>
 
-      {/* ── تذكير بتطبيق الـ Migration ── */}
-      <div className="rounded-2xl border border-amber-500/15 bg-amber-500/5 p-4">
-        <p className="text-xs font-semibold text-amber-400">⚠️ تذكير</p>
-        <p className="mt-1 text-xs text-slate-400">
-          لتفعيل هذه الصفحة، طبّق{' '}
-          <span className="font-mono text-amber-300">021_store_analytics.sql</span>
-          {' '}في Supabase SQL Editor أولاً.
-        </p>
-      </div>
-
     </div>
   )
 }

@@ -11,6 +11,10 @@ interface Customer {
   phone: string | null
   email: string | null
   city: string | null
+  address: string | null
+  notes: string | null
+  social_url: string | null
+  credit_limit: number | null
   balance: number
   total_orders: number
   customer_type: string
@@ -26,6 +30,7 @@ interface Props {
   searchQuery: string
   sort: string
   lastOrderDates: Record<string, string>
+  initShowAdd?: boolean
 }
 
 const TYPE_LABELS: Record<string, { label: string; color: string }> = {
@@ -79,17 +84,34 @@ function exportCSV(customers: Customer[], currencyCode: string, lastOrderDates: 
 }
 
 export default function CustomersTable({
-  customers, currencyCode, storeId, activeType, searchQuery, sort, lastOrderDates,
+  customers, currencyCode, storeId, activeType, searchQuery, sort, lastOrderDates, initShowAdd,
 }: Props) {
   const router = useRouter()
-  const [showAdd, setShowAdd] = useState(false)
+  const [showAdd, setShowAdd] = useState(initShowAdd || false)
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
+  const [deletingCustomer, setDeletingCustomer] = useState<Customer | null>(null)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importMsg, setImportMsg] = useState('')
   const [form, setForm] = useState({
     name: '', phone: '', email: '', city: '', address: '',
     customer_type: 'retail', notes: '', credit_limit: '0', social_url: '',
   })
+
+  function handleEditClick(c: Customer) {
+    setForm({
+      name: c.name, phone: c.phone ?? '', email: c.email ?? '', city: c.city ?? '',
+      address: c.address ?? '', customer_type: c.customer_type, notes: c.notes ?? '',
+      credit_limit: String(c.credit_limit ?? 0), social_url: c.social_url ?? ''
+    })
+    setEditingCustomer(c)
+  }
+
+  function handleCancelEdit() {
+    setEditingCustomer(null)
+    setForm({ name: '', phone: '', email: '', city: '', address: '', customer_type: 'retail', notes: '', credit_limit: '0', social_url: '' })
+  }
 
   async function importFromContacts() {
     const nav = navigator as Navigator & { contacts?: { select: (props: string[], opts: object) => Promise<Array<{ name?: string[]; tel?: string[]; email?: string[] }>> } }
@@ -135,13 +157,12 @@ export default function CustomersTable({
     router.push(buildUrl({ q }))
   }
 
-  async function addCustomer(e: React.FormEvent) {
+  async function saveCustomer(e: React.FormEvent) {
     e.preventDefault()
     if (!form.name.trim()) return
     setSaving(true)
     const supabase = createClient()
-    const { error } = await supabase.from('customers').insert({
-      store_id: storeId,
+    const data = {
       name: form.name.trim(),
       phone: form.phone.trim() || null,
       email: form.email.trim() || null,
@@ -151,13 +172,34 @@ export default function CustomersTable({
       notes: form.notes.trim() || null,
       credit_limit: parseFloat(form.credit_limit) || 0,
       social_url: form.social_url.trim() || null,
-    })
+    }
+    
+    let error;
+    if (editingCustomer) {
+      const { error: err } = await supabase.from('customers').update({ ...data, updated_at: new Date().toISOString() }).eq('id', editingCustomer.id)
+      error = err
+    } else {
+      const { error: err } = await supabase.from('customers').insert({ store_id: storeId, ...data })
+      error = err
+    }
+    
     setSaving(false)
     if (!error) {
       setShowAdd(false)
+      setEditingCustomer(null)
       setForm({ name: '', phone: '', email: '', city: '', address: '', customer_type: 'retail', notes: '', credit_limit: '0', social_url: '' })
       router.refresh()
     }
+  }
+
+  async function deleteCustomer() {
+    if (!deletingCustomer) return
+    setDeleting(true)
+    const supabase = createClient()
+    await supabase.from('customers').delete().eq('id', deletingCustomer.id)
+    setDeleting(false)
+    setDeletingCustomer(null)
+    router.refresh()
   }
 
   return (
@@ -243,6 +285,7 @@ export default function CustomersTable({
                 <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الزبون</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">التواصل</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">النوع</th>
+                <th className="hidden lg:table-cell px-4 py-3 text-right text-xs font-medium text-slate-400">تاريخ التسجيل</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الطلبيات</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الذمة</th>
                 <th className="hidden md:table-cell px-4 py-3 text-right text-xs font-medium text-slate-400">آخر طلبية</th>
@@ -298,7 +341,18 @@ export default function CustomersTable({
                         {t.label}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-300">{c.total_orders}</td>
+                    <td className="hidden lg:table-cell px-4 py-3 text-xs text-slate-300">
+                      {new Date(c.created_at).toLocaleDateString('ar-u-nu-latn')}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-300">
+                      <Link 
+                        href={`/dashboard/orders?q=${encodeURIComponent(c.phone || c.name)}`}
+                        className="text-sky-400 hover:underline"
+                        title="عرض طلبيات هذا الزبون"
+                      >
+                        {c.total_orders} طلبيات
+                      </Link>
+                    </td>
                     <td className="px-4 py-3">
                       {c.balance > 0 ? (
                         <span className="text-sm font-semibold text-red-400" dir="ltr">
@@ -316,12 +370,26 @@ export default function CustomersTable({
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <Link
-                        href={`/dashboard/customers/${c.id}`}
-                        className="rounded-lg bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-white transition-colors"
-                      >
-                        الملف
-                      </Link>
+                      <div className="flex items-center gap-1">
+                        <Link
+                          href={`/dashboard/customers/${c.id}`}
+                          className="rounded-lg bg-white/5 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-white transition-colors"
+                        >
+                          الملف
+                        </Link>
+                        <button
+                          onClick={() => handleEditClick(c)}
+                          className="rounded-lg bg-sky-500/10 px-2.5 py-1.5 text-xs text-sky-400 hover:bg-sky-500/20 transition-colors"
+                        >
+                          تعديل
+                        </button>
+                        <button
+                          onClick={() => setDeletingCustomer(c)}
+                          className="rounded-lg bg-red-500/10 px-2.5 py-1.5 text-xs text-red-400 hover:bg-red-500/20 transition-colors"
+                        >
+                          حذف
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -331,14 +399,16 @@ export default function CustomersTable({
         </div>
       )}
 
-      {/* Modal إضافة زبون */}
-      {showAdd && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setShowAdd(false)}>
-          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-6" onClick={e => e.stopPropagation()}>
-            <h2 className="mb-4 text-lg font-semibold text-white">زبون جديد</h2>
+      {/* Modal إضافة/تعديل زبون */}
+      {(showAdd || editingCustomer) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={editingCustomer ? handleCancelEdit : () => setShowAdd(false)}>
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <h2 className="mb-4 text-lg font-semibold text-white">{editingCustomer ? 'تعديل زبون' : 'زبون جديد'}</h2>
 
             {/* استيراد من جهات الاتصال */}
-            <button
+            {!editingCustomer && (
+              <>
+                <button
               type="button"
               onClick={importFromContacts}
               disabled={importing}
@@ -352,18 +422,20 @@ export default function CustomersTable({
                   <span>استيراد من جهات الاتصال</span>
                 </>
               )}
-            </button>
-            {importMsg && (
-              <p className="mb-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-400">{importMsg}</p>
+                </button>
+                {importMsg && (
+                  <p className="mb-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-400">{importMsg}</p>
+                )}
+
+                <div className="mb-4 flex items-center gap-3">
+                  <div className="flex-1 border-t border-white/10" />
+                  <span className="text-xs text-slate-600">أو أدخل يدوياً</span>
+                  <div className="flex-1 border-t border-white/10" />
+                </div>
+              </>
             )}
 
-            <div className="mb-4 flex items-center gap-3">
-              <div className="flex-1 border-t border-white/10" />
-              <span className="text-xs text-slate-600">أو أدخل يدوياً</span>
-              <div className="flex-1 border-t border-white/10" />
-            </div>
-
-            <form onSubmit={addCustomer} className="space-y-3">
+            <form onSubmit={saveCustomer} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">
                   <label className="mb-1 block text-xs text-slate-400">الاسم *</label>
@@ -455,7 +527,7 @@ export default function CustomersTable({
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowAdd(false)}
+                  onClick={editingCustomer ? handleCancelEdit : () => setShowAdd(false)}
                   className="flex-1 rounded-xl border border-white/10 py-2.5 text-sm text-slate-400 hover:text-white"
                 >
                   إلغاء
@@ -465,10 +537,40 @@ export default function CustomersTable({
                   disabled={saving}
                   className="flex-1 rounded-xl bg-sky-600 py-2.5 text-sm font-semibold text-white hover:bg-sky-500 disabled:opacity-50"
                 >
-                  {saving ? 'جاري الحفظ...' : 'إضافة الزبون'}
+                  {saving ? 'جاري الحفظ...' : (editingCustomer ? 'حفظ التعديلات' : 'إضافة الزبون')}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal حذف زبون */}
+      {deletingCustomer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setDeletingCustomer(null)}>
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900 p-6 text-center" onClick={e => e.stopPropagation()}>
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 text-2xl text-red-400">
+              ⚠️
+            </div>
+            <h2 className="mb-2 text-lg font-semibold text-white">حذف الزبون</h2>
+            <p className="mb-6 text-sm text-slate-400">
+              هل أنت متأكد من حذف الزبون <strong>{deletingCustomer.name}</strong>؟ لا يمكن التراجع عن هذا الإجراء وسيتم حذف جميع البيانات المرتبطة به.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeletingCustomer(null)}
+                className="flex-1 rounded-xl border border-white/10 py-2.5 text-sm font-medium text-slate-400 hover:text-white"
+              >
+                تراجع
+              </button>
+              <button
+                onClick={deleteCustomer}
+                disabled={deleting}
+                className="flex-1 rounded-xl bg-red-500 py-2.5 text-sm font-semibold text-white hover:bg-red-400 disabled:opacity-50"
+              >
+                {deleting ? 'جاري الحذف...' : 'نعم، احذف الزبون'}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -138,7 +138,7 @@ export default function StoreHeader({ store, country, subdomain }: Props) {
           <p className="px-4 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">المتجر</p>
 
           <DrawerLink href={base} onClick={close}>🏠 الرئيسية</DrawerLink>
-          <DrawerLink href={`${base}?q=`} onClick={close}>🛍️ جميع المنتجات</DrawerLink>
+          <DrawerLink href={`${base}#products`} onClick={close}>🛍️ جميع المنتجات</DrawerLink>
           <DrawerLink href={`${base}/cart`} onClick={close} badge={count}>🛒 سلة التسوق</DrawerLink>
           <DrawerLink href={`${base}/wishlist`} onClick={close} badge={wishlistCount}>❤️ المفضلة</DrawerLink>
 

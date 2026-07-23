@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
@@ -51,14 +51,30 @@ export default function ProductsTable({ products: initial, categories, storeId, 
   const [deleting, setDeleting]   = useState(false)
   const [duplicating, setDuplicating] = useState<Record<string, boolean>>({})
 
-  function applyFilters() {
-    const params = new URLSearchParams()
-    if (search)                params.set('q', search)
-    if (category)              params.set('category', category)
-    if (status)                params.set('status', status)
-    if (sort && sort !== 'newest') params.set('sort', sort)
-    router.push(`/dashboard/products?${params.toString()}`)
-  }
+  useEffect(() => {
+    setProducts(initial)
+  }, [initial])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams()
+      if (search) params.set('q', search)
+      if (category) params.set('category', category)
+      if (status) params.set('status', status)
+      if (sort && sort !== 'newest') params.set('sort', sort)
+      
+      const currentQuery = new URLSearchParams()
+      if (filters.q) currentQuery.set('q', filters.q)
+      if (filters.category) currentQuery.set('category', filters.category)
+      if (filters.status) currentQuery.set('status', filters.status)
+      if (filters.sort && filters.sort !== 'newest') currentQuery.set('sort', filters.sort)
+
+      if (params.toString() !== currentQuery.toString()) {
+        router.push(`/dashboard/products?${params.toString()}`)
+      }
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [search, category, status, sort, filters.q, filters.category, filters.status, filters.sort, router])
 
   async function toggleActive(product: Product) {
     const next = product.status === 'active' ? 'hidden' : 'active'
@@ -150,28 +166,21 @@ export default function ProductsTable({ products: initial, categories, storeId, 
     <>
       {/* ── Filters (ثابتة أعلى الصفحة عند التمرير) ── */}
       <div className="sticky top-0 z-20 mb-4 -mx-4 space-y-2 border-b border-white/5 bg-slate-950/85 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-slate-950/70 sm:-mx-6 sm:px-6">
-        {/* سطر البحث + الزر */}
+        {/* سطر البحث */}
         <div className="flex gap-2">
           <input
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && applyFilters()}
             placeholder="بحث باسم المنتج..."
             className="flex-1 rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-right text-sm text-white placeholder-slate-500 outline-none focus:border-sky-500"
           />
-          <button
-            onClick={applyFilters}
-            className="shrink-0 rounded-xl bg-slate-700 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-slate-600"
-          >
-            بحث
-          </button>
         </div>
         {/* سطر الفلاتر */}
         <div className="flex gap-2">
           <select
             value={category}
-            onChange={e => { setCategory(e.target.value); setTimeout(applyFilters, 0) }}
+            onChange={e => setCategory(e.target.value)}
             className="flex-1 rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-right text-sm text-white outline-none focus:border-sky-500"
           >
             <option value="">كل الفئات</option>
@@ -181,7 +190,7 @@ export default function ProductsTable({ products: initial, categories, storeId, 
           </select>
           <select
             value={status}
-            onChange={e => { setStatus(e.target.value); setTimeout(applyFilters, 0) }}
+            onChange={e => setStatus(e.target.value)}
             className="flex-1 rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-right text-sm text-white outline-none focus:border-sky-500"
           >
             <option value="">كل الحالات</option>
@@ -194,7 +203,7 @@ export default function ProductsTable({ products: initial, categories, storeId, 
           </select>
           <select
             value={sort}
-            onChange={e => { setSort(e.target.value); setTimeout(applyFilters, 0) }}
+            onChange={e => setSort(e.target.value)}
             className="flex-1 rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 text-right text-sm text-white outline-none focus:border-sky-500"
           >
             <option value="newest">الأحدث</option>
@@ -209,10 +218,14 @@ export default function ProductsTable({ products: initial, categories, storeId, 
       {/* ── Table ── */}
       {products.length === 0 ? (
         <div className="rounded-xl border border-dashed border-white/10 p-12 text-center">
-          <p className="text-slate-400">لا توجد منتجات</p>
-          <Link href="/dashboard/products/new" className="mt-3 inline-block text-sm text-sky-400 hover:text-sky-300">
-            أضف أول منتج
-          </Link>
+          <p className="text-slate-400">
+            {search ? 'المنتج غير موجود' : 'لا توجد منتجات'}
+          </p>
+          {!search && (
+            <Link href="/dashboard/products/new" className="mt-3 inline-block text-sm text-sky-400 hover:text-sky-300">
+              أضف أول منتج
+            </Link>
+          )}
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-white/5">

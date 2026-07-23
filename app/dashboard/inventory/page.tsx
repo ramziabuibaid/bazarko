@@ -40,7 +40,17 @@ export default async function InventoryPage({ searchParams }: Props) {
     query = query.gt('stock_available', 0)
   }
 
-  const { data: products } = await query
+  let { data: products } = await query
+
+  if (searchParams.status === 'low' && products) {
+    products = products.filter(p => 
+      (p.stock_available ?? 0) > 0 &&
+      p.low_stock_alert != null &&
+      p.low_stock_alert > 0 &&
+      (p.stock_available ?? 0) <= p.low_stock_alert
+    )
+  }
+
 
   // إحصائيات
   const { data: all } = await supabase

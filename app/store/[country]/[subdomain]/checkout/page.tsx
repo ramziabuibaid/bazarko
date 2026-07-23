@@ -60,26 +60,17 @@ export default function CheckoutPage() {
   // جلب بيانات المتجر والمناطق
   useEffect(() => {
     const supabase = createClient()
-    Promise.all([
-      supabase
-        .from('stores')
-        .select('id, name, currency_code, country_code, delivery_enabled, free_delivery_threshold')
-        .eq('subdomain', subdomain)
-        .eq('country_code', country.toUpperCase())
-        .single(),
-      supabase
-        .from('delivery_zones')
-        .select('id, name, cost, estimated_days, shipping_methods(id, name, cost, min_days, max_days, is_active)')
-        .eq('is_active', true)
-        .order('sort_order', { ascending: true }),
-    ]).then(([{ data: storeData }, { data: zonesData }]) => {
-      if (storeData) {
-        setStore(storeData as StoreInfo)
-        // فلتر المناطق حسب المتجر (تأتي كلها بسياسة anon لكن نحتاج تصفية)
-        // نجلب مع store_id لاحقاً — حالياً نجلب كل المناطق النشطة
-      }
-      setZones((zonesData ?? []) as Zone[])
-    })
+    supabase
+      .from('stores')
+      .select('id, name, currency_code, country_code, delivery_enabled, free_delivery_threshold')
+      .eq('subdomain', subdomain)
+      .eq('country_code', country.toUpperCase())
+      .single()
+      .then(({ data: storeData }) => {
+        if (storeData) {
+          setStore(storeData as StoreInfo)
+        }
+      })
   }, [subdomain, country])
 
   // إعادة جلب مناطق المتجر فقط بعد معرفة store.id
@@ -164,101 +155,46 @@ export default function CheckoutPage() {
     }
 
     setLoading(true)
-    const supabase = createClient()
-
-    // تثبيت الأسعار من DB
-    const productIds = items.map(i => i.productId)
-    const nowIso     = new Date().toISOString()
-    const [{ data: dbProducts }, { data: dbOfferItems }] = await Promise.all([
-      supabase.from('products').select('id, price').in('id', productIds),
-      supabase
-        .from('offer_items')
-        .select('product_id, offer_price, max_quantity, sold_quantity, offers!inner(store_id, is_active, starts_at, ends_at)')
-        .in('product_id', productIds)
-        .eq('offers.store_id', store.id)
-        .eq('offers.is_active', true)
-        .lte('offers.starts_at', nowIso)
-        .gte('offers.ends_at', nowIso),
-    ])
-
-    const priceMap = new Map<string, number>(
-      ((dbProducts ?? []) as { id: string; price: number }[]).map(p => [p.id, p.price])
-    )
-    const offerPriceMap = new Map<string, number>()
-    for (const oi of (dbOfferItems ?? []) as { product_id: string; offer_price: number; max_quantity: number | null; sold_quantity: number }[]) {
-      if (oi.max_quantity != null && oi.sold_quantity >= oi.max_quantity) continue
-      const existing = offerPriceMap.get(oi.product_id)
-      if (existing === undefined || oi.offer_price < existing)
-        offerPriceMap.set(oi.product_id, oi.offer_price)
-    }
-
-    const pricedItems = items.map(item => ({
-      ...item,
-      finalPrice:   offerPriceMap.get(item.productId) ?? priceMap.get(item.productId) ?? item.price,
-      isOfferPrice: offerPriceMap.has(item.productId),
-    }))
-
-    const { data: orderNum } = await supabase.rpc('generate_sequence_number', {
-      p_store_id: store.id,
-      p_prefix:   `ORD-${new Date().getFullYear()}-`,
-    })
-
-    const calcSubtotal = pricedItems.reduce((sum, i) => sum + i.finalPrice * i.quantity, 0)
-    const finalTotal   = calcSubtotal + shippingCost
-
-    const { data: order, error: orderErr } = await supabase
-      .from('orders')
-      .insert({
-        store_id:             store.id,
-        order_number:         orderNum ?? `ORD-${Date.now()}`,
-        status:               'pending',
-        payment_method:       form.payment_method,
-        subtotal:             calcSubtotal,
-        total_amount:         finalTotal,
-        shipping_cost:        shippingCost,
-        shipping_zone_id:     selectedZoneId || null,
-        shipping_method_id:   selectedMethodId || null,
-        shipping_zone_name:   selectedZone?.name ?? null,
-        shipping_method_name: selectedMethod?.name ?? null,
-        customer_name:        form.name,
-        customer_phone:       form.phone,
-        shipping_address:     form.address,
-        shipping_city:        form.city || selectedZone?.name || null,
-        customer_notes:       form.notes,
-        source:               'store',
+    try {
+      const response = await fetch('/api/storefront/checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          storeId: store.id,
+          items: items.map(item => ({
+            productId: item.productId,
+            name: item.name,
+            price: item.price,
+            quantity: item.quantity,
+          })),
+          form,
+          selectedZoneId,
+          selectedMethodId,
+          selectedZoneName: selectedZone?.name,
+          selectedMethodName: selectedMethod?.name,
+          shippingCost,
+        }),
       })
-      .select('id')
-      .single()
 
-    if (orderErr || !order) {
+      if (!response.ok) {
+        throw new Error('حدث خطأ أثناء الطلب')
+      }
+
+      const { orderId, error } = await response.json()
+      
+      if (error) {
+        throw new Error(error)
+      }
+
+      clearCart()
+      setSuccessOrderId(orderId)
+    } catch (err) {
+      console.error(err)
       setError('حدث خطأ، حاول مجدداً')
       setLoading(false)
-      return
     }
-
-    const orderItems = pricedItems.map(item => ({
-      order_id:     order.id,
-      product_id:   item.productId,
-      product_name: item.name,
-      quantity:     item.quantity,
-      unit_price:   item.finalPrice,
-      total_price:  item.finalPrice * item.quantity,
-    }))
-    await supabase.from('order_items').insert(orderItems)
-
-    await Promise.all(
-      pricedItems
-        .filter(i => i.isOfferPrice)
-        .map(i => supabase.rpc('record_offer_sale', {
-          p_store_id:  store.id,
-          p_product_id: i.productId,
-          p_qty:        i.quantity,
-        }))
-    )
-
-    clearCart()
-    setSuccessOrderId(order.id)
-    setLoading(false)
   }
 
   // ── شاشة السلة الفارغة ──────────────────────────────────
@@ -417,20 +353,20 @@ export default function CheckoutPage() {
                       </span>
                     </div>
                   )}
-
-                  {/* المدينة / العنوان */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="المدينة أو المنطقة">
-                      <input value={form.city} onChange={e => update('city', e.target.value)}
-                        placeholder="رام الله، البيرة..." className={inp} />
-                    </Field>
-                    <Field label="العنوان التفصيلي">
-                      <input value={form.address} onChange={e => update('address', e.target.value)}
-                        placeholder="شارع النهضة، رقم 5" className={inp} />
-                    </Field>
-                  </div>
                 </div>
               )}
+
+              {/* المدينة / العنوان (تظهر دائماً حتى لو لم تكن هناك مناطق توصيل محددة) */}
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <Field label="المدينة أو المنطقة">
+                  <input value={form.city} onChange={e => update('city', e.target.value)}
+                    placeholder="رام الله، البيرة..." className={inp} />
+                </Field>
+                <Field label="العنوان التفصيلي">
+                  <input value={form.address} onChange={e => update('address', e.target.value)}
+                    placeholder="شارع النهضة، رقم 5" className={inp} />
+                </Field>
+              </div>
 
               {/* ملاحظات */}
               <div className="mt-3">
