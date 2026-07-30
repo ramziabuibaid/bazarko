@@ -60,12 +60,20 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
 
   const [
     { data: orders },
+    { data: independentInvoices },
     { data: payments },
     { data: movements },
   ] = await Promise.all([
     supabase.from('orders')
       .select('id, total_amount, payment_status')
       .eq('store_id', store.id)
+      .not('status', 'eq', 'cancelled')
+      .gte('created_at', start)
+      .lte('created_at', end + 'T23:59:59'),
+    supabase.from('invoices')
+      .select('id, total')
+      .eq('store_id', store.id)
+      .is('order_id', null)
       .not('status', 'eq', 'cancelled')
       .gte('created_at', start)
       .lte('created_at', end + 'T23:59:59'),
@@ -81,7 +89,11 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
 
   type OrderRow = { id: string; total_amount: number | null; payment_status: string }
   const ordersArr = (orders ?? []) as OrderRow[]
-  const sales = ordersArr.reduce((s, o) => s + (o.total_amount ?? 0), 0)
+  const invoicesArr = (independentInvoices ?? []) as { id: string; total: number }[]
+  
+  const ordersSales = ordersArr.reduce((s, o) => s + (o.total_amount ?? 0), 0)
+  const invoicesSales = invoicesArr.reduce((s, i) => s + (i.total ?? 0), 0)
+  const sales = ordersSales + invoicesSales
 
   // ── تكلفة البضاعة المباعة (COGS) من بنود الطلبيات ──
   const orderIds = ordersArr.map(o => o.id)
@@ -94,6 +106,26 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
     cogs = (lineItems ?? []).reduce(
       (s, li: { quantity: number; cost_price: number | null }) => s + (li.cost_price ?? 0) * li.quantity, 0,
     )
+  }
+  // COGS for independent invoices
+  if (invoicesArr.length > 0) {
+    const invoiceIds = invoicesArr.map(i => i.id)
+    const { data: invItems } = await supabase
+      .from('invoice_items')
+      .select('product_id, quantity')
+      .in('invoice_id', invoiceIds)
+      .not('product_id', 'is', null)
+      
+    if (invItems && invItems.length > 0) {
+      const productIds = invItems.map(i => i.product_id)
+      const { data: products } = await supabase
+        .from('products')
+        .select('id, cost_price')
+        .in('id', productIds)
+        
+      const costMap = new Map(products?.map(p => [p.id, p.cost_price ?? 0]) ?? [])
+      cogs += invItems.reduce((s, item) => s + (costMap.get(item.product_id) ?? 0) * item.quantity, 0)
+    }
   }
 
   const paymentsArr  = (payments ?? []) as { amount: number; category: string | null }[]
@@ -165,19 +197,19 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
         <h2 className="mb-4 text-sm font-semibold text-white">الأرباح والخسائر — {label}</h2>
         <div className="mx-auto max-w-lg space-y-2.5 text-sm">
           <div className="flex justify-between py-1">
-            <span className="text-slate-300">المبيعات</span>
+            <span className="text-slate-300" title="إجمالي مبيعات الطلبيات والفواتير المباشرة">المبيعات</span>
             <span className="font-semibold text-emerald-400" dir="ltr">{fmt(sales)} {cc}</span>
           </div>
           <div className="flex justify-between py-1">
-            <span className="text-slate-400">− تكلفة البضاعة المباعة</span>
+            <span className="text-slate-400" title="تكلفة البضاعة المباعة (كمية × سعر التكلفة)">− تكلفة البضاعة المباعة</span>
             <span className="text-red-400" dir="ltr">{fmt(cogs)} {cc}</span>
           </div>
           <div className="flex justify-between border-t border-white/10 py-2 font-semibold">
-            <span className="text-white">= الربح الإجمالي {grossMargin !== null && <span className="text-xs font-normal text-slate-500">({grossMargin}%)</span>}</span>
+            <span className="text-white" title="المبيعات ناقص تكلفة البضاعة المباعة">= الربح الإجمالي {grossMargin !== null && <span className="text-xs font-normal text-slate-500">({grossMargin}%)</span>}</span>
             <span className={grossProfit >= 0 ? 'text-emerald-400' : 'text-red-400'} dir="ltr">{fmt(grossProfit)} {cc}</span>
           </div>
           <div className="flex justify-between py-1">
-            <span className="text-slate-400">− المصروفات التشغيلية</span>
+            <span className="text-slate-400" title="مصروفات المتجر من سندات الصرف">− المصروفات التشغيلية</span>
             <span className="text-red-400" dir="ltr">{fmt(expenses)} {cc}</span>
           </div>
           <div className={`flex justify-between rounded-xl border px-4 py-3 text-base font-bold ${
@@ -197,8 +229,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
           <div key={c.label} className="rounded-2xl border border-white/5 bg-slate-900 p-4">
             <p className="mb-2 text-xs font-semibold text-slate-400">التدفق النقدي — {c.label}</p>
             <div className="flex items-center justify-between text-sm">
-              <span className="text-emerald-400" dir="ltr">↓ {fmt(c.f.in)}</span>
-              <span className="text-red-400" dir="ltr">↑ {fmt(c.f.out)}</span>
+              <span className="text-emerald-400" title="النقد الداخل (مقبوضات المبيعات، إيداعات، سداد الديون، وغيرها)" dir="ltr">↑ {fmt(c.f.in)}</span>
+              <span className="text-red-400" title="النقد الخارج (المصروفات، مسحوبات، ومدفوعات أخرى)" dir="ltr">↓ {fmt(c.f.out)}</span>
             </div>
             <p className={`mt-2 text-xl font-bold tabular-nums ${c.f.net >= 0 ? 'text-emerald-400' : 'text-red-400'}`} dir="ltr">
               {c.f.net >= 0 ? '+' : ''}{fmt(c.f.net)} {cc}

@@ -313,7 +313,7 @@ export default function ProductsTable({ products: initial, categories, storeId, 
                   </td>
 
                   {/* الإجراءات */}
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 whitespace-nowrap">
                     <div className="flex items-center justify-end gap-1">
                       {/* toggle: يعمل فقط بين active ↔ hidden */}
                       {product.status !== 'archived' && (
@@ -388,7 +388,7 @@ export default function ProductsTable({ products: initial, categories, storeId, 
         href="/dashboard/products/new"
         title="منتج جديد"
         aria-label="إضافة منتج جديد"
-        className="fixed bottom-6 left-6 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-sky-500 text-slate-950 shadow-lg shadow-sky-500/30 transition-transform hover:scale-105 hover:bg-sky-400"
+        className="fixed bottom-20 left-4 md:bottom-6 md:left-6 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-sky-500 text-slate-950 shadow-lg shadow-sky-500/30 transition-transform hover:scale-105 hover:bg-sky-400 lg:hidden"
       >
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
           <line x1="12" y1="5" x2="12" y2="19" />

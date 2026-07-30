@@ -43,7 +43,7 @@ export async function recordInvoicePayment(
   const pay       = Math.min(amount, remaining)
   const newPaid   = inv.amount_paid + pay
   const fullyPaid = newPaid >= inv.total - 0.001
-  const newStatus = fullyPaid ? 'paid' : 'partial'
+  const newStatus = fullyPaid ? 'paid' : 'draft'
 
   // 1) سند قبض → يولّد حركة صندوق (نقد داخل) عبر الـ trigger
   const { count } = await supabase
@@ -72,7 +72,6 @@ export async function recordInvoicePayment(
   await supabase.from('invoices').update({
     amount_paid: newPaid,
     status:      newStatus,
-    paid_at:     fullyPaid ? new Date().toISOString() : null,
     updated_at:  new Date().toISOString(),
   }).eq('id', inv.id)
 

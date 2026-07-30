@@ -119,7 +119,7 @@ export default function AlertsContent({ outOfStock, lowStock, currencyCode, stor
         onClick={() => toggleVisibility(p)}
         disabled={busy}
         title={active ? 'إخفاء مؤقت من المتجر' : 'إعادة إظهار في المتجر'}
-        className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
+        className={`w-full sm:w-auto rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
           active
             ? 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
             : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
@@ -134,44 +134,53 @@ export default function AlertsContent({ outOfStock, lowStock, currencyCode, stor
     const active    = isActive(p)
     const available = currentStock(p)
     return (
-      <div className={`flex items-center gap-3 px-4 py-3 ${i > 0 ? `border-t ${borderColor}` : ''} ${!active ? 'opacity-60' : ''}`}>
-        <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-white/5">
-          {p.thumbnail_url
-            ? <img src={p.thumbnail_url} alt="" className="h-full w-full object-cover" />
-            : <div className="flex h-full items-center justify-center">🛍️</div>}
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-white truncate">{p.name}</p>
-          <div className="flex items-center gap-2 mt-0.5">
-            {p.sku && <span className="text-xs text-slate-400" dir="ltr">{p.sku}</span>}
-            {(p.sku && (p.monthlySold > 0 || p.lastSaleAt)) ? <span className="text-slate-600">·</span> : null}
-            {salesHint(p)}
+      <div className={`flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3 ${i > 0 ? `border-t ${borderColor}` : ''} ${!active ? 'opacity-60' : ''}`}>
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-white/5">
+            {p.thumbnail_url
+              ? <img src={p.thumbnail_url} alt="" className="h-full w-full object-cover" />
+              : <div className="flex h-full items-center justify-center">🛍️</div>}
           </div>
-          {!active && (
-            <span className="mt-0.5 inline-block rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-400">مخفي من المتجر</span>
-          )}
-        </div>
-        {available <= 0 ? (
-          <span className="text-sm font-bold text-red-400 shrink-0">نفد</span>
-        ) : (
-          <div className="text-center shrink-0">
-            <span className="text-sm font-bold text-yellow-400">{available}</span>
-            <p className="text-xs text-slate-400">متبقي</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-white truncate">{p.name}</p>
+            <div className="flex flex-wrap items-center gap-1.5 mt-0.5 min-w-0">
+              {p.sku && <span className="text-xs text-slate-400 truncate max-w-[120px]" dir="ltr">{p.sku}</span>}
+              {(p.sku && (p.monthlySold > 0 || p.lastSaleAt)) ? <span className="text-slate-600 shrink-0">·</span> : null}
+              <div className="shrink-0">{salesHint(p)}</div>
+            </div>
+            {!active && (
+              <span className="mt-0.5 inline-block rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-400">مخفي من المتجر</span>
+            )}
           </div>
-        )}
-        <button
-          onClick={() => openRestock(p)}
-          className="rounded-lg bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20 transition-colors shrink-0"
-        >
-          📥 تعبئة
-        </button>
-        <HideButton p={p} />
-        <Link
-          href={`/dashboard/inventory?q=${encodeURIComponent(p.name)}`}
-          className="rounded-lg bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:bg-sky-500/15 hover:text-sky-400 shrink-0"
-        >
-          تعديل
-        </Link>
+          <div className="shrink-0 pl-1">
+            {available <= 0 ? (
+              <span className="inline-flex rounded-full bg-red-500/10 px-2.5 py-1 text-xs font-bold text-red-400">نفد</span>
+            ) : (
+              <div className="text-center">
+                <span className="text-sm font-bold text-yellow-400">{available}</span>
+                <p className="text-[10px] text-slate-400">متبقي</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 shrink-0 border-t border-white/5 sm:border-0 pt-3 sm:pt-0">
+          <button
+            onClick={() => openRestock(p)}
+            className="flex-1 sm:flex-none rounded-lg bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20 transition-colors text-center"
+          >
+            📥 تعبئة
+          </button>
+          <div className="flex-1 sm:flex-none">
+            <HideButton p={p} />
+          </div>
+          <Link
+            href={`/dashboard/inventory?q=${encodeURIComponent(p.name)}`}
+            className="flex-1 sm:flex-none block rounded-lg bg-white/5 px-3 py-1.5 text-xs text-slate-300 hover:bg-sky-500/15 hover:text-sky-400 text-center"
+          >
+            تعديل
+          </Link>
+        </div>
       </div>
     )
   }

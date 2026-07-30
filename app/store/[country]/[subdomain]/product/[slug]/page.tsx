@@ -134,7 +134,7 @@ export default async function ProductPage({ params }: Props) {
   const isInstagram = videoUrl?.includes('instagram.com')
 
   return (
-    <div className="min-h-screen bg-white transition-colors dark:bg-gray-950" dir="rtl">
+    <div className="min-h-screen overflow-x-hidden bg-white transition-colors dark:bg-gray-950" dir="rtl">
       <StoreAnalyticsTracker storeId={store.id} eventType="product_view" productId={product.id} pagePath={`/store/${params.country}/${params.subdomain}/product/${params.slug}`} />
       <StoreHeader store={store} country={params.country} subdomain={params.subdomain} />
 
@@ -410,7 +410,7 @@ export default async function ProductPage({ params }: Props) {
                   <p className="font-medium">
                     {isTikTok ? 'شاهد على TikTok' : isInstagram ? 'شاهد على Instagram' : 'شاهد الفيديو'}
                   </p>
-                  <p className="text-xs text-gray-400 mt-0.5 dark:text-gray-500" dir="ltr">{videoUrl}</p>
+                  <p className="text-xs text-gray-400 mt-0.5 dark:text-gray-500 break-all" dir="ltr">{videoUrl}</p>
                 </div>
               </a>
             )}

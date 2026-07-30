@@ -178,12 +178,23 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
 
     setSaving(true)
 
-    const { count } = await supabase
+    const { data: lastInv } = await supabase
       .from('invoices')
-      .select('*', { count: 'exact', head: true })
+      .select('invoice_number')
       .eq('store_id', storeId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
 
-    const invoiceNumber = `INV-${String((count ?? 0) + 1).padStart(4, '0')}`
+    let nextNum = 1
+    if (lastInv?.invoice_number) {
+      const match = lastInv.invoice_number.match(/INV-(\d+)/)
+      if (match) {
+        nextNum = parseInt(match[1], 10) + 1
+      }
+    }
+
+    const invoiceNumber = `INV-${String(nextNum).padStart(4, '0')}`
 
     const { data: inv, error: invErr } = await supabase
       .from('invoices')
@@ -193,12 +204,9 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
         order_id:         prefill?.orderId ?? null,
         customer_id:      selectedCustomer?.id ?? null,
         customer_name:    (selectedCustomer?.name ?? (customerMode === 'manual' ? customerName.trim() : null)) || null,
-        customer_phone:   activePhone || null,
-        customer_address: customerAddress.trim() || null,
         issue_date:       issueDate,
         due_date:         dueDate || null,
-        status:           amountPaid >= total ? 'paid' : amountPaid > 0 ? 'partial' : 'draft',
-        paid_at:          amountPaid >= total ? new Date().toISOString() : null,
+        status:           amountPaid >= total ? 'paid' : 'draft',
         subtotal,
         discount_amount:  discountAmount,
         total,
@@ -211,7 +219,8 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
 
     if (invErr || !inv) {
       setSaving(false)
-      setError('حدث خطأ أثناء الحفظ')
+      setError(`حدث خطأ أثناء الحفظ: ${invErr?.message || 'Unknown Error'}`)
+      console.error(invErr)
       return
     }
 
