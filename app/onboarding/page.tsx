@@ -16,7 +16,6 @@ interface FormData {
 
 const COUNTRIES = [
   { code: 'PS', name: 'فلسطين', flag: '🇵🇸', currency_code: 'ILS', currency_symbol: '₪' },
-  { code: 'SY', name: 'سوريا', flag: '🇸🇾', currency_code: 'SYP', currency_symbol: 'ل.س' },
 ]
 
 export default function OnboardingPage() {

@@ -7,7 +7,7 @@ const PLAN_COLORS: Record<string, string> = {
   pro:   'text-purple-400 bg-purple-400/10 border-purple-400/20',
 }
 const PLAN_LABELS: Record<string, string> = { free: 'مجاني', basic: 'أساسي', pro: 'احترافي' }
-const COUNTRY_LABELS: Record<string, string> = { PS: '🇵🇸 فلسطين', SY: '🇸🇾 سوريا', JO: '🇯🇴 الأردن', SA: '🇸🇦 السعودية' }
+const COUNTRY_LABELS: Record<string, string> = { PS: '🇵🇸 فلسطين' }
 
 interface SearchParams { plan?: string; country?: string; status?: string }
 
@@ -86,8 +86,7 @@ export default async function AdminStoresPage({ searchParams }: { searchParams: 
         {/* Country */}
         {[
           { label: 'كل البلدان', value: '' },
-          { label: '🇵🇸 PS', value: 'PS' },
-          { label: '🇸🇾 SY', value: 'SY' },
+          { label: '🇵🇸 فلسطين (PS)', value: 'PS' },
         ].map(f => (
           <Link key={f.value} href={`/admin/stores?country=${f.value}${searchParams.status ? `&status=${searchParams.status}` : ''}${searchParams.plan ? `&plan=${searchParams.plan}` : ''}`}
             className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${

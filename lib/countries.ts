@@ -15,14 +15,6 @@ const countries: Country[] = [
     currency_code: 'ILS',
     currency_symbol: '₪',
     domain_prefix: 'ps'
-  },
-  {
-    code: 'SY',
-    name_ar: 'سوريا',
-    name_en: 'Syria',
-    currency_code: 'SYP',
-    currency_symbol: 'ل.س',
-    domain_prefix: 'sy'
   }
 ];
 

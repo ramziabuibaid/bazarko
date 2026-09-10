@@ -41,14 +41,11 @@ const DAYS: { key: DayKey; label: string }[] = [
 
 const DIAL_CODES = [
   { code: '970', flag: '🇵🇸', label: 'فلسطين (+970)' },
-  { code: '963', flag: '🇸🇾', label: 'سوريا (+963)' },
+  { code: '972', flag: '🇵🇸', label: 'فلسطين (+972)' },
   { code: '962', flag: '🇯🇴', label: 'الأردن (+962)' },
   { code: '20',  flag: '🇪🇬', label: 'مصر (+20)' },
   { code: '966', flag: '🇸🇦', label: 'السعودية (+966)' },
   { code: '971', flag: '🇦🇪', label: 'الإمارات (+971)' },
-  { code: '965', flag: '🇰🇼', label: 'الكويت (+965)' },
-  { code: '961', flag: '🇱🇧', label: 'لبنان (+961)' },
-  { code: '964', flag: '🇮🇶', label: 'العراق (+964)' },
 ]
 
 const SECONDARY_CURRENCIES = [
@@ -924,7 +921,7 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
         <h2 className="mb-4 font-semibold text-white">معلومات الحساب</h2>
         <div className="grid gap-3 sm:grid-cols-3">
           {[
-            { label: 'البلد', value: store.country_code === 'PS' ? '🇵🇸 فلسطين' : '🇸🇾 سوريا' },
+            { label: 'البلد', value: '🇵🇸 فلسطين' },
             { label: 'العملة', value: store.currency_code },
             { label: 'الـ Subdomain', value: store.subdomain },
           ].map(item => (

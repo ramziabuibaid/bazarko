@@ -198,53 +198,10 @@ export default function VouchersTable({ vouchers, type, storeId, userId, currenc
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank')
   }
 
-  // ── طباعة السند (نافذة مستقلة → PDF) ──────────────────────────
+  // ── طباعة السند (صفحة رسمية مخصصة للطباعة → PDF) ────────────
   function printVoucher(v: Voucher) {
-    const w = window.open('', '_blank', 'width=460,height=640')
-    if (!w) { toast('فضلاً اسمح بالنوافذ المنبثقة للطباعة', 'error'); return }
-    const methodLabel = PAYMENT_METHODS.find(m => m.value === v.payment_method)?.label ?? v.payment_method
-    const head = isReceipt ? 'سند قبض' : 'سند صرف'
-    const partyLabel = isReceipt ? 'استلمنا من' : 'صرفنا إلى'
-    const esc = (s: string) => s.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c] as string))
-    w.document.write(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8">
-      <title>${esc(v.voucher_number)}</title>
-      <style>
-        *{box-sizing:border-box;font-family:'Segoe UI',Tahoma,Arial,sans-serif}
-        body{margin:0;padding:28px;color:#0f172a}
-        .card{border:2px solid #0f172a;border-radius:14px;padding:24px;max-width:400px;margin:0 auto}
-        .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px dashed #cbd5e1;padding-bottom:14px;margin-bottom:14px}
-        .store{font-size:18px;font-weight:700}
-        .phone{font-size:12px;color:#64748b;direction:ltr;text-align:left}
-        .badge{background:${isReceipt ? '#dcfce7' : '#fee2e2'};color:${isReceipt ? '#166534' : '#991b1b'};border-radius:8px;padding:4px 10px;font-size:12px;font-weight:700}
-        .num{font-family:monospace;color:#0369a1;direction:ltr}
-        .row{display:flex;justify-content:space-between;font-size:13px;margin:8px 0}
-        .label{color:#64748b}
-        .amount{text-align:center;margin:18px 0;padding:14px;background:#f1f5f9;border-radius:10px}
-        .amount .v{font-size:26px;font-weight:800;direction:ltr}
-        .desc{font-size:13px;background:#f8fafc;border-radius:8px;padding:10px;margin-top:10px}
-        .sign{display:flex;justify-content:space-between;margin-top:32px;font-size:12px;color:#64748b}
-        .sign div{border-top:1px solid #94a3b8;padding-top:6px;width:40%;text-align:center}
-        @media print{body{padding:0}}
-      </style></head><body>
-      <div class="card">
-        <div class="head">
-          <div><div class="store">${esc(storeName ?? 'المتجر')}</div>
-          ${storePhone ? `<div class="phone">${esc(storePhone)}</div>` : ''}</div>
-          <div class="badge">${head}</div>
-        </div>
-        <div class="row"><span class="label">رقم السند</span><span class="num">${esc(v.voucher_number)}</span></div>
-        <div class="row"><span class="label">التاريخ</span><span>${new Date(v.date).toLocaleDateString('ar-u-nu-latn')}</span></div>
-        <div class="row"><span class="label">${partyLabel}</span><span>${esc(v.party_name ?? '—')}</span></div>
-        <div class="row"><span class="label">طريقة الدفع</span><span>${esc(methodLabel)}</span></div>
-        ${v.category ? `<div class="row"><span class="label">التصنيف</span><span>${esc(v.category)}</span></div>` : ''}
-        <div class="amount"><div class="label" style="font-size:12px">المبلغ</div><div class="v">${fmt(v.amount)} ${esc(currencyCode)}</div></div>
-        <div class="desc"><b>بخصوص:</b> ${esc(v.description)}</div>
-        ${v.reference ? `<div class="row" style="margin-top:10px"><span class="label">مرجع</span><span class="num">${esc(v.reference)}</span></div>` : ''}
-        <div class="sign"><div>توقيع المستلم</div><div>توقيع المسؤول</div></div>
-      </div>
-      <script>window.onload=function(){window.print()}</script>
-      </body></html>`)
-    w.document.close()
+    const printUrl = `/dashboard/accounting/${isReceipt ? 'receipts' : 'payments'}/print/${v.id}`
+    window.open(printUrl, '_blank')
   }
 
   // ── تصدير Excel (CSV بترميز UTF-8) ────────────────────────────

@@ -47,23 +47,23 @@ export default function HomePage() {
           </h1>
 
           <p className="mx-auto max-w-xl text-lg text-slate-400 leading-relaxed">
-            منصة SaaS متكاملة للتجار في فلسطين وسوريا — متجر إلكتروني، طلبيات، محاسبة،
-            مخزون، زبائن، وصيانة. كل شيء جاهز من أول يوم.
+            منصة SaaS متكاملة للأعمال والمتاجر في فلسطين — إدارة المبيعات، المحاسبة المزدوجة،
+            المخزون، الشيكات وسلطة النقد، ونقاط البيع والمتجر الإلكتروني.
           </p>
 
           <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
             <Link href="/onboarding"
               className="group flex items-center gap-2 rounded-xl bg-sky-600 hover:bg-sky-500 px-7 py-3.5 text-base font-bold text-white transition-all shadow-lg shadow-sky-900/40 no-underline">
-              أنشئ متجرك مجاناً
+              أنشئ حسابك مجاناً
               <span className="transition-transform group-hover:-translate-x-1">←</span>
             </Link>
             <Link href="/marketplace/ps"
               className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-7 py-3.5 text-base font-semibold text-white transition-all no-underline">
-              🛍️ تصفح السوق
+              🛍️ تصفح المتاجر
             </Link>
           </div>
 
-          <p className="text-xs text-slate-600">لا حاجة لبطاقة ائتمانية · مجاني للبدء · إلغاء في أي وقت</p>
+          <p className="text-xs text-slate-600">نظام متوافق مع معايير سلطة النقد والمحاسبة الفلسطينية</p>
         </div>
       </section>
 
@@ -72,9 +72,9 @@ export default function HomePage() {
         <div className="mx-auto max-w-4xl px-4">
           <div className="grid grid-cols-3 gap-px overflow-hidden rounded-2xl border border-white/5">
             {[
-              { num: '٢', unit: 'دولة', label: 'فلسطين وسوريا' },
-              { num: '٣٧', unit: 'صفحة', label: 'في لوحة التحكم' },
-              { num: '١٠٠٪', unit: 'عربي', label: 'واجهة وبيانات' },
+              { num: '100%', unit: 'محلي', label: 'مخصص للسوق الفلسطيني' },
+              { num: '40+', unit: 'شاشة', label: 'في نظام الـ ERP ولوحة التحكم' },
+              { num: '100%', unit: 'عربي', label: 'واجهة وتقارير مالية رسمية' },
             ].map(({ num, unit, label }) => (
               <div key={label} className="bg-slate-900/60 py-6 text-center">
                 <p className="text-3xl font-black text-white">
@@ -236,13 +236,12 @@ export default function HomePage() {
             </div>
             <nav className="flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm text-slate-500">
               <Link href="/marketplace/ps" className="hover:text-white no-underline transition-colors">سوق فلسطين</Link>
-              <Link href="/marketplace/sy" className="hover:text-white no-underline transition-colors">سوق سوريا</Link>
               <Link href="/login" className="hover:text-white no-underline transition-colors">تسجيل الدخول</Link>
               <Link href="/onboarding" className="hover:text-white no-underline transition-colors">إنشاء متجر</Link>
             </nav>
           </div>
           <div className="mt-8 border-t border-white/5 pt-6 text-center text-xs text-slate-700">
-            © 2025 Bazarko · جميع الحقوق محفوظة · bazarko.app
+            © 2026 Bazarko · جميع الحقوق محفوظة · bazarko.app
           </div>
         </div>
       </footer>
@@ -266,23 +265,23 @@ const FEATURES = [
   },
   {
     icon: '📊',
-    title: 'محاسبة متكاملة',
-    desc: 'فواتير، سندات قبض وصرف، تقارير الربح والخسارة، وتدفق النقد — كل شيء في مكان واحد.',
+    title: 'محاسبة متكاملة وشجرة حسابات',
+    desc: 'قيود يومية مزدوجة، شجرة حسابات، فواتير، سندات قبض وصرف، وميزان مراجعة وتقارير مالية رسمية.',
+  },
+  {
+    icon: '🏦',
+    title: 'الشيكات والبنوك (PMA)',
+    desc: 'إدارة محفظة الشيكات الواردة والصادرة، دليل سلطة النقد الفلسطينية، وحسابات بنكية مع كشوف الحسابات.',
   },
   {
     icon: '📋',
-    title: 'إدارة المخزون',
-    desc: 'تتبع الكميات، تنبيهات نفاد المخزون، حركات الدخول والخروج، وتقارير تفصيلية.',
+    title: 'إدارة المخزون وكشف حركات الصنف',
+    desc: 'تتبع الحركات والرصيد التراكمي، دليل الماركات والبراندات، تنبيهات نفاد المخزون، والجرد والتسويات.',
   },
   {
     icon: '👥',
-    title: 'إدارة الزبائن والذمم',
-    desc: 'ملف كامل لكل زبون مع كشف حساب، سجل الطلبيات، والأرصدة المستحقة.',
-  },
-  {
-    icon: '🔧',
-    title: 'نظام الصيانة',
-    desc: 'استلام الأجهزة، لوحة Kanban لمتابعة الإصلاحات، قطع الغيار، وتتبع الزبون بدون تسجيل دخول.',
+    title: 'إدارة الزبائن والموردين',
+    desc: 'ملفات شاملة مع كشوف حسابات تفصيلية، عروض الأسعار، والمردودات.',
   },
 ]
 
@@ -291,17 +290,9 @@ const MARKETS = [
     href: '/marketplace/ps',
     flag: '🇵🇸',
     name: 'سوق فلسطين',
-    desc: 'تسوق من أفضل المتاجر الفلسطينية بالشيكل الإسرائيلي',
+    desc: 'تسوق من أفضل المتاجر والشركات الفلسطينية بالشيكل الإسرائيلي والعملات المتداولة',
     from: 'rgb(15 23 42)',
     to: 'rgb(7 89 133 / 0.4)',
-  },
-  {
-    href: '/marketplace/sy',
-    flag: '🇸🇾',
-    name: 'سوق سوريا',
-    desc: 'تسوق من أفضل المتاجر السورية بالليرة السورية',
-    from: 'rgb(15 23 42)',
-    to: 'rgb(67 20 7 / 0.4)',
   },
 ]
 
