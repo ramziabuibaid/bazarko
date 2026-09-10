@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import Image from 'next/image'
+import BazarkoLogo from '@/components/ui/BazarkoLogo'
 import {
   IndustriesShowcase,
   ModularSimulator,
@@ -14,12 +15,7 @@ export default function HomePage() {
       <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/80 backdrop-blur-xl">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 py-3.5 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Link href="/" className="flex items-center gap-2.5 no-underline">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-sky-600 to-cyan-400 font-black text-white text-lg shadow-md shadow-sky-600/30">
-                B
-              </span>
-              <span className="text-xl font-black tracking-tight text-white">Bazarko</span>
-            </Link>
+            <BazarkoLogo size="md" variant="image" href="/" />
             <span className="hidden sm:inline-flex items-center rounded-full bg-sky-500/10 border border-sky-500/20 px-2.5 py-0.5 text-[11px] font-semibold text-sky-400">
               نظام ERP سحابي متكامل
             </span>
@@ -554,12 +550,7 @@ export default function HomePage() {
         <div className="mx-auto max-w-7xl">
           <div className="grid grid-cols-2 md:grid-cols-5 gap-8 mb-12">
             <div className="col-span-2 space-y-3">
-              <div className="flex items-center gap-2.5">
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-tr from-sky-600 to-cyan-400 font-black text-white text-base">
-                  B
-                </span>
-                <span className="text-xl font-black text-white">Bazarko ERP</span>
-              </div>
+              <BazarkoLogo size="lg" variant="image" subtitle="Cloud ERP & Commerce" href="/" />
               <p className="text-xs text-slate-400 max-w-sm leading-relaxed">
                 منظومة تخطيط موارد المؤسسات (ERP) السحابية المتكاملة والمخصصة للشركات والمتاجر في العالم العربي — محاسبة مزدوجة، مخزون، شيكات، صيانة، وتجارة إلكترونية.
               </p>

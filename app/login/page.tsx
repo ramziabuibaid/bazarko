@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import BazarkoLogo from '@/components/ui/BazarkoLogo'
 
 type Mode = 'login' | 'signup'
 
@@ -98,8 +99,8 @@ export default function LoginPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4">
       <div className="w-full max-w-sm">
-        <div className="mb-8 text-center">
-          <p className="text-sm uppercase tracking-widest text-sky-400">Bazarko</p>
+        <div className="mb-8 text-center flex flex-col items-center">
+          <BazarkoLogo size="lg" variant="image" subtitle="منظومة ERP السحابية المتكاملة" href="/" className="mb-2" />
           <h1 className="mt-2 text-2xl font-semibold text-white">
             {mode === 'login' ? 'أهلاً بعودتك' : 'إنشاء حساب جديد'}
           </h1>

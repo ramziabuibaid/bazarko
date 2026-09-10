@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import BazarkoLogo from '@/components/ui/BazarkoLogo'
 
 const NAV = [
   { href: '/admin',        label: 'نظرة عامة', icon: '📊' },
@@ -41,11 +42,10 @@ function AdminSidebarContent({
   return (
     <>
       {/* رأس السايدبار */}
-      <div className="flex items-start justify-between border-b border-white/5 px-4 py-4">
+      <div className="flex items-start justify-between border-b border-white/5 px-4 py-3.5">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-widest text-red-400">Bazarko</p>
-          <p className="mt-1 font-semibold text-white">لوحة الإدارة</p>
-          <span className="mt-1 inline-flex items-center rounded-full bg-red-500/10 border border-red-500/20 px-2 py-0.5 text-[10px] font-semibold text-red-400">
+          <BazarkoLogo size="xs" variant="image" subtitle="لوحة الإدارة الرئيسية" href="/admin" />
+          <span className="mt-2 inline-flex items-center rounded-full bg-red-500/10 border border-red-500/20 px-2 py-0.5 text-[10px] font-semibold text-red-400">
             Super Admin
           </span>
         </div>

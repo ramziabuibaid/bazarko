@@ -14,6 +14,11 @@ export const metadata: Metadata = {
   title: 'Bazarko — منصة إدارة الأعمال والمتاجر الإلكترونية في فلسطين',
   description: 'منصة SaaS متكاملة للتجار والشركات في فلسطين — إدارة المبيعات، المحاسبة، المخزون، الشيكات، البنوك، ونقاط البيع والمتجر الإلكتروني من مكان واحد.',
   metadataBase: new URL('https://bazarko.app'),
+  icons: {
+    icon: '/images/bazarko-logo-mark.jpg',
+    shortcut: '/images/bazarko-logo-mark.jpg',
+    apple: '/images/bazarko-logo-mark.jpg',
+  },
   openGraph: {
     title: 'Bazarko — منصة إدارة الأعمال والمتاجر الإلكترونية في فلسطين',
     description: 'نظام ERP وتجارة إلكترونية سحابي متكامل للأعمال في فلسطين',

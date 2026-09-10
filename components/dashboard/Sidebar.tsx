@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import BazarkoLogo from '@/components/ui/BazarkoLogo'
 
 interface Store {
   id: string
@@ -132,10 +133,12 @@ function NavContent({
   return (
     <>
       {/* رأس السايدبار */}
-      <div className="flex items-start justify-between border-b border-white/5 px-4 py-4">
+      <div className="flex items-start justify-between border-b border-white/5 px-4 py-3.5">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-widest text-sky-400">Bazarko</p>
-          <h2 className="mt-1 truncate font-semibold text-white">{store.name}</h2>
+          <div className="mb-2">
+            <BazarkoLogo size="xs" variant="image" subtitle="نظام الـ ERP" href="/dashboard" />
+          </div>
+          <h2 className="truncate font-semibold text-white text-sm">{store.name}</h2>
           <div className="mt-0.5 flex items-center gap-1">
             <a
               href={`https://${storeUrl}`}

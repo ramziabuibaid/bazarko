@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { getCountryByCode } from '@/lib/countries'
+import BazarkoLogo from '@/components/ui/BazarkoLogo'
 
 interface Props {
   children: React.ReactNode
@@ -16,13 +17,12 @@ export default function MarketplaceLayout({ children, params }: Props) {
       {/* Navbar */}
       <header className="sticky top-0 z-40 border-b border-white/5 bg-slate-950/90 backdrop-blur-md">
         <div className="mx-auto max-w-6xl px-4 py-3 flex items-center gap-4">
-          <Link href={`/marketplace/${params.country}`}
-            className="flex items-center gap-2 shrink-0">
-            <span className="text-lg font-black tracking-tight text-white">Bazarko</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <BazarkoLogo size="sm" variant="image" href={`/marketplace/${params.country}`} />
             <span className="rounded-full bg-sky-500/15 border border-sky-500/20 px-2 py-0.5 text-xs text-sky-400 font-medium">
               {country.name_ar}
             </span>
-          </Link>
+          </div>
 
           {/* Search Bar */}
           <form action={`/marketplace/${params.country}/search`} method="get" className="flex-1 max-w-xl">
@@ -54,8 +54,11 @@ export default function MarketplaceLayout({ children, params }: Props) {
 
       <main>{children}</main>
 
-      <footer className="border-t border-white/5 py-8 text-center text-xs text-slate-600">
-        <p>Bazarko · {country.name_ar} · جميع الحقوق محفوظة</p>
+      <footer className="border-t border-white/5 py-8 text-center text-xs text-slate-500">
+        <div className="flex items-center justify-center gap-2">
+          <BazarkoLogo size="xs" variant="image" href="/" />
+          <span>· {country.name_ar} · جميع الحقوق محفوظة</span>
+        </div>
       </footer>
     </div>
   )

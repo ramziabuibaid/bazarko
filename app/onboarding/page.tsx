@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import BazarkoLogo from '@/components/ui/BazarkoLogo'
 
 type Step = 1 | 2 | 3
 
@@ -123,8 +124,13 @@ export default function OnboardingPage() {
   const selectedCountry = COUNTRIES.find(c => c.code === form.country_code)
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4">
+    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-8">
       <div className="w-full max-w-lg">
+        {/* Brand Logo Header */}
+        <div className="mb-6 text-center flex flex-col items-center">
+          <BazarkoLogo size="lg" variant="image" subtitle="معالج إعداد المتجر والـ ERP" href="/" />
+        </div>
+
         {/* Progress bar */}
         <div className="mb-8">
           <div className="flex items-center gap-2">
