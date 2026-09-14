@@ -73,6 +73,7 @@ const navGroups: NavGroup[] = [
       { href: '/dashboard/categories', label: 'الفئات والتصنيفات', icon: '📂' },
       { href: '/dashboard/inventory', label: 'إدارة المخزون والمستودع', icon: '📉' },
       { href: '/dashboard/inventory/movements', label: 'حركة المخزون الشاملة', icon: '🔄' },
+      { href: '/dashboard/inventory/sync', label: 'مزامنة وربط المخزون', icon: '⚡' },
       { href: '/dashboard/inventory/alerts', label: 'تنبيهات النواقص', icon: '⚠️' },
     ],
   },
@@ -81,6 +82,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: '/dashboard/orders', label: 'طلبيات المتجر', icon: '📦' },
       { href: '/dashboard/offers', label: 'العروض الحصرية', icon: '🎁' },
+      { href: '/dashboard/marketing/ads', label: 'إعلانات وحملات WhatsApp', icon: '📢' },
       { href: '/dashboard/attributes', label: 'الخصائص والمواصفات', icon: '🎚️' },
       { href: '/dashboard/reviews', label: 'تقييمات الزبائن', icon: '⭐' },
       { href: '/dashboard/delivery', label: 'مناطق ورسوم التوصيل', icon: '🚚' },

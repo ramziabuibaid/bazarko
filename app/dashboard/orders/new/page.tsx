@@ -14,7 +14,7 @@ export default async function NewOrderPage() {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, currency_code')
+    .select('id, name, phone, address, currency_code, tax_number, pos_receipt_footer')
     .eq('id', storeId)
     .single()
 
@@ -29,10 +29,20 @@ export default async function NewOrderPage() {
         >
           ← الطلبيات
         </Link>
-        <h1 className="text-xl font-semibold text-white">طلبية جديدة</h1>
+        <h1 className="text-xl font-semibold text-white">نقطة البيع والطلبيات</h1>
       </div>
 
-      <NewOrderForm storeId={store.id} currencyCode={store.currency_code} />
+      <NewOrderForm
+        storeId={store.id}
+        currencyCode={store.currency_code}
+        storeInfo={{
+          name: store.name,
+          phone: store.phone,
+          address: store.address,
+          taxNumber: store.tax_number,
+          receiptFooter: store.pos_receipt_footer,
+        }}
+      />
     </div>
   )
 }

@@ -102,6 +102,7 @@ export default function ChequesClient({
   const [showAddModal, setShowAddModal] = useState(false)
   const [showOpModal, setShowOpModal] = useState<{ check: CheckItem; opType: string } | null>(null)
   const [lightboxImage, setLightboxImage] = useState<string | null>(null)
+  const [lightboxCheck, setLightboxCheck] = useState<CheckItem | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -619,7 +620,10 @@ export default function ChequesClient({
                       <td className="p-3.5">
                         {check.images && check.images.length > 0 ? (
                           <button
-                            onClick={() => setLightboxImage(check.images[0])}
+                            onClick={() => {
+                              setLightboxImage(check.images[0])
+                              setLightboxCheck(check)
+                            }}
                             className="group relative h-9 w-14 overflow-hidden rounded-lg border border-white/10 bg-slate-800"
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1062,18 +1066,54 @@ export default function ChequesClient({
       {/* ── Image Lightbox Modal ── */}
       {lightboxImage && (
         <div
-          onClick={() => setLightboxImage(null)}
+          onClick={() => {
+            setLightboxImage(null)
+            setLightboxCheck(null)
+          }}
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-md"
         >
-          <div className="relative max-h-[90vh] max-w-3xl overflow-hidden rounded-2xl border border-white/20 bg-slate-950 p-2">
-            <button
-              onClick={() => setLightboxImage(null)}
-              className="absolute top-4 right-4 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white font-bold hover:bg-rose-600 transition"
-            >
-              ✕
-            </button>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={lightboxImage} alt="صورة الشيك بالحجم الكامل" className="max-h-[85vh] w-auto rounded-xl object-contain" />
+          <div
+            onClick={e => e.stopPropagation()}
+            className="relative max-h-[92vh] max-w-4xl overflow-hidden rounded-2xl border border-white/20 bg-slate-950 p-4 shadow-2xl flex flex-col"
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-3 text-white">
+              <div className="flex items-center gap-3">
+                <span className="text-base font-bold">
+                  {lightboxCheck ? `شيك رقم #${lightboxCheck.check_number} (${lightboxCheck.bank_name})` : 'صورة الشيك'}
+                </span>
+                {lightboxCheck && (
+                  <span className="rounded-lg bg-white/10 px-2.5 py-0.5 text-xs font-mono font-bold text-sky-400">
+                    {Number(lightboxCheck.amount).toLocaleString('ar-u-nu-latn')} {lightboxCheck.currency}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                {lightboxCheck && (
+                  <Link
+                    href={`/dashboard/cheques/print/${lightboxCheck.id}`}
+                    target="_blank"
+                    className="flex items-center gap-1.5 rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-bold text-slate-950 hover:bg-sky-400 transition"
+                  >
+                    <span>🖨️</span> طباعة بطاقة ومستند الشيك
+                  </Link>
+                )}
+                <button
+                  onClick={() => {
+                    setLightboxImage(null)
+                    setLightboxCheck(null)
+                  }}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-white font-bold hover:bg-rose-600 transition"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-auto max-h-[75vh] flex items-center justify-center bg-black/50 rounded-xl p-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={lightboxImage} alt="صورة الشيك بالحجم الكامل" className="max-h-[70vh] w-auto rounded-lg object-contain shadow-lg" />
+            </div>
           </div>
         </div>
       )}

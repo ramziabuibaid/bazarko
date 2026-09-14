@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { trackAction } from '@/lib/activity/track'
@@ -248,6 +249,14 @@ export default function OrderDetail({ order, items, currencyCode, storeId }: Pro
                 إلغاء الطلب
               </button>
             )}
+
+            <Link
+              href={`/dashboard/orders/receipt/${order.id}`}
+              target="_blank"
+              className="flex items-center justify-center gap-2 w-full rounded-xl bg-slate-800 border border-white/10 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-700 hover:text-white transition"
+            >
+              <span>🧾</span> طباعة إيصال نقطة البيع (POS)
+            </Link>
           </div>
 
           <div className="mt-4 space-y-1.5 border-t border-white/5 pt-4">

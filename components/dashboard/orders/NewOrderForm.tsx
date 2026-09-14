@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
+import PosReceiptModal, { ReceiptData } from './PosReceiptModal'
+
 interface Product {
   id: string
   name: string
@@ -43,6 +45,13 @@ const PAYMENT_METHODS = [
 interface Props {
   storeId: string
   currencyCode: string
+  storeInfo?: {
+    name?: string
+    phone?: string | null
+    address?: string | null
+    taxNumber?: string | null
+    receiptFooter?: string | null
+  }
 }
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -54,7 +63,7 @@ function useDebounce<T>(value: T, delay: number): T {
   return debounced
 }
 
-export default function NewOrderForm({ storeId, currencyCode }: Props) {
+export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props) {
   const router = useRouter()
   const supabase = createClient()
 
@@ -62,6 +71,10 @@ export default function NewOrderForm({ storeId, currencyCode }: Props) {
   const [items, setItems] = useState<LineItem[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+
+  // إيصال الطباعة الفوري
+  const [receiptData, setReceiptData] = useState<ReceiptData | null>(null)
+  const [showReceipt, setShowReceipt] = useState(false)
 
   // Product search
   const [productQuery, setProductQuery] = useState('')
@@ -205,12 +218,54 @@ export default function NewOrderForm({ storeId, currencyCode }: Props) {
 
       const data = await res.json()
       if (!res.ok) { setError(data.error ?? 'حدث خطأ'); return }
-      router.push(`/dashboard/orders/${data.orderId}`)
+
+      // إعداد بيانات الإيصال الفوري لنقطة البيع
+      const receipt: ReceiptData = {
+        orderId: data.orderId,
+        orderNumber: data.orderNumber || `ORD-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        customerName: mode === 'pos' ? (posName.trim() || 'زبون نقدي') : (selectedCustomer?.name || 'عميل على الحساب'),
+        customerPhone: mode === 'pos' ? posPhone : selectedCustomer?.phone,
+        items: items.map(i => ({
+          name: i.name,
+          quantity: i.quantity,
+          unitPrice: i.unitPrice,
+          totalPrice: i.unitPrice * i.quantity,
+        })),
+        subtotal,
+        totalAmount,
+        amountPaid: effectiveAmountPaid,
+        paymentMethod,
+        paymentStatus: effectiveAmountPaid >= totalAmount ? 'paid' : effectiveAmountPaid > 0 ? 'partial' : 'unpaid',
+        storeName: storeInfo?.name || 'Bazarko Store',
+        storePhone: storeInfo?.phone,
+        storeAddress: storeInfo?.address,
+        taxNumber: storeInfo?.taxNumber,
+        currencyCode,
+        receiptFooter: storeInfo?.receiptFooter,
+        customerBalance: mode === 'account' && selectedCustomer ? selectedCustomer.balance + amountRemaining : null,
+      }
+
+      setReceiptData(receipt)
+      setShowReceipt(true)
     } catch {
       setError('حدث خطأ في الاتصال')
     } finally {
       setSubmitting(false)
     }
+  }
+
+  function handleNewSale() {
+    setItems([])
+    setPosName('')
+    setPosPhone('')
+    setPosEmail('')
+    setAmountPaid('')
+    setNotes('')
+    setSelectedCustomer(null)
+    setReceiptData(null)
+    setShowReceipt(false)
+    setError('')
   }
 
   return (
@@ -557,6 +612,18 @@ export default function NewOrderForm({ storeId, currencyCode }: Props) {
           </div>
         </div>
       </div>
+
+      {receiptData && (
+        <PosReceiptModal
+          receipt={receiptData}
+          isOpen={showReceipt}
+          onClose={() => {
+            setShowReceipt(false)
+            router.push(`/dashboard/orders/${receiptData.orderId}`)
+          }}
+          onNewSale={handleNewSale}
+        />
+      )}
     </form>
   )
 }

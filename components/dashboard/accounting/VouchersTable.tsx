@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { recordAuditEvent } from '@/app/dashboard/accounting/audit-actions'
@@ -87,6 +87,19 @@ export default function VouchersTable({ vouchers, type, storeId, userId, currenc
   const [saving, setSaving]                 = useState(false)
   const [error, setError]                   = useState('')
 
+  // حسابات البنوك الخاصة بالشركة
+  const [bankAccounts, setBankAccounts]     = useState<Array<{ id: string; bank_name: string; account_number: string; currency: string }>>([])
+  const [selectedBankId, setSelectedBankId] = useState('')
+
+  useEffect(() => {
+    supabase
+      .from('bank_accounts')
+      .select('id, bank_name, account_number, currency')
+      .eq('store_id', storeId)
+      .eq('is_active', true)
+      .then(({ data }) => setBankAccounts(data || []))
+  }, [storeId])
+
   const categories  = type === 'receipt' ? RECEIPT_CATEGORIES : PAYMENT_CATEGORIES
   const fmt         = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })
   const totalAmount = vouchers.reduce((s, v) => s + v.amount, 0)
@@ -105,6 +118,7 @@ export default function VouchersTable({ vouchers, type, storeId, userId, currenc
     setPaymentMethod('cash'); setCategory('')
     setDescription(''); setReference('')
     setSelectedCustomer(''); setPartyName('')
+    setSelectedBankId('')
     setError('')
   }
 
@@ -138,11 +152,21 @@ export default function VouchersTable({ vouchers, type, storeId, userId, currenc
       category:       category || null,
       description:    description.trim(),
       reference:      reference.trim() || null,
+      bank_account_id: (paymentMethod === 'bank' || paymentMethod === 'transfer') && selectedBankId ? selectedBankId : null,
       created_by:     userId,
     })
 
     setSaving(false)
     if (err) { setError('حدث خطأ أثناء الحفظ'); return }
+
+    // تحديث رصيد الحساب البنكي إن وجد
+    if ((paymentMethod === 'bank' || paymentMethod === 'transfer') && selectedBankId) {
+      const { data: bAcc } = await supabase.from('bank_accounts').select('balance').eq('id', selectedBankId).single()
+      if (bAcc) {
+        const newBal = isReceipt ? Number(bAcc.balance || 0) + amt : Number(bAcc.balance || 0) - amt
+        await supabase.from('bank_accounts').update({ balance: newBal, updated_at: new Date().toISOString() }).eq('id', selectedBankId)
+      }
+    }
 
     await recordAuditEvent({
       entityType: 'voucher', entityLabel: voucherNumber,
@@ -447,6 +471,30 @@ export default function VouchersTable({ vouchers, type, storeId, userId, currenc
                   </select>
                 </div>
               </div>
+
+              {/* اختيار الحساب البنكي للشركة عند التحويل البنكي */}
+              {(paymentMethod === 'bank' || paymentMethod === 'transfer') && (
+                <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3">
+                  <label className="mb-1.5 block text-xs font-semibold text-sky-400">
+                    حساب بنك الشركة {isReceipt ? '(المودع فيه)' : '(المسحوب منه)'} *
+                  </label>
+                  <select
+                    value={selectedBankId}
+                    onChange={e => setSelectedBankId(e.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-slate-800 px-3 py-2 text-sm text-white outline-none focus:border-sky-500/50"
+                  >
+                    <option value="">-- اختر حساب الشركة البنكي --</option>
+                    {bankAccounts.map(b => (
+                      <option key={b.id} value={b.id}>
+                        {b.bank_name} - {b.account_number} ({b.currency})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    يتم تحديث رصيد الحساب البنكي وتسجيل الحركة مباشرة في كشف حساب البنك.
+                  </p>
+                </div>
+              )}
 
               {/* رقم مرجعي */}
               <div>
