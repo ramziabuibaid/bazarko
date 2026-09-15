@@ -67,7 +67,7 @@ export default function DashboardShell({
               <line x1="3" y1="15" x2="17" y2="15" />
             </svg>
           </button>
-          <DashboardTopbar storeId={store.id} notifications={notifications} />
+          <DashboardTopbar storeId={store.id} plan={store.plan} notifications={notifications} />
         </header>
 
         <main className="flex-1 overflow-y-auto pb-16 lg:pb-0">

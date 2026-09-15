@@ -3,7 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
-import { tafqeet } from '@/lib/tafqeet'
+import { tafqeetCheque } from '@/lib/tafqeet'
 
 export const metadata = {
   title: 'طباعة فاتورة مشتريات — Bazarko ERP',
@@ -24,7 +24,7 @@ export default async function PrintPurchasePage({ params }: { params: { id: stri
     supabase.from('stores').select('*').eq('id', storeId).single(),
     supabase
       .from('purchase_invoices')
-      .select('*, supplier:suppliers(id, name, phone, address), items:purchase_items(*)')
+      .select('*, supplier:suppliers(id, name, phone, address, tax_number), items:purchase_items(*)')
       .eq('id', params.id)
       .eq('store_id', storeId)
       .single()
@@ -32,106 +32,172 @@ export default async function PrintPurchasePage({ params }: { params: { id: stri
 
   if (!store || !purchase) notFound()
 
+  const currency = store.currency_code || 'ILS'
+  const currencySymbol = currency === 'ILS' ? '₪' : currency === 'USD' ? '$' : currency === 'JOD' ? 'د.أ' : currency
+  const tafqeetText = tafqeetCheque(Number(purchase.total_amount), currency)
+
+  const subtotal = (purchase.items || []).reduce((acc: number, item: any) => acc + Number(item.total_price || (item.quantity * item.unit_price)), 0)
+  const discount = Number(purchase.discount_amount || 0)
+  const total = Number(purchase.total_amount || (subtotal - discount))
+
   return (
-    <div className="min-h-screen bg-slate-100 p-4 sm:p-8 text-slate-900 font-sans print:p-0 print:bg-white">
-      {/* ── Toolbar ── */}
+    <div className="min-h-screen bg-slate-100 p-4 sm:p-8 text-slate-900 font-sans print:p-0 print:bg-white" dir="rtl">
+      {/* ── Top Toolbar ── */}
       <div className="mx-auto mb-6 flex max-w-4xl items-center justify-between rounded-xl bg-slate-900 p-4 text-white shadow-lg print:hidden">
         <Link
           href="/dashboard/purchases"
           className="text-xs font-bold text-slate-300 hover:text-white transition"
         >
-          ← العودة للمشتريات
+          ← العودة لفواتير المشتريات
         </Link>
-        <PrintButton label="🖨️ طباعة الفاتورة (PDF)" className="rounded-lg bg-sky-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-sky-400 transition" />
+        <PrintButton label="🖨️ طباعة الفاتورة (Print / PDF)" className="rounded-lg bg-sky-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-sky-400 transition" />
       </div>
 
-      {/* ── Paper Document ── */}
-      <div className="mx-auto max-w-4xl rounded-xl border border-slate-300 bg-white p-8 shadow-sm print:border-none print:shadow-none print:p-4">
+      {/* ── Official Paper Canvas ── */}
+      <div className="mx-auto max-w-4xl rounded-2xl border border-slate-300 bg-white p-8 shadow-sm print:border-none print:shadow-none print:p-4">
         {/* Header */}
-        <div className="flex items-start justify-between border-b-2 border-slate-900 pb-4">
+        <div className="flex items-start justify-between border-b-2 border-slate-900 pb-5">
           <div>
-            <h1 className="text-2xl font-black text-slate-900">{store.name}</h1>
+            <h1 className="text-2xl font-black text-slate-950">{store.name}</h1>
             <p className="text-xs text-slate-600 mt-0.5">{store.address || 'فلسطين'}</p>
             {store.phone && <p className="text-xs text-slate-600">هاتف: {store.phone}</p>}
-            {store.tax_number && <p className="text-xs text-slate-600">الرقم الضريبي: {store.tax_number}</p>}
+            {store.tax_number && <p className="text-xs text-slate-600">الرقم الضريبي / المشتغل: {store.tax_number}</p>}
+            {store.email && <p className="text-xs text-slate-600">بريد: {store.email}</p>}
           </div>
 
           <div className="text-center">
-            <h2 className="text-lg font-black text-slate-900 border-2 border-slate-900 px-6 py-1 rounded-lg inline-block bg-slate-50">
+            <h2 className="text-xl font-black text-slate-900 border-2 border-slate-900 px-6 py-1.5 rounded-xl inline-block bg-slate-50 shadow-sm">
               فاتورة مشتريات وتوريد
             </h2>
-            <p className="mt-1 font-mono text-sm font-bold text-slate-700">#{purchase.invoice_number}</p>
+            <p className="mt-1 font-mono text-sm font-bold text-sky-900" dir="ltr">
+              No: {purchase.invoice_number}
+            </p>
           </div>
 
-          <div className="text-left font-mono text-xs">
-            <p><span className="text-slate-500">التاريخ:</span> <span className="font-bold">{new Date(purchase.invoice_date).toLocaleDateString('en-GB')}</span></p>
+          <div className="text-left text-xs space-y-1 font-mono">
+            <div>تاريخ الفاتورة: <strong className="text-slate-900">{new Date(purchase.invoice_date).toLocaleDateString('en-GB')}</strong></div>
             {purchase.supplier_invoice_number && (
-              <p className="mt-1"><span className="text-slate-500">فاتورة المورد:</span> #{purchase.supplier_invoice_number}</p>
+              <div>رقم فاتورة المورد: <strong className="text-slate-900">#{purchase.supplier_invoice_number}</strong></div>
             )}
-            <p className="mt-1"><span className="text-slate-500">طريقة الدفع:</span> {purchase.payment_method}</p>
+            <div>طريقة الدفع: <strong className="text-slate-900">{
+              purchase.payment_method === 'cash' ? 'نقداً (Cash)' :
+              purchase.payment_method === 'credit' ? 'على الحساب (Credit)' :
+              purchase.payment_method === 'check' ? 'شيك بنكي' : (purchase.payment_method || 'نقداً')
+            }</strong></div>
+            <div>حالة السداد: <strong className={purchase.status === 'paid' ? 'text-emerald-700' : 'text-slate-900'}>{
+              purchase.status === 'paid' ? 'مدفوعة بالكامل' :
+              purchase.status === 'partial' ? 'مدفوعة جزئياً' : 'آجلة / غير مدفوعة'
+            }</strong></div>
           </div>
         </div>
 
-        {/* Supplier Info */}
-        <div className="my-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
-          <p><span className="text-slate-500">اسم المورد:</span> <span className="font-bold text-slate-900 text-sm">{purchase.supplier?.name || 'مورد عام / نقدي'}</span></p>
-          {purchase.supplier?.phone && <p className="mt-1"><span className="text-slate-500">الهاتف:</span> {purchase.supplier.phone}</p>}
-          {purchase.notes && <p className="mt-1"><span className="text-slate-500">ملاحظات:</span> {purchase.notes}</p>}
+        {/* Supplier Information Box */}
+        <div className="my-5 grid grid-cols-2 sm:grid-cols-3 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs">
+          <div>
+            <span className="text-slate-500 block mb-0.5">اسم المورد / المنشأة الموردة:</span>
+            <strong className="text-slate-900 text-sm">{purchase.supplier?.name || 'مورد عام / نقدي'}</strong>
+          </div>
+          <div>
+            <span className="text-slate-500 block mb-0.5">رقم الهاتف:</span>
+            <strong className="font-mono text-slate-900" dir="ltr">{purchase.supplier?.phone || '—'}</strong>
+          </div>
+          <div>
+            <span className="text-slate-500 block mb-0.5">العنوان / الرقم الضريبي:</span>
+            <span className="text-slate-800">{purchase.supplier?.address || purchase.supplier?.tax_number || '—'}</span>
+          </div>
         </div>
 
         {/* Items Table */}
         <table className="w-full text-right text-xs border border-slate-200">
           <thead>
-            <tr className="bg-slate-100 text-slate-800 border-b font-bold">
-              <th className="p-2.5 w-12 text-center">#</th>
-              <th className="p-2.5">اسم الصنف المشترى</th>
-              <th className="p-2.5 w-24 text-center">الكمية</th>
-              <th className="p-2.5 w-28 text-left">سعر التكلفة</th>
-              <th className="p-2.5 w-32 text-left">الإجمالي</th>
+            <tr className="bg-slate-900 text-white border-b">
+              <th className="p-2.5 text-center w-10">#</th>
+              <th className="p-2.5">اسم الصنف المشترى والمواصفات</th>
+              <th className="p-2.5 text-center">الكمية</th>
+              <th className="p-2.5 text-left">سعر التكلفة</th>
+              <th className="p-2.5 text-left">الإجمالي</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 text-slate-800">
             {(purchase.items || []).map((item: any, idx: number) => (
-              <tr key={item.id}>
+              <tr key={item.id} className="hover:bg-slate-50">
                 <td className="p-2.5 text-center font-mono text-slate-500">{idx + 1}</td>
-                <td className="p-2.5 font-semibold text-slate-900">{item.product_name}</td>
-                <td className="p-2.5 text-center font-mono font-bold">{Number(item.quantity).toLocaleString('en-GB')}</td>
-                <td className="p-2.5 text-left font-mono">{Number(item.unit_price).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪</td>
-                <td className="p-2.5 text-left font-mono font-bold text-slate-900">
-                  {Number(item.total_price).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪
+                <td className="p-2.5 font-bold text-slate-950">{item.product_name}</td>
+                <td className="p-2.5 text-center font-mono font-bold text-slate-900" dir="ltr">{Number(item.quantity).toLocaleString('en-GB')}</td>
+                <td className="p-2.5 text-left font-mono text-slate-900" dir="ltr">
+                  {Number(item.unit_price).toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currencySymbol}
+                </td>
+                <td className="p-2.5 text-left font-mono font-bold text-slate-950" dir="ltr">
+                  {Number(item.total_price || (item.quantity * item.unit_price)).toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currencySymbol}
                 </td>
               </tr>
             ))}
           </tbody>
-          <tfoot>
-            <tr className="bg-slate-50 border-t-2 border-slate-900 font-bold text-xs">
-              <td colSpan={4} className="p-3 text-right">الإجمالي الكلي للمشتريات:</td>
-              <td className="p-3 text-left font-mono text-sm font-black text-slate-900">
-                {Number(purchase.total_amount).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪
-              </td>
-            </tr>
-          </tfoot>
         </table>
 
-        {/* Tafqeet in Arabic */}
-        <div className="mt-4 rounded-lg bg-slate-50 p-3 text-xs font-bold text-slate-800 border">
-          فقط {tafqeet(Number(purchase.total_amount), 'ILS')} لا غير.
+        {/* Totals and Tafqeet */}
+        <div className="mt-4 flex flex-col sm:flex-row justify-between items-start gap-4">
+          <div className="flex-1 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs space-y-2 w-full sm:w-auto">
+            <span className="font-bold text-slate-900 block">المبلغ الإجمالي كتابة بالحروف:</span>
+            <p className="font-bold text-slate-800 leading-relaxed text-sm">{tafqeetText}</p>
+            {purchase.notes && (
+              <div className="pt-2 border-t border-slate-200 text-slate-600">
+                <span className="font-semibold text-slate-700">ملاحظات التوريد والاستلام:</span> {purchase.notes}
+              </div>
+            )}
+          </div>
+
+          <div className="w-full sm:w-72 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs space-y-2">
+            <div className="flex justify-between text-slate-600">
+              <span>المجموع الفرعي:</span>
+              <span className="font-mono font-bold text-slate-900" dir="ltr">
+                {subtotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currencySymbol}
+              </span>
+            </div>
+            {discount > 0 && (
+              <div className="flex justify-between text-rose-600">
+                <span>الخصم الممنوح:</span>
+                <span className="font-mono font-bold" dir="ltr">
+                  - {discount.toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currencySymbol}
+                </span>
+              </div>
+            )}
+            <div className="flex justify-between border-t-2 border-slate-300 pt-2 text-sm font-black text-slate-950">
+              <span>صافي فاتورة المشتريات:</span>
+              <span className="font-mono text-base text-sky-900" dir="ltr">
+                {total.toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currencySymbol}
+              </span>
+            </div>
+            {Number(purchase.paid_amount) > 0 && (
+              <div className="flex justify-between text-emerald-700 pt-1 border-t border-slate-200">
+                <span>المدفوع للمورد:</span>
+                <span className="font-mono font-bold" dir="ltr">
+                  {Number(purchase.paid_amount).toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currencySymbol}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Signatures */}
-        <div className="mt-14 grid grid-cols-3 gap-6 border-t-2 border-slate-900 pt-6 text-center text-xs font-bold text-slate-800">
+        <div className="mt-14 pt-6 border-t-2 border-slate-900 grid grid-cols-3 gap-6 text-center text-xs font-bold text-slate-800">
           <div>
-            <p className="text-slate-500 mb-8">المستلم / أمين المستودع</p>
-            <p className="border-t border-dotted border-slate-400 pt-1">التوقيع</p>
+            <p className="text-slate-500 mb-10">أمين المشتريات / منظم الفاتورة</p>
+            <p className="border-t border-dashed border-slate-400 pt-1">التوقيع</p>
           </div>
           <div>
-            <p className="text-slate-500 mb-8">المحاسب المالي</p>
-            <p className="border-t border-dotted border-slate-400 pt-1">التوقيع</p>
+            <p className="text-slate-500 mb-10">أمين المستودع (تم فحص واستلام البضاعة)</p>
+            <p className="border-t border-dashed border-slate-400 pt-1">التوقيع</p>
           </div>
           <div>
-            <p className="text-slate-500 mb-8">المدير العام / الاعتماد</p>
-            <p className="border-t border-dotted border-slate-400 pt-1">الختم والتوقيع</p>
+            <p className="text-slate-500 mb-10">الاعتماد المالي والإداري</p>
+            <p className="border-t border-dashed border-slate-400 pt-1">الختم والتوقيع</p>
           </div>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-8 text-center text-[10px] text-slate-400 border-t border-slate-100 pt-3">
+          شكراً لتعاملكم معنا • نظام بازاركو لإدارة الأعمال والتجارة
         </div>
       </div>
     </div>

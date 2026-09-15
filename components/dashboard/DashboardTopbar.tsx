@@ -22,9 +22,11 @@ interface SearchResult {
 
 export default function DashboardTopbar({
   storeId,
+  plan = 'free',
   notifications,
 }: {
   storeId: string
+  plan?: string
   notifications: DashNotification[]
 }) {
   const router = useRouter()
@@ -126,6 +128,18 @@ export default function DashboardTopbar({
           </div>
         )}
       </div>
+
+      {/* زر الترقية إلى النسخة الكاملة في أعلى الشاشة */}
+      {plan !== 'pro' && plan !== 'basic' && (
+        <Link
+          href="/dashboard/upgrade"
+          className="hidden sm:flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-gradient-to-r from-amber-500/20 via-orange-500/15 to-amber-500/10 px-3.5 py-1.5 text-xs font-bold text-amber-300 shadow-sm transition hover:border-amber-400 hover:bg-amber-500/30 hover:scale-[1.02]"
+        >
+          <span>👑</span>
+          <span>الترقية للنسخة الكاملة</span>
+          <span className="rounded-md bg-amber-500/25 px-1 py-0.2 text-[10px] font-black text-amber-200">⚡</span>
+        </Link>
+      )}
 
       {/* جرس الإشعارات */}
       <div ref={bellRef} className="relative">

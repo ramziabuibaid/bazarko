@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
 import AdStudioClient from '@/components/dashboard/marketing/AdStudioClient'
+import FeatureGate from '@/components/dashboard/FeatureGate'
 
 export const metadata = {
   title: 'استوديو الإعلانات وواتساب — Bazarko ERP',
@@ -23,7 +24,7 @@ export default async function MarketingAdsPage() {
   ] = await Promise.all([
     supabase
       .from('stores')
-      .select('id, name, subdomain, country_code, currency_code')
+      .select('id, name, subdomain, country_code, currency_code, plan')
       .eq('id', storeId)
       .single(),
     supabase
@@ -48,11 +49,18 @@ export default async function MarketingAdsPage() {
   ])
 
   return (
-    <AdStudioClient
-      store={store!}
-      products={products || []}
-      customers={customers || []}
-      initialCampaigns={campaigns || []}
-    />
+    <FeatureGate
+      plan={store?.plan}
+      featureName="استوديو إعلانات وحملات WhatsApp"
+      featureDescription="توليد بطاقات عروض ترويجية تفاعلية، بوسترات المنتجات، ورسائل واتساب مخصصة للعملاء بنقرة واحدة."
+      icon="📢"
+    >
+      <AdStudioClient
+        store={store!}
+        products={products || []}
+        customers={customers || []}
+        initialCampaigns={campaigns || []}
+      />
+    </FeatureGate>
   )
 }

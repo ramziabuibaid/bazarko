@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
+import FeatureGate from '@/components/dashboard/FeatureGate'
 
 export const metadata = {
   title: 'عروض الأسعار — Bazarko ERP',
@@ -19,7 +20,7 @@ export default async function QuotationsPage() {
     { data: store },
     { data: quotations }
   ] = await Promise.all([
-    supabase.from('stores').select('id, name, currency_code').eq('id', storeId).single(),
+    supabase.from('stores').select('id, name, currency_code, plan').eq('id', storeId).single(),
     supabase
       .from('quotations')
       .select('*, customer:customers(id, name, phone), items:quotation_items(*)')
@@ -39,6 +40,12 @@ export default async function QuotationsPage() {
   }
 
   return (
+    <FeatureGate
+      plan={store?.plan}
+      featureName="عروض الأسعار الرسمية (Quotations)"
+      featureDescription="إصدار عروض أسعار بتصاميم رسمية موحدة للشركات، تحديد مدد الصلاحية والشروط، والتحويل إلى فواتير مبيعات بنقرة واحدة."
+      icon="📑"
+    >
     <div className="space-y-6">
       {/* ── Header ── */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -133,5 +140,6 @@ export default async function QuotationsPage() {
         </div>
       </div>
     </div>
+    </FeatureGate>
   )
 }

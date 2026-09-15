@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import BazarkoLogo from '@/components/ui/BazarkoLogo'
+import { isRouteAllowed } from '@/lib/plans'
 
 interface Store {
   id: string
@@ -178,6 +179,21 @@ function NavContent({
               )}
             </button>
           </div>
+
+          {/* زر الترقية للنسخة الكاملة في السايدبار */}
+          {store.plan !== 'pro' && store.plan !== 'basic' && (
+            <Link
+              href="/dashboard/upgrade"
+              onClick={onNavClick}
+              className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-amber-500/40 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/5 px-3 py-2 text-xs font-bold text-amber-300 shadow-sm transition hover:border-amber-400 hover:bg-amber-500/25"
+            >
+              <div className="flex items-center gap-1.5">
+                <span>👑</span>
+                <span>الترقية للنسخة الكاملة</span>
+              </div>
+              <span className="rounded-md bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-black text-amber-300">⚡ ترقية</span>
+            </Link>
+          )}
         </div>
 
         {/* زر الإغلاق على الموبايل */}
@@ -220,22 +236,30 @@ function NavContent({
               </p>
             )}
             <ul className="space-y-0.5">
-              {group.items.map(item => (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    onClick={onNavClick}
-                    className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
-                      isActive(item.href)
-                        ? 'bg-sky-500/15 text-sky-400'
-                        : 'text-slate-400 hover:bg-white/5 hover:text-white'
-                    }`}
-                  >
-                    <span className="text-base leading-none">{item.icon}</span>
-                    {item.label}
-                  </Link>
-                </li>
-              ))}
+              {group.items.map(item => {
+                const isAllowed = isRouteAllowed(item.href, store.plan)
+                return (
+                  <li key={item.href}>
+                    <Link
+                      href={item.href}
+                      onClick={onNavClick}
+                      className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
+                        isActive(item.href)
+                          ? 'bg-sky-500/15 text-sky-400'
+                          : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-base leading-none">{item.icon}</span>
+                        <span>{item.label}</span>
+                      </div>
+                      {!isAllowed && (
+                        <span className="text-xs text-amber-400/90" title="ميزة متوفرة في النسخة الكاملة">🔒</span>
+                      )}
+                    </Link>
+                  </li>
+                )
+              })}
             </ul>
           </div>
         ))}
@@ -243,6 +267,15 @@ function NavContent({
 
       {/* أسفل السايدبار */}
       <div className="border-t border-white/5 px-3 py-3 space-y-0.5">
+        {store.plan !== 'pro' && store.plan !== 'basic' && (
+          <Link
+            href="/dashboard/upgrade"
+            onClick={onNavClick}
+            className="flex items-center gap-3 rounded-xl px-3 py-2 text-xs font-bold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 transition-colors mb-1"
+          >
+            <span>👑</span> الوصول إلى النسخة الكاملة
+          </Link>
+        )}
         <Link
           href="/dashboard/settings"
           onClick={onNavClick}

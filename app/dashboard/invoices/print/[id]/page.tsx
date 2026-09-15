@@ -53,11 +53,14 @@ export default async function PrintInvoicePage({ params }: { params: { id: strin
             <h1 className="text-2xl font-black text-slate-950">{store.name}</h1>
             <p className="text-xs text-slate-600 mt-0.5">{store.address || 'فلسطين'}</p>
             {store.phone && <p className="text-xs text-slate-600">هاتف: {store.phone}</p>}
+            {store.tax_number && <p className="text-xs text-slate-600">الرقم الضريبي / المشتغل: {store.tax_number}</p>}
           </div>
 
           <div className="text-center">
-            <h2 className="text-xl font-black text-slate-900 border-2 border-slate-900 px-6 py-1.5 rounded-xl inline-block bg-slate-50">
-              فاتورة مبيعات ضريبية
+            <h2 className="text-xl font-black text-slate-900 border-2 border-slate-900 px-6 py-1.5 rounded-xl inline-block bg-slate-50 shadow-sm">
+              {invoice.status === 'paid' || invoice.payment_method === 'cash'
+                ? 'فاتورة مبيعات نقدية (Cash Invoice)'
+                : 'فاتورة مبيعات آجلة (Credit Invoice)'}
             </h2>
             <p className="mt-1 font-mono text-sm font-bold text-sky-900" dir="ltr">
               No: {invoice.invoice_number}
@@ -69,7 +72,17 @@ export default async function PrintInvoicePage({ params }: { params: { id: strin
             {invoice.due_date && (
               <div>تاريخ الاستحقاق: <strong className="text-slate-900">{new Date(invoice.due_date).toLocaleDateString('en-GB')}</strong></div>
             )}
-            <div>الحالة: <strong className="text-slate-900">{invoice.status === 'paid' ? 'مدفوعة بالكامل' : invoice.status === 'partial' ? 'مدفوعة جزئياً' : 'آجلة / مستحقة'}</strong></div>
+            <div>طريقة الدفع: <strong className="text-slate-900">{
+              invoice.payment_method === 'cash' ? 'نقداً (Cash)' :
+              invoice.payment_method === 'credit' ? 'على الحساب (Credit)' :
+              invoice.payment_method === 'check' ? 'شيك بنكي' :
+              invoice.payment_method === 'card' ? 'بطاقة ائتمان' : (invoice.payment_method || 'نقداً')
+            }</strong></div>
+            <div>حالة السداد: <strong className={invoice.status === 'paid' ? 'text-emerald-700' : invoice.status === 'partial' ? 'text-amber-700' : 'text-rose-700'}>{
+              invoice.status === 'paid' ? 'مدفوعة بالكامل (Paid)' :
+              invoice.status === 'partial' ? 'مدفوعة جزئياً (Partial)' :
+              'آجلة / غير مدفوعة (Unpaid)'
+            }</strong></div>
           </div>
         </div>
 
