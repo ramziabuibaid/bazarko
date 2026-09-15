@@ -473,11 +473,11 @@ export default function LoginPage() {
 
               <div>
                 <label className="mb-1.5 block text-center text-xs font-semibold text-slate-300">
-                  رمز التحقق (OTP مكون من 6 أرقام) *
+                  رمز التحقق (OTP) *
                 </label>
                 <input
                   type="text"
-                  maxLength={6}
+                  maxLength={10}
                   autoFocus
                   required
                   dir="ltr"
@@ -488,7 +488,7 @@ export default function LoginPage() {
                     setError('')
                   }}
                   placeholder="000000"
-                  className="w-full rounded-xl border-2 border-sky-500/40 bg-slate-800 py-3 text-center text-2xl font-bold tracking-[10px] text-white outline-none focus:border-sky-400 font-mono shadow-inner"
+                  className="w-full rounded-xl border-2 border-sky-500/40 bg-slate-800 py-3 text-center text-2xl font-bold tracking-[8px] text-white outline-none focus:border-sky-400 font-mono shadow-inner"
                 />
               </div>
 
@@ -577,11 +577,11 @@ export default function LoginPage() {
 
               <div>
                 <label className="mb-1 block text-center text-xs font-semibold text-slate-300">
-                  رمز التحقق (6 أرقام) *
+                  رمز التحقق المستلم (OTP) *
                 </label>
                 <input
                   type="text"
-                  maxLength={6}
+                  maxLength={10}
                   required
                   dir="ltr"
                   value={otpCode}
@@ -590,8 +590,8 @@ export default function LoginPage() {
                     setOtpCode(val)
                     setError('')
                   }}
-                  placeholder="000000"
-                  className="w-full rounded-xl border-2 border-sky-500/40 bg-slate-800 py-2 text-center text-xl font-bold tracking-[8px] text-white outline-none focus:border-sky-400 font-mono shadow-inner"
+                  placeholder="أدخل الرمز كاملاً"
+                  className="w-full rounded-xl border-2 border-sky-500/40 bg-slate-800 py-2 text-center text-xl font-bold tracking-[6px] text-white outline-none focus:border-sky-400 font-mono shadow-inner"
                 />
               </div>
 
