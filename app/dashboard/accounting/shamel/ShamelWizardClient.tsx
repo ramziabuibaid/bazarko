@@ -1309,7 +1309,7 @@ export default function ShamelWizardClient({
                           <td className="py-3 px-3.5 text-xs">
                             <div className="font-bold text-slate-200">{getBankName(chq.bank_code)}</div>
                             <div className="text-slate-400 font-mono text-[11px] mt-0.5" dir="ltr">
-                              فرع {chq.branch_code || '—'} · حساب {chq.account_no || '—'}
+                              فرع {chq.branch_code || '—'} · حساب {chq.account_number || chq.account_no || '—'}
                             </div>
                           </td>
                           <td className="py-3 px-3.5 text-center">
@@ -1330,28 +1330,25 @@ export default function ShamelWizardClient({
                                 ⚠️ معاد / راجع
                               </span>
                             ) : (
-                              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 border border-white/5">
-                                {chq.status_name || chq.status || 'غير محدد'}
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400 border border-white/10">
+                                {chq.status_name || 'أخرى'}
                               </span>
                             )}
                           </td>
-                          <td className="py-3 px-3.5 min-w-56">
+                          <td className="py-3 px-3.5">
                             {chq.status_name === 'مجيّر' || chq.status === 'endorsed' ? (
-                              <div className="p-2.5 rounded-xl bg-purple-950/40 border border-purple-900/60 shadow-xs">
-                                <div className="text-xs font-bold text-purple-200 flex items-center gap-1.5">
-                                  <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
-                                  <span>مجيّر لصالح:</span>
-                                  <span className="text-xs font-black text-white">
-                                    {cleanTargetName || chq.target_account || '—'}
-                                  </span>
+                              <div className="p-2 rounded-xl bg-purple-950/30 border border-purple-900/40 text-xs">
+                                <div className="font-bold text-purple-300 flex items-center gap-1">
+                                  <span>🔄</span>
+                                  <span>{cleanTargetName || 'طرف ثالث'}</span>
                                 </div>
                                 {chq.target_account && (
-                                  <div className="text-[11px] text-purple-300 font-mono mt-1 flex items-center gap-2">
+                                  <div className="text-[11px] text-slate-400 font-mono mt-0.5 flex items-center justify-between">
                                     <span>كود: {chq.target_account}</span>
                                     {chq.target_account.startsWith('C') && (
                                       <button
                                         onClick={() => setStatementCustomer({ code: chq.target_account, name: cleanTargetName })}
-                                        className="underline hover:text-white font-sans text-sky-400 font-bold"
+                                        className="text-[10px] text-sky-400 hover:underline"
                                       >
                                         (عرض كشفه)
                                       </button>
@@ -1359,14 +1356,9 @@ export default function ShamelWizardClient({
                                   </div>
                                 )}
                               </div>
-                            ) : chq.status_name === 'في الصندوق' || chq.status === 'in_safe' || chq.status === 'in_portfolio' ? (
-                              <div className="text-xs text-sky-300 font-bold flex items-center gap-1.5 p-2 rounded-xl bg-sky-950/30 border border-sky-900/40">
-                                <span>📦</span>
-                                <span>موجود في حافظة الشيكات</span>
-                              </div>
                             ) : chq.status_name === 'محصل في البنك' || chq.status === 'collected' ? (
-                              <div className="text-xs text-emerald-300 p-2 rounded-xl bg-emerald-950/30 border border-emerald-900/40">
-                                <div className="font-bold flex items-center gap-1.5">
+                              <div className="p-2 rounded-xl bg-emerald-950/30 border border-emerald-900/40 text-xs">
+                                <div className="font-bold text-emerald-300 flex items-center gap-1">
                                   <span>🏦</span>
                                   <span>{cleanTargetName || 'الحساب الجاري بالبنك'}</span>
                                 </div>
@@ -1400,9 +1392,10 @@ export default function ShamelWizardClient({
                           <td className="py-3 px-3.5 text-center">
                             <div className="flex items-center justify-center gap-1.5">
                               <button
-                                disabled={!chq.customer_code}
+                                disabled={!chq.customer_code || !chq.customer_code.startsWith('C')}
                                 onClick={() => setStatementCustomer({ code: chq.customer_code, name: chq.customer_name || chq.drawer_name })}
                                 className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 transition disabled:opacity-30 flex items-center gap-1"
+                                title={!chq.customer_code?.startsWith('C') ? 'غير مرتبط بحساب زبون' : 'عرض كشف حساب الزبون'}
                               >
                                 <span>كشف الزبون</span>
                                 <span>←</span>

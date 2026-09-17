@@ -42,6 +42,9 @@ export async function GET(req: NextRequest) {
       })
 
       if (error) throw error
+      if (data && (data as any).error) {
+        return NextResponse.json({ error: (data as any).message || 'الزبون غير مسجل في مستودع الشامل' }, { status: 404 })
+      }
       return NextResponse.json(data)
     }
 

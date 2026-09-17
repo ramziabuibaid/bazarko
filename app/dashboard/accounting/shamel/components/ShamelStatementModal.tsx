@@ -164,6 +164,7 @@ export default function ShamelStatementModal({
       .then(async res => {
         const body = await res.json()
         if (!res.ok) throw new Error(body.error || body.message || 'فشل جلب كشف الحساب')
+        if (body.error) throw new Error(body.message || body.error)
         return body as StatementData
       })
       .then(stmt => {
@@ -171,6 +172,7 @@ export default function ShamelStatementModal({
       })
       .catch(err => {
         console.error('Statement error:', err)
+        setData(null)
         setError(err.message || 'تعذر تحميل كشف الحساب')
       })
       .finally(() => setLoading(false))
@@ -305,7 +307,7 @@ export default function ShamelStatementModal({
         <html lang="ar" dir="rtl">
         <head>
           <meta charset="utf-8">
-          <title>كشف حساب — ${escapeHtml(data.customer.name)} (${escapeHtml(data.customer.code)})</title>
+          <title>كشف حساب — ${escapeHtml(data?.customer?.name || customerName || customerCode)} (${escapeHtml(data?.customer?.code || customerCode)})</title>
           <style>
             body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #0f172a; padding: 24px; direction: rtl; }
             h1 { font-size: 20px; margin: 0 0 6px 0; color: #1e1b4b; }
@@ -325,10 +327,10 @@ export default function ShamelStatementModal({
           <div class="header-box">
             <h1>${escapeHtml(storeName)} — كشف حساب الزبون (الشامل المحاسبي) ${detailed ? '— تفصيلي' : ''}</h1>
             <div class="meta-grid">
-              <div><b>الزبون:</b> ${escapeHtml(data.customer.name)}</div>
-              <div><b>الكود:</b> <span style="font-family:monospace;">${escapeHtml(data.customer.code)}</span></div>
-              <div><b>الهاتف:</b> ${escapeHtml(data.customer.phone || '—')}</div>
-              <div><b>العنوان:</b> ${escapeHtml(data.customer.address || '—')}</div>
+              <div><b>الزبون:</b> ${escapeHtml(data?.customer?.name || customerName || customerCode)}</div>
+              <div><b>الكود:</b> <span style="font-family:monospace;">${escapeHtml(data?.customer?.code || customerCode)}</span></div>
+              <div><b>الهاتف:</b> ${escapeHtml(data?.customer?.phone || '—')}</div>
+              <div><b>العنوان:</b> ${escapeHtml(data?.customer?.address || '—')}</div>
               <div><b>الفترة:</b> ${escapeHtml(from || 'من البداية')} إلى ${escapeHtml(to || 'الآن')}</div>
               <div><b>العملة:</b> ${escapeHtml(currency)}</div>
               <div><b>تاريخ الطباعة:</b> ${new Date().toLocaleDateString('ar-u-nu-latn')}</div>
@@ -390,7 +392,7 @@ export default function ShamelStatementModal({
             </table>
           ` : `
             <div style="padding:20px; text-align:center; color:#64748b; background:#f8fafc; border-radius:8px;">
-              لا توجد قيود يومية تفصيلية مسجلة في هذه الفترة. رصيد الزبون المسجل: <b>${money(data.customer.balance)} ${currency}</b>.
+              لا توجد قيود يومية تفصيلية مسجلة في هذه الفترة. رصيد الزبون المسجل: <b>${money(data?.customer?.balance ?? 0)} ${currency}</b>.
             </div>
           `}
 
@@ -562,7 +564,7 @@ export default function ShamelStatementModal({
     </tr>
     <tr style="background:#f8fafc;">
       <td colspan="5" style="padding:8px; border:1px solid #cbd5e1;">
-        <b>الزبون:</b> ${escapeHtml(data.customer.name)} | <b>الكود:</b> ${escapeHtml(data.customer.code)} | <b>الهاتف:</b> ${escapeHtml(data.customer.phone || '—')}
+        <b>الزبون:</b> ${escapeHtml(data?.customer?.name || customerName || customerCode)} | <b>الكود:</b> ${escapeHtml(data?.customer?.code || customerCode)} | <b>الهاتف:</b> ${escapeHtml(data?.customer?.phone || '—')}
       </td>
       <td colspan="5" style="padding:8px; border:1px solid #cbd5e1; text-align:left;">
         <b>الفترة:</b> ${escapeHtml(from || 'من البداية')} إلى ${escapeHtml(to || 'حتى اليوم')} | <b>العملة:</b> ${escapeHtml(currency === 'NIS' ? 'الشيكل NIS (موحد عام)' : currency)} | <b>تاريخ التصدير:</b> ${new Date().toLocaleDateString('en-GB')}
@@ -645,8 +647,8 @@ export default function ShamelStatementModal({
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      const cleanName = data.customer.name.replace(/[\\/:*?"<>|]/g, '_').trim()
-      link.download = `كشف_حساب_${cleanName}_${data.customer.code}_${detailed ? 'تفصيلي' : 'ملخص'}_${new Date().toISOString().slice(0, 10)}.xls`
+      const cleanName = (data?.customer?.name || customerName || 'زبون').replace(/[\\/:*?"<>|]/g, '_').trim()
+      link.download = `كشف_حساب_${cleanName}_${data?.customer?.code || customerCode}_${detailed ? 'تفصيلي' : 'ملخص'}_${new Date().toISOString().slice(0, 10)}.xls`
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
@@ -667,13 +669,13 @@ export default function ShamelStatementModal({
             <div className="flex items-center gap-2">
               <span className="text-xl">📄</span>
               <h2 className="text-lg font-bold text-white">
-                كشف حساب الزبون: <span className="text-sky-400">{customerName || data?.customer.name || customerCode}</span>
+                كشف حساب الزبون: <span className="text-sky-400">{customerName || data?.customer?.name || customerCode}</span>
               </h2>
               <span className="font-mono text-xs bg-sky-500/20 text-sky-300 border border-sky-500/30 px-2 py-0.5 rounded-full font-bold">
                 {customerCode}
               </span>
             </div>
-            {data && (
+            {data?.customer && (
               <p className="text-xs text-slate-400 mt-1">
                 الهاتف: {data.customer.phone || '—'} • العنوان: {data.customer.address || '—'}
               </p>
@@ -800,7 +802,7 @@ export default function ShamelStatementModal({
               <div className="text-2xl animate-spin mb-2">⏳</div>
               جاري احتساب كشف الحساب من قيود الشامل...
             </div>
-          ) : data ? (
+          ) : (data && data.customer) ? (
             <div className="space-y-4">
               {/* 4 Summary Cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">

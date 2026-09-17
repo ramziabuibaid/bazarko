@@ -110,16 +110,6 @@ export function processShamelArchive(files: Map<string, ExtractedFile>): ShamelP
     if (c.code && c.name) customerNames.set(c.code, c.name)
   }
 
-  // Enrich cheques with target_name and customer_name if missing
-  for (const chq of cheques) {
-    if (!chq.customer_name && chq.customer_code) {
-      chq.customer_name = customerNames.get(chq.customer_code) || accountNames.get(chq.customer_code) || ''
-    }
-    if (!chq.target_name && chq.target_account) {
-      chq.target_name = customerNames.get(chq.target_account) || accountNames.get(chq.target_account) || ''
-    }
-  }
-
   // 7. Parse auxiliary tables (Assets, Cost Centers, Salesmen, Customer Prices)
   const assetsFile = files.get('assets.dat')
   const assets = assetsFile ? parseAssets(assetsFile.data) : []
@@ -143,6 +133,30 @@ export function processShamelArchive(files: Map<string, ExtractedFile>): ShamelP
   // 9. Parse Journal Entries (ctrans.dat)
   const ctransFile = files.get('ctrans.dat')
   const entries = ctransFile ? parseEntries(ctransFile.data, headersMap, notesMap) : []
+
+  // Build lookup from entries for document -> customer account and date
+  const docCustomerMap = new Map<string, { code: string; date?: string | null }>()
+  for (const e of entries) {
+    if (e.document && e.account && e.account.startsWith('C')) {
+      docCustomerMap.set(e.document, { code: e.account, date: e.day })
+    }
+  }
+
+  // Enrich cheques with target_name and customer_name if missing
+  for (const chq of cheques) {
+    if ((!chq.customer_code || !chq.customer_code.startsWith('C')) && chq.document && docCustomerMap.has(chq.document)) {
+      const docMatch = docCustomerMap.get(chq.document)!
+      chq.customer_code = docMatch.code
+      if (!chq.due_date && docMatch.date) chq.due_date = docMatch.date
+    }
+
+    if (!chq.customer_name && chq.customer_code) {
+      chq.customer_name = customerNames.get(chq.customer_code) || accountNames.get(chq.customer_code) || ''
+    }
+    if (!chq.target_name && chq.target_account) {
+      chq.target_name = customerNames.get(chq.target_account) || accountNames.get(chq.target_account) || ''
+    }
+  }
 
   // 10. Parse Invoice Items (strans.dat)
   const stransFile = files.get('strans.dat')

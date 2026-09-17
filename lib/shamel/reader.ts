@@ -318,9 +318,17 @@ export function parseCheques(data: Uint8Array): ShamelCheque[] {
       // Alternate Shamel Cheque Layout (e.g. doc at 0..9)
       doc = decodeCp1256(r.subarray(0, 9))
       if (!/^[RPCJ]\d{7}$/.test(doc)) continue
-      cheque_no = decodeCp1256(r.subarray(17, 30))
+      cheque_no = decodeCp1256(r.subarray(17, 26))
+      const d = r[26], m = r[27], y = view.getUint16(28, true)
+      if (y >= 1990 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+        due_date = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+      }
       bank_code = decodeCp1256(r.subarray(50, 55))
-      customer_code = decodeCp1256(r.subarray(80, 90))
+      branch_code = decodeCp1256(r.subarray(55, 60))
+      account_number = decodeCp1256(r.subarray(60, 74))
+      target_account = decodeCp1256(r.subarray(73, 82))
+      customer_code = decodeCp1256(r.subarray(82, 92))
+      action_doc = decodeCp1256(r.subarray(132, 141))
       amount = readDoubleLE(view, 150)
       if (amount <= 0) amount = readDoubleLE(view, 160)
     }
