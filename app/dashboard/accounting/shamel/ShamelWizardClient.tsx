@@ -180,6 +180,26 @@ export default function ShamelWizardClient({
     return <span className="text-sky-400 mr-1 text-[10px] font-bold">{customerSortDir === 'asc' ? '▲' : '▼'}</span>
   }
 
+  // Stock Explorer Sorting & Filtering
+  const [stockSortBy, setStockSortBy] = useState<'code' | 'name' | 'barcode' | 'cost_price' | 'quantity'>('code')
+  const [stockSortDir, setStockSortDir] = useState<'asc' | 'desc'>('asc')
+  const [stockHideZero, setStockHideZero] = useState(false)
+
+  const handleStockSort = (column: 'code' | 'name' | 'barcode' | 'cost_price' | 'quantity') => {
+    if (stockSortBy === column) {
+      setStockSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setStockSortBy(column)
+      setStockSortDir('asc')
+    }
+    setCurrentPage(1)
+  }
+
+  const renderStockSortIndicator = (column: string) => {
+    if (stockSortBy !== column) return <span className="text-slate-600 mr-1 text-[10px]">↕</span>
+    return <span className="text-sky-400 mr-1 text-[10px] font-bold">{stockSortDir === 'asc' ? '▲' : '▼'}</span>
+  }
+
   // Modals State
   const [statementCustomer, setStatementCustomer] = useState<{ code: string; name?: string } | null>(null)
   const [itemCardProduct, setItemCardProduct] = useState<{ code: string; name?: string } | null>(null)
@@ -244,6 +264,11 @@ export default function ShamelWizardClient({
       if (chequeBank !== 'all') params.set('bank', chequeBank)
       if (chequeDueDateFrom) params.set('from', chequeDueDateFrom)
       if (chequeDueDateTo) params.set('to', chequeDueDateTo)
+    } else if (activeTab === 'explorer_stock') {
+      if (searchTerm) params.set('q', searchTerm)
+      params.set('sort_by', stockSortBy)
+      params.set('sort_dir', stockSortDir)
+      if (stockHideZero || filterStatus === 'in_stock') params.set('hide_zero', 'true')
     } else {
       if (searchTerm) params.set('q', searchTerm)
       if (filterStatus !== 'all') params.set('status', filterStatus)
@@ -269,6 +294,9 @@ export default function ShamelWizardClient({
     customerSortBy,
     customerSortDir,
     customerHideZero,
+    stockSortBy,
+    stockSortDir,
+    stockHideZero,
     chequeNo,
     chequeAmount,
     chequeAccount,
@@ -1435,7 +1463,7 @@ export default function ShamelWizardClient({
               </p>
             </div>
 
-            <div className="flex items-center gap-3 w-full md:w-auto">
+            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
               <input
                 type="text"
                 value={searchTerm}
@@ -1443,6 +1471,19 @@ export default function ShamelWizardClient({
                 placeholder="بحث باسم الصنف، الكود، الباركود..."
                 className="px-3.5 py-2 text-xs border border-white/10 bg-slate-950 text-white placeholder-slate-500 rounded-xl outline-none focus:border-sky-500 w-full md:w-64"
               />
+
+              <button
+                type="button"
+                onClick={() => { setStockHideZero(!stockHideZero); setCurrentPage(1) }}
+                className={`px-3 py-2 border rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
+                  stockHideZero
+                    ? 'bg-sky-500/20 border-sky-500/40 text-sky-300'
+                    : 'border-white/10 bg-slate-800 text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>{stockHideZero ? '☑️ متوفر بالمخزن فقط' : '◻️ كافة الأصناف'}</span>
+              </button>
+
               <button
                 onClick={() => handlePromote('stock')}
                 disabled={promotingAll || queryRows.length === 0}
@@ -1464,12 +1505,37 @@ export default function ShamelWizardClient({
             <div className="overflow-x-auto">
               <table className="w-full text-right text-xs">
                 <thead>
-                  <tr className="border-b border-white/10 bg-slate-800/60 text-slate-400">
-                    <th className="py-3 px-3.5 font-bold">كود الصنف</th>
-                    <th className="py-3 px-3.5 font-bold">اسم الصنف</th>
-                    <th className="py-3 px-3.5 font-bold">الباركود</th>
-                    <th className="py-3 px-3.5 font-bold">سعر التكلفة</th>
-                    <th className="py-3 px-3.5 font-bold">الكمية بالمخزن</th>
+                  <tr className="border-b border-white/10 bg-slate-800/60 text-slate-400 select-none">
+                    <th
+                      className="py-3 px-3.5 font-bold cursor-pointer hover:text-sky-400 transition"
+                      onClick={() => handleStockSort('code')}
+                    >
+                      كود الصنف {renderStockSortIndicator('code')}
+                    </th>
+                    <th
+                      className="py-3 px-3.5 font-bold cursor-pointer hover:text-sky-400 transition"
+                      onClick={() => handleStockSort('name')}
+                    >
+                      اسم الصنف {renderStockSortIndicator('name')}
+                    </th>
+                    <th
+                      className="py-3 px-3.5 font-bold cursor-pointer hover:text-sky-400 transition"
+                      onClick={() => handleStockSort('barcode')}
+                    >
+                      الباركود {renderStockSortIndicator('barcode')}
+                    </th>
+                    <th
+                      className="py-3 px-3.5 font-bold cursor-pointer hover:text-sky-400 transition"
+                      onClick={() => handleStockSort('cost_price')}
+                    >
+                      سعر التكلفة {renderStockSortIndicator('cost_price')}
+                    </th>
+                    <th
+                      className="py-3 px-3.5 font-bold cursor-pointer hover:text-sky-400 transition"
+                      onClick={() => handleStockSort('quantity')}
+                    >
+                      الكمية بالمخزن {renderStockSortIndicator('quantity')}
+                    </th>
                     <th className="py-3 px-3.5 font-bold text-center">الإجراءات</th>
                   </tr>
                 </thead>

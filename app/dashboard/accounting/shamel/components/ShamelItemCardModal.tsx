@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 
 interface Props {
   isOpen: boolean
@@ -9,6 +9,33 @@ interface Props {
   itemName?: string
   storeName: string
   currencyCode: string
+}
+
+interface MovementRow {
+  document: string
+  line_index: number
+  day: string
+  quantity: number
+  price: number
+  total: number
+  location: number
+  movement_type: string
+  party_type: 'customer' | 'supplier' | 'internal'
+  party_code?: string | null
+  party_name?: string | null
+}
+
+interface InvoiceItemDetail {
+  item_code: string
+  item_name: string
+  quantity: number
+  price: number
+  total: number
+}
+
+interface DocumentDetails {
+  document: string
+  items: InvoiceItemDetail[]
 }
 
 interface ItemCardData {
@@ -29,25 +56,20 @@ interface ItemCardData {
       price: number
       quantity: number
       document: string
+      customer_code?: string | null
+      customer_name?: string | null
     } | null
     last_purchase?: {
       day: string
       price: number
       quantity: number
       document: string
+      supplier_code?: string | null
+      supplier_name?: string | null
     } | null
   }
   total: number
-  rows: Array<{
-    document: string
-    line_index: number
-    day: string
-    quantity: number
-    price: number
-    total: number
-    location: number
-    movement_type: string
-  }>
+  rows: MovementRow[]
 }
 
 const money = (n: number) =>
@@ -75,6 +97,11 @@ export default function ShamelItemCardModal({
   const [error, setError] = useState<string | null>(null)
   const [printing, setPrinting] = useState(false)
 
+  // Document details drilldown
+  const [expandedDoc, setExpandedDoc] = useState<string | null>(null)
+  const [docDetails, setDocDetails] = useState<Record<string, DocumentDetails>>({})
+  const [loadingDoc, setLoadingDoc] = useState<string | null>(null)
+
   useEffect(() => {
     if (!isOpen || !itemCode) return
 
@@ -86,13 +113,14 @@ export default function ShamelItemCardModal({
       from,
       to,
       type: movementType,
-      limit: '200',
+      limit: '300',
     })
 
     fetch(`/api/shamel/query?${params.toString()}`)
       .then(async res => {
         const body = await res.json()
         if (!res.ok) throw new Error(body.error || body.message || 'فشل جلب سجل حركة الصنف')
+        if (body.error) throw new Error(body.message || body.error)
         return body as ItemCardData
       })
       .then(res => {
@@ -100,12 +128,35 @@ export default function ShamelItemCardModal({
       })
       .catch(err => {
         console.error('Item card error:', err)
+        setData(null)
         setError(err.message || 'تعذر تحميل سجل الصنف')
       })
       .finally(() => setLoading(false))
   }, [isOpen, itemCode, from, to, movementType])
 
   if (!isOpen) return null
+
+  const toggleDoc = async (doc: string) => {
+    if (expandedDoc === doc) {
+      setExpandedDoc(null)
+      return
+    }
+    setExpandedDoc(doc)
+    if (!docDetails[doc]) {
+      setLoadingDoc(doc)
+      try {
+        const res = await fetch(`/api/shamel/query?kind=details&document=${encodeURIComponent(doc)}`)
+        const body = await res.json()
+        if (res.ok) {
+          setDocDetails(prev => ({ ...prev, [doc]: body }))
+        }
+      } catch (err) {
+        console.error('Failed to load invoice details:', err)
+      } finally {
+        setLoadingDoc(null)
+      }
+    }
+  }
 
   const printItemCard = () => {
     if (!data) return
@@ -149,8 +200,8 @@ export default function ShamelItemCardModal({
               <div><b>الكود:</b> <span style="font-family:monospace;">${escapeHtml(data.item.code)}</span></div>
               <div><b>الباركود:</b> ${escapeHtml(data.item.barcode || '—')}</div>
               <div><b>الكمية المتوفرة:</b> ${num(data.item.stock_quantity)}</div>
-              <div><b>سعر البيع:</b> ${money(data.item.price)} ${currencyCode}</div>
-              <div><b>التكلفة:</b> ${money(data.item.cost_price)} ${currencyCode}</div>
+              <div><b>سعر التكلفة:</b> ${money(data.item.cost_price)} ${currencyCode}</div>
+              <div><b>الفترة:</b> ${escapeHtml(from || 'من البداية')} إلى ${escapeHtml(to || 'حتى الآن')}</div>
               <div><b>تاريخ الطباعة:</b> ${new Date().toLocaleDateString('ar-u-nu-latn')}</div>
             </div>
           </div>
@@ -169,8 +220,8 @@ export default function ShamelItemCardModal({
               <div class="summary-val" style="color:#b91c1c;">${num(data.stats.total_purchased)}</div>
             </div>
             <div>
-              <div class="summary-title">قيمة المخزون الإجمالية</div>
-              <div class="summary-val">${money(data.item.stock_quantity * (data.item.cost_price || data.item.price))} ${currencyCode}</div>
+              <div class="summary-title">إجمالي الحركات</div>
+              <div class="summary-val">${num(data.total)}</div>
             </div>
           </div>
 
@@ -178,13 +229,14 @@ export default function ShamelItemCardModal({
             <table>
               <thead>
                 <tr>
-                  <th style="width:80px;">التاريخ</th>
-                  <th style="width:85px;">المستند</th>
-                  <th style="width:85px;">نوع الحركة</th>
-                  <th style="width:70px; text-align:center;">الكمية</th>
-                  <th style="width:90px; text-align:left;">السعر</th>
-                  <th style="width:100px; text-align:left;">الإجمالي</th>
-                  <th style="width:80px; text-align:center;">الموقع</th>
+                  <th style="width:85px;">التاريخ</th>
+                  <th style="width:85px;">رقم الفاتورة</th>
+                  <th style="width:80px;">نوع الحركة</th>
+                  <th>الطرف (الزبون / المورد)</th>
+                  <th style="width:65px; text-align:center;">الموقع</th>
+                  <th style="width:65px; text-align:center;">الكمية</th>
+                  <th style="width:85px; text-align:left;">السعر</th>
+                  <th style="width:95px; text-align:left;">الإجمالي</th>
                 </tr>
               </thead>
               <tbody>
@@ -193,10 +245,14 @@ export default function ShamelItemCardModal({
                     <td style="font-family:monospace;">${escapeHtml(r.day)}</td>
                     <td style="font-family:monospace; font-weight:bold;">${escapeHtml(r.document)}</td>
                     <td>${escapeHtml(r.movement_type)}</td>
+                    <td>
+                      <b>${escapeHtml(r.party_name || '—')}</b>
+                      ${r.party_code ? `<span style="font-size:10px; color:#64748b; font-family:monospace; margin-right:4px;">(${escapeHtml(r.party_code)})</span>` : ''}
+                    </td>
+                    <td style="text-align:center;">${r.location === 1 ? 'مستودع' : 'المحل'}</td>
                     <td style="text-align:center; font-family:monospace; font-weight:bold;">${num(r.quantity)}</td>
                     <td class="num">${money(r.price)}</td>
                     <td class="num" style="font-weight:bold;">${money(r.total)}</td>
-                    <td style="text-align:center;">${r.location === 1 ? 'مستودع' : 'المحل'}</td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -227,22 +283,23 @@ export default function ShamelItemCardModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 md:p-6 overflow-y-auto" dir="rtl">
-      <div className="bg-slate-900 border border-white/10 text-white rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+      <div className="bg-slate-900 border border-white/10 text-white rounded-2xl w-full max-w-5xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
         {/* Modal Header */}
         <div className="p-5 border-b border-white/10 bg-slate-800/70 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xl">🏷️</span>
               <h2 className="text-lg font-bold text-white">
-                بطاقة وسجل حركة الصنف: <span className="text-sky-400">{itemName || data?.item.name || itemCode}</span>
+                بطاقة وسجل حركة الصنف: <span className="text-sky-400">{itemName || data?.item?.name || itemCode}</span>
               </h2>
               <span className="font-mono text-xs bg-sky-500/20 text-sky-300 border border-sky-500/30 px-2 py-0.5 rounded-full font-bold">
                 {itemCode}
               </span>
             </div>
-            {data?.item.barcode && (
-              <p className="text-xs text-slate-400 mt-1 font-mono">
-                الباركود: {data.item.barcode}
+            {data?.item && (
+              <p className="text-xs text-slate-400 mt-1">
+                الباركود: <span className="font-mono text-slate-300">{data.item.barcode || '—'}</span> • سعر التكلفة:{' '}
+                <span className="font-mono text-emerald-400 font-bold">{money(data.item.cost_price)} {currencyCode}</span>
               </p>
             )}
           </div>
@@ -253,7 +310,7 @@ export default function ShamelItemCardModal({
               disabled={loading || printing || !data}
               className="px-3.5 py-1.5 bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-bold rounded-xl shadow-xs disabled:opacity-50 transition flex items-center gap-1.5"
             >
-              <span>{printing ? 'جاري التجهيز...' : '🖨️ طباعة سجل الصنف'}</span>
+              <span>{printing ? '⏳ جاري التجهيز...' : '🖨️ طباعة سجل الصنف'}</span>
             </button>
             <button
               onClick={onClose}
@@ -265,49 +322,58 @@ export default function ShamelItemCardModal({
         </div>
 
         {/* Filter Toolbar */}
-        <div className="p-4 border-b border-white/10 bg-slate-950/60 flex flex-wrap items-center gap-3 text-xs">
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-400 font-bold">نوع الحركة:</span>
-            <select
-              value={movementType}
-              onChange={e => setMovementType(e.target.value as any)}
-              className="px-2.5 py-1.5 border border-white/10 bg-slate-900 text-white rounded-lg text-xs outline-none focus:border-sky-500"
-            >
-              <option value="all">كافة الحركات</option>
-              <option value="sales">مبيعات فقط</option>
-              <option value="purchases">مشتريات فقط</option>
-              <option value="returns">مردودات</option>
-            </select>
+        <div className="p-4 border-b border-white/10 bg-slate-950/60 flex flex-wrap items-center justify-between gap-3 text-xs">
+          {/* Movement Type Tabs */}
+          <div className="flex gap-1 bg-slate-800 p-1 rounded-xl border border-white/10">
+            {([
+              ['all', 'كافة الحركات'],
+              ['sales', 'فواتير المبيعات'],
+              ['purchases', 'فواتير المشتريات'],
+              ['returns', 'المردودات'],
+            ] as const).map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setMovementType(k)}
+                className={`px-3 py-1.5 rounded-lg font-bold text-xs transition ${
+                  movementType === k
+                    ? 'bg-sky-500 text-slate-950 shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-400 font-bold">من تاريخ:</span>
-            <input
-              type="date"
-              value={from}
-              onChange={e => setFrom(e.target.value)}
-              className="px-2.5 py-1.5 border border-white/10 bg-slate-900 text-white rounded-lg text-xs outline-none focus:border-sky-500"
-            />
+          {/* Date Range */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400 font-bold">من:</span>
+              <input
+                type="date"
+                value={from}
+                onChange={e => setFrom(e.target.value)}
+                className="px-2.5 py-1.5 border border-white/10 bg-slate-900 text-white rounded-lg text-xs outline-none focus:border-sky-500"
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400 font-bold">إلى:</span>
+              <input
+                type="date"
+                value={to}
+                onChange={e => setTo(e.target.value)}
+                className="px-2.5 py-1.5 border border-white/10 bg-slate-900 text-white rounded-lg text-xs outline-none focus:border-sky-500"
+              />
+            </div>
+            {(from || to) && (
+              <button
+                onClick={() => { setFrom(''); setTo('') }}
+                className="text-sky-400 hover:text-sky-300 font-bold text-xs"
+              >
+                إعادة ضبط
+              </button>
+            )}
           </div>
-
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-400 font-bold">إلى تاريخ:</span>
-            <input
-              type="date"
-              value={to}
-              onChange={e => setTo(e.target.value)}
-              className="px-2.5 py-1.5 border border-white/10 bg-slate-900 text-white rounded-lg text-xs outline-none focus:border-sky-500"
-            />
-          </div>
-
-          {(from || to || movementType !== 'all') && (
-            <button
-              onClick={() => { setFrom(''); setTo(''); setMovementType('all') }}
-              className="text-sky-400 hover:text-sky-300 font-bold text-xs"
-            >
-              إعادة تعيين الفلتر
-            </button>
-          )}
         </div>
 
         {/* Modal Body */}
@@ -321,9 +387,9 @@ export default function ShamelItemCardModal({
           {loading ? (
             <div className="py-16 text-center text-slate-400 text-xs">
               <div className="text-2xl animate-spin mb-2">⏳</div>
-              جاري فحص سجل حركات الصنف في الشامل...
+              جاري فحص سجل حركات وفواتير الصنف في الشامل...
             </div>
-          ) : data ? (
+          ) : data && data.item ? (
             <div className="space-y-4">
               {/* Summary Metrics */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
@@ -334,55 +400,69 @@ export default function ShamelItemCardModal({
                   </div>
                 </div>
 
-                <div className="bg-slate-800/60 p-3.5 rounded-xl border border-white/10">
-                  <div className="text-[11px] text-slate-400 font-medium">سعر البيع الافتراضي</div>
-                  <div className="text-lg font-mono font-bold text-white mt-1">
-                    {money(data.item.price)} {currencyCode}
+                <div className="bg-blue-500/10 p-3.5 rounded-xl border border-blue-500/20">
+                  <div className="text-[11px] text-blue-300 font-bold">إجمالي المبيعات السابقة</div>
+                  <div className="text-xl font-mono font-bold text-blue-400 mt-1">
+                    {num(data.stats.total_sold)}
                   </div>
                 </div>
 
-                <div className="bg-slate-800/60 p-3.5 rounded-xl border border-white/10">
-                  <div className="text-[11px] text-slate-400 font-medium">سعر التكلفة التقديري</div>
-                  <div className="text-lg font-mono font-bold text-slate-300 mt-1">
-                    {money(data.item.cost_price)} {currencyCode}
+                <div className="bg-amber-500/10 p-3.5 rounded-xl border border-amber-500/20">
+                  <div className="text-[11px] text-amber-300 font-bold">إجمالي المشتريات السابقة</div>
+                  <div className="text-xl font-mono font-bold text-amber-400 mt-1">
+                    {num(data.stats.total_purchased)}
                   </div>
                 </div>
 
                 <div className="bg-sky-500/10 p-3.5 rounded-xl border border-sky-500/20">
-                  <div className="text-[11px] text-sky-300 font-bold">إجمالي قيمة المخزون</div>
-                  <div className="text-lg font-mono font-black text-sky-400 mt-1">
-                    {money(data.item.stock_quantity * (data.item.cost_price || data.item.price))} {currencyCode}
+                  <div className="text-[11px] text-sky-300 font-bold">إجمالي الحركات المسجلة</div>
+                  <div className="text-xl font-mono font-black text-sky-400 mt-1">
+                    {num(data.total)}
                   </div>
                 </div>
               </div>
 
-              {/* Last Sale & Purchase info */}
+              {/* Last Sale & Purchase info with Party Name */}
               {(data.stats.last_sale || data.stats.last_purchase) && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                   {data.stats.last_sale && (
-                    <div className="p-3 bg-blue-500/10 rounded-xl border border-blue-500/20 flex items-center justify-between">
-                      <div>
-                        <div className="font-bold text-blue-300">آخر حركة بيع:</div>
-                        <div className="text-slate-400 mt-0.5">
-                          تاريخ {data.stats.last_sale.day} • فاتورة <span className="font-mono text-sky-400">{data.stats.last_sale.document}</span>
-                        </div>
+                    <div className="p-3 bg-blue-500/10 rounded-xl border border-blue-500/20 flex flex-col justify-between gap-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-blue-300">آخر حركة بيع:</span>
+                        <span className="font-mono text-slate-400 text-[11px]">{data.stats.last_sale.day}</span>
                       </div>
-                      <div className="text-left font-mono font-bold text-blue-300">
-                        {money(data.stats.last_sale.price)} {currencyCode} ({num(data.stats.last_sale.quantity)} قطعة)
+                      <div className="font-bold text-white text-sm">
+                        {data.stats.last_sale.customer_name || 'زبون غير مسجل'}
+                        {data.stats.last_sale.customer_code && (
+                          <span className="text-[11px] text-sky-400 font-mono mr-1">({data.stats.last_sale.customer_code})</span>
+                        )}
+                      </div>
+                      <div className="text-slate-400 flex items-center justify-between mt-0.5">
+                        <span>فاتورة: <button onClick={() => toggleDoc(data.stats.last_sale!.document)} className="font-mono font-bold text-sky-400 hover:underline">{data.stats.last_sale.document}</button></span>
+                        <span className="font-mono font-bold text-blue-300" dir="ltr">
+                          {money(data.stats.last_sale.price)} {currencyCode} ({num(data.stats.last_sale.quantity)} قطعة)
+                        </span>
                       </div>
                     </div>
                   )}
 
                   {data.stats.last_purchase && (
-                    <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/20 flex items-center justify-between">
-                      <div>
-                        <div className="font-bold text-amber-300">آخر حركة توريد / شراء:</div>
-                        <div className="text-slate-400 mt-0.5">
-                          تاريخ {data.stats.last_purchase.day} • سند <span className="font-mono text-amber-400">{data.stats.last_purchase.document}</span>
-                        </div>
+                    <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/20 flex flex-col justify-between gap-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-amber-300">آخر حركة شراء / توريد:</span>
+                        <span className="font-mono text-slate-400 text-[11px]">{data.stats.last_purchase.day}</span>
                       </div>
-                      <div className="text-left font-mono font-bold text-amber-300">
-                        {money(data.stats.last_purchase.price)} {currencyCode} ({num(data.stats.last_purchase.quantity)} قطعة)
+                      <div className="font-bold text-white text-sm">
+                        {data.stats.last_purchase.supplier_name || 'مورد غير مسجل'}
+                        {data.stats.last_purchase.supplier_code && (
+                          <span className="text-[11px] text-amber-400 font-mono mr-1">({data.stats.last_purchase.supplier_code})</span>
+                        )}
+                      </div>
+                      <div className="text-slate-400 flex items-center justify-between mt-0.5">
+                        <span>سند شراء: <button onClick={() => toggleDoc(data.stats.last_purchase!.document)} className="font-mono font-bold text-amber-400 hover:underline">{data.stats.last_purchase.document}</button></span>
+                        <span className="font-mono font-bold text-amber-300" dir="ltr">
+                          {money(data.stats.last_purchase.price)} {currencyCode} ({num(data.stats.last_purchase.quantity)} قطعة)
+                        </span>
                       </div>
                     </div>
                   )}
@@ -401,42 +481,170 @@ export default function ShamelItemCardModal({
                       <thead className="bg-slate-800/60 text-slate-400 border-b border-white/10">
                         <tr>
                           <th className="py-3 px-3.5 font-bold">التاريخ</th>
-                          <th className="py-3 px-3.5 font-bold">رقم المستند</th>
-                          <th className="py-3 px-3.5 font-bold">نوع الحركة</th>
+                          <th className="py-3 px-3.5 font-bold text-center">رقم الفاتورة</th>
+                          <th className="py-3 px-3.5 font-bold text-center">نوع الحركة</th>
+                          <th className="py-3 px-3.5 font-bold">الطرف (الزبون / المورد)</th>
+                          <th className="py-3 px-3.5 font-bold text-center">الموقع</th>
                           <th className="py-3 px-3.5 font-bold text-center">الكمية</th>
                           <th className="py-3 px-3.5 font-bold text-left">السعر</th>
                           <th className="py-3 px-3.5 font-bold text-left">الإجمالي</th>
-                          <th className="py-3 px-3.5 font-bold text-center">الموقع</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5 text-slate-200">
-                        {data.rows.map((r, idx) => (
-                          <tr key={idx} className="hover:bg-slate-800/50">
-                            <td className="py-2.5 px-3.5 font-mono text-slate-400">{r.day}</td>
-                            <td className="py-2.5 px-3.5 font-mono font-bold text-sky-400">{r.document}</td>
-                            <td className="py-2.5 px-3.5">
-                              <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold border ${
-                                r.movement_type === 'مبيعات' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                                r.movement_type === 'مشتريات' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                                'bg-slate-800 text-slate-300 border border-white/5'
-                              }`}>
-                                {r.movement_type}
-                              </span>
-                            </td>
-                            <td className="py-2.5 px-3.5 text-center font-mono font-bold text-white">
-                              {num(r.quantity)}
-                            </td>
-                            <td className="py-2.5 px-3.5 text-left font-mono text-slate-300">
-                              {money(r.price)}
-                            </td>
-                            <td className="py-2.5 px-3.5 text-left font-mono font-black text-white">
-                              {money(r.total)}
-                            </td>
-                            <td className="py-2.5 px-3.5 text-center text-slate-400">
-                              {r.location === 1 ? 'مستودع' : 'المحل'}
-                            </td>
-                          </tr>
-                        ))}
+                        {data.rows.map((r, idx) => {
+                          const isExpanded = expandedDoc === r.document
+                          const details = docDetails[r.document]
+                          const isLoadingCurrentDoc = loadingDoc === r.document
+
+                          return (
+                            <Fragment key={`${r.document}-${r.line_index}-${idx}`}>
+                              <tr className="hover:bg-slate-800/50 transition-colors">
+                                <td className="py-3 px-3.5 font-mono text-slate-300 text-xs">{r.day}</td>
+
+                                {/* Invoice Document with Drilldown Toggle */}
+                                <td className="py-3 px-3.5 text-center">
+                                  <button
+                                    onClick={() => toggleDoc(r.document)}
+                                    className="font-mono font-bold px-2.5 py-1 rounded-lg border border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 transition-colors inline-flex items-center gap-1.5 shadow-xs"
+                                    title="عرض كافة بنود ومحتويات هذه الفاتورة"
+                                  >
+                                    <span>{r.document}</span>
+                                    <span className="text-[10px] text-sky-400">{isExpanded ? '▲' : '▼'}</span>
+                                  </button>
+                                </td>
+
+                                {/* Movement Type Badge */}
+                                <td className="py-3 px-3.5 text-center">
+                                  <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold border ${
+                                    r.movement_type === 'مبيعات' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+                                    r.movement_type === 'مشتريات' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                    r.movement_type.includes('مردود') ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                                    'bg-slate-800 text-slate-300 border border-white/5'
+                                  }`}>
+                                    {r.movement_type}
+                                  </span>
+                                </td>
+
+                                {/* Party Name & Code (Customer or Supplier) */}
+                                <td className="py-3 px-3.5 min-w-56">
+                                  <div className="font-bold text-white text-xs">
+                                    {r.party_name || <span className="text-slate-500 font-normal">حركة داخلية / غير محدد</span>}
+                                  </div>
+                                  {r.party_code && (
+                                    <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                                      {r.party_type === 'customer' ? 'الزبون: ' : r.party_type === 'supplier' ? 'المورد: ' : 'الحساب: '}
+                                      <span className="text-sky-400 font-bold">{r.party_code}</span>
+                                    </div>
+                                  )}
+                                </td>
+
+                                {/* Location */}
+                                <td className="py-3 px-3.5 text-center text-slate-400 text-xs">
+                                  <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-white/5">
+                                    {r.location === 1 ? 'مستودع (1)' : 'المحل (0)'}
+                                  </span>
+                                </td>
+
+                                {/* Quantity */}
+                                <td className="py-3 px-3.5 text-center font-mono font-bold text-white">
+                                  {num(r.quantity)}
+                                </td>
+
+                                {/* Price */}
+                                <td className="py-3 px-3.5 text-left font-mono text-slate-300" dir="ltr">
+                                  {money(r.price)} {currencyCode}
+                                </td>
+
+                                {/* Total */}
+                                <td className="py-3 px-3.5 text-left font-mono font-black text-white" dir="ltr">
+                                  {money(r.total)} {currencyCode}
+                                </td>
+                              </tr>
+
+                              {/* Expandable Invoice Details Drilldown */}
+                              {isExpanded && (
+                                <tr className="bg-slate-950/80 border-y border-sky-500/30">
+                                  <td colSpan={8} className="p-4">
+                                    <div className="space-y-3 max-w-4xl mx-auto">
+                                      <div className="flex items-center justify-between text-xs">
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-bold text-sky-400 text-sm">
+                                            📑 تفاصيل ومحتويات الفاتورة {r.document}
+                                          </span>
+                                          {r.party_name && (
+                                            <span className="text-slate-400 text-xs">
+                                              — الصادرة باسم: <b className="text-white">{r.party_name}</b>
+                                            </span>
+                                          )}
+                                        </div>
+                                        <button
+                                          onClick={() => setExpandedDoc(null)}
+                                          className="text-slate-400 hover:text-white text-xs font-bold"
+                                        >
+                                          ✕ إغلاق التفاصيل
+                                        </button>
+                                      </div>
+
+                                      {isLoadingCurrentDoc ? (
+                                        <div className="py-4 text-center text-slate-400 text-xs">
+                                          <div className="text-lg animate-spin mb-1">⏳</div>
+                                          جاري جلب بنود الفاتورة...
+                                        </div>
+                                      ) : details?.items && details.items.length > 0 ? (
+                                        <div className="rounded-xl border border-white/10 overflow-hidden bg-slate-900 shadow-lg">
+                                          <table className="w-full text-xs text-right">
+                                            <thead className="bg-slate-800 text-slate-400 border-b border-white/10">
+                                              <tr>
+                                                <th className="py-2.5 px-3">#</th>
+                                                <th className="py-2.5 px-3">كود الصنف</th>
+                                                <th className="py-2.5 px-3">اسم الصنف</th>
+                                                <th className="py-2.5 px-3 text-center">الكمية</th>
+                                                <th className="py-2.5 px-3 text-left">السعر</th>
+                                                <th className="py-2.5 px-3 text-left">الإجمالي</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-white/5 text-slate-200">
+                                              {details.items.map((it, itemIdx) => {
+                                                const isCurrent = it.item_code === data.item.code
+
+                                                return (
+                                                  <tr
+                                                    key={itemIdx}
+                                                    className={isCurrent ? 'bg-sky-500/10 font-bold' : 'hover:bg-slate-800/40'}
+                                                  >
+                                                    <td className="py-2 px-3 text-slate-400 font-mono text-[11px]">{itemIdx + 1}</td>
+                                                    <td className="py-2 px-3 font-mono text-sky-400">{it.item_code}</td>
+                                                    <td className="py-2 px-3 text-white">
+                                                      {it.item_name}
+                                                      {isCurrent && (
+                                                        <span className="mr-2 text-[10px] bg-sky-500/20 text-sky-300 border border-sky-500/30 px-2 py-0.5 rounded-full font-bold">
+                                                          الصنف الحالي
+                                                        </span>
+                                                      )}
+                                                    </td>
+                                                    <td className="py-2 px-3 text-center font-mono font-bold">{num(it.quantity)}</td>
+                                                    <td className="py-2 px-3 text-left font-mono" dir="ltr">{money(it.price)}</td>
+                                                    <td className="py-2 px-3 text-left font-mono font-black text-white" dir="ltr">
+                                                      {money(it.total)}
+                                                    </td>
+                                                  </tr>
+                                                )
+                                              })}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      ) : (
+                                        <div className="py-3 text-slate-400 text-xs text-center bg-slate-900 rounded-xl border border-white/5">
+                                          لا توجد بنود إضافية مسجلة لهذه الفاتورة في المستودع.
+                                        </div>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>

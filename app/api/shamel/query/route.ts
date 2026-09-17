@@ -121,7 +121,11 @@ export async function GET(req: NextRequest) {
         .order(sortColumn, { ascending: sortDir === 'asc', nullsFirst: false })
 
       if (q) {
-        query = query.or(`name.ilike.%${q}%,code.ilike.%${q}%,phone.ilike.%${q}%`)
+        const tokens = q.split(/\s+/).filter(Boolean)
+        for (const rawToken of tokens) {
+          const norm = rawToken.replace(/[أإآ]/g, '_').replace(/[ةه]/g, '_')
+          query = query.or(`name.ilike.%${norm}%,code.ilike.%${rawToken}%,phone.ilike.%${rawToken}%`)
+        }
       }
       if (hideZero || status === 'has_balance') {
         query = query.or('has_balance.eq.true,equivalent_balance.neq.0,balance.neq.0')
@@ -134,16 +138,27 @@ export async function GET(req: NextRequest) {
 
     // 5. Stock Explorer
     if (kind === 'stock') {
+      let sortCol = 'code'
+      if (sortBy === 'name') sortCol = 'name'
+      else if (sortBy === 'barcode') sortCol = 'barcode'
+      else if (sortBy === 'cost_price') sortCol = 'cost_price'
+      else if (sortBy === 'quantity') sortCol = 'quantity'
+      else if (sortBy === 'price') sortCol = 'price'
+
       let query = supabase
         .from('shamel_stock')
         .select('*', { count: 'exact' })
         .eq('store_id', storeId)
-        .order('code', { ascending: true })
+        .order(sortCol, { ascending: sortDir === 'asc', nullsFirst: false })
 
       if (q) {
-        query = query.or(`name.ilike.%${q}%,code.ilike.%${q}%,barcode.ilike.%${q}%`)
+        const tokens = q.split(/\s+/).filter(Boolean)
+        for (const rawToken of tokens) {
+          const norm = rawToken.replace(/[أإآ]/g, '_').replace(/[ةه]/g, '_')
+          query = query.or(`name.ilike.%${norm}%,code.ilike.%${rawToken}%,barcode.ilike.%${rawToken}%`)
+        }
       }
-      if (status === 'in_stock') {
+      if (hideZero || status === 'in_stock') {
         query = query.gt('quantity', 0)
       }
 
