@@ -145,6 +145,30 @@ export default function ShamelStatementModal({
   const [loadingDocDetails, setLoadingDocDetails] = useState<string | null>(null)
 
   const [viewTab, setViewTab] = useState<'movements' | 'cheques'>('movements')
+  const [promotingCheques, setPromotingCheques] = useState(false)
+  const [promoteSuccess, setPromoteSuccess] = useState<string | null>(null)
+
+  const handlePromoteCustomerCheques = async () => {
+    if (!customerCode) return
+    setPromotingCheques(true)
+    setPromoteSuccess(null)
+    try {
+      const res = await fetch('/api/shamel/import-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'promote', entity: 'cheques', code: customerCode }),
+      })
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error || 'فشل ترحيل الشيكات')
+      const count = body.result?.promoted_count || data?.cheques?.length || 0
+      setPromoteSuccess(`✓ تم ترحيل وموائمة ${count.toLocaleString('ar-u-nu-latn')} شيك للزبون بنجاح إلى بازاركو!`)
+      setTimeout(() => setPromoteSuccess(null), 5000)
+    } catch (err: any) {
+      alert(err.message || 'فشل الترحيل إلى بازاركو')
+    } finally {
+      setPromotingCheques(false)
+    }
+  }
 
   useEffect(() => {
     if (!isOpen || !customerCode) return
@@ -994,7 +1018,30 @@ export default function ShamelStatementModal({
                       لا توجد شيكات مرتبطة بهذا الزبون في مستودع الشامل.
                     </div>
                   ) : (
-                    <div className="overflow-x-auto">
+                    <>
+                      <div className="p-3 bg-slate-800/60 border-b border-white/10 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-slate-200">
+                            🏦 شيكات الزبون المسجلة ({data.cheques.length.toLocaleString('ar-u-nu-latn')} شيك)
+                          </span>
+                          {promoteSuccess && (
+                            <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-lg">
+                              {promoteSuccess}
+                            </span>
+                          )}
+                        </div>
+
+                        <button
+                          onClick={handlePromoteCustomerCheques}
+                          disabled={promotingCheques || data.cheques.length === 0}
+                          className="px-3.5 py-1.5 bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold text-xs rounded-xl transition flex items-center gap-1.5 shadow-sm"
+                        >
+                          <span>{promotingCheques ? 'جاري الترحيل...' : 'ترحيل شيكات الزبون لبازاركو'}</span>
+                          <span>📥</span>
+                        </button>
+                      </div>
+
+                      <div className="overflow-x-auto">
                       <table className="w-full text-right text-xs">
                         <thead className="bg-slate-800/60 text-slate-400 border-b border-white/10">
                           <tr>
@@ -1036,8 +1083,9 @@ export default function ShamelStatementModal({
                         </tbody>
                       </table>
                     </div>
-                  )}
-                </div>
+                  </>
+                )}
+              </div>
               )}
             </div>
           ) : null}

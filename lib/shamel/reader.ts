@@ -199,9 +199,13 @@ export function parseBalances(data: Uint8Array): Map<string, number> {
   for (const r of iterateRecords(data)) {
     const code = decodeCp1256(r.subarray(0, 9))
     if (!code) continue
+    const currency = decodeCp1256(r.subarray(9, 13)).trim().toUpperCase()
     const view = new DataView(r.buffer, r.byteOffset, r.byteLength)
     const bal = -readDoubleLE(view, 21) // Balances in Shamel are stored inverted
-    map.set(code, (map.get(code) || 0) + bal)
+    // Prioritize ILS/NIS domestic currency, avoid blindly accumulating multi-currency or multi-period balances
+    if (!map.has(code) || currency === 'NIS' || currency === 'ILS') {
+      map.set(code, bal)
+    }
   }
   return map
 }
