@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { PALESTINIAN_BANKS, getPmaBankByCode, normalizeBankCode } from '@/lib/palestineBanks'
 import { tafqeet } from '@/lib/tafqeet'
+import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
 
 interface CheckItem {
   id: string
@@ -400,6 +401,11 @@ export default function ChequesClient({
 
   return (
     <div className="space-y-6">
+      {/* ── Back to Finance Hub ── */}
+      <div>
+        <BackToDashboardButton href="/dashboard/finance" label="العودة إلى لوحة إدارة المالية والسيولة" />
+      </div>
+
       {/* ── Header ── */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

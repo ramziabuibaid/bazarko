@@ -4,10 +4,13 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
-import { emailInvoice, recordInvoicePayment } from '@/app/dashboard/accounting/invoices/invoice-actions'
+import Image from 'next/image'
+import { emailInvoice, recordInvoicePayment, deleteInvoice } from '@/app/dashboard/accounting/invoices/invoice-actions'
 import { recordAuditEvent } from '@/app/dashboard/accounting/audit-actions'
 import { useToast } from '@/components/ui/Toast'
 import { useConfirm } from '@/components/ui/Confirm'
+import PrintButton from '@/components/dashboard/PrintButton'
+import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
 
 interface InvoiceItem {
   id: string
@@ -29,9 +32,12 @@ interface Invoice {
   due_date: string | null
   status: string
   subtotal: number
+  discount_type?: 'amount' | 'percentage' | null
+  discount_value?: number | null
   discount_amount: number
   total: number
   amount_paid: number
+  payment_method?: string | null
   notes: string | null
   created_at: string
 }
@@ -41,6 +47,7 @@ interface Props {
   items: InvoiceItem[]
   storeName: string
   storePhone: string | null
+  storeLogo?: string | null
   currencyCode: string
   linkedOrder: { id: string; order_number: string } | null
   storeId: string
@@ -48,14 +55,14 @@ interface Props {
 }
 
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
-  draft:     { label: 'مسودة',          cls: 'bg-slate-500/15 text-slate-300' },
-  sent:      { label: 'مُرسلة',         cls: 'bg-blue-500/15 text-blue-300' },
-  partial:   { label: 'مدفوعة جزئياً',  cls: 'bg-amber-500/15 text-amber-300' },
-  paid:      { label: 'مدفوعة',         cls: 'bg-emerald-500/15 text-emerald-300' },
-  cancelled: { label: 'ملغاة',          cls: 'bg-red-500/15 text-red-300' },
+  draft:     { label: 'غير مدفوعة',      cls: 'bg-amber-500/15 text-amber-300 border border-amber-500/30' },
+  sent:      { label: 'مُرسلة (غير مدفوعة)', cls: 'bg-blue-500/15 text-blue-300 border border-blue-500/30' },
+  partial:   { label: 'مدفوعة جزئياً',  cls: 'bg-yellow-500/15 text-yellow-300 border border-yellow-500/30' },
+  paid:      { label: 'مدفوعة بالكامل', cls: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' },
+  cancelled: { label: 'ملغاة',          cls: 'bg-red-500/15 text-red-300 border border-red-500/30' },
 }
 
-export default function InvoiceView({ invoice, items, storeName, storePhone, currencyCode, linkedOrder, storeId, userId }: Props) {
+export default function InvoiceView({ invoice, items, storeName, storePhone, storeLogo, currencyCode, linkedOrder, storeId, userId }: Props) {
   const router = useRouter()
   const supabase = createClient()
   const toast = useToast()
@@ -63,6 +70,7 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
   const [status, setStatus] = useState(invoice.status)
   const [advancing, setAdvancing] = useState(false)
   const [cancelling, setCancelling] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [showEmailForm, setShowEmailForm] = useState(false)
   const [emailTo, setEmailTo] = useState('')
   const [sending, setSending] = useState(false)
@@ -77,7 +85,11 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
 
   const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })
   const remaining = Math.max(0, invoice.total - invoice.amount_paid)
-  const sl = STATUS_LABELS[status] ?? { label: status, cls: 'bg-white/5 text-white' }
+
+  const computedStatus = (invoice.amount_paid >= invoice.total && invoice.total > 0)
+    ? 'paid'
+    : (invoice.amount_paid > 0 ? 'partial' : status)
+  const sl = STATUS_LABELS[computedStatus] ?? { label: computedStatus, cls: 'bg-white/5 text-white' }
 
   // متأخرة: تجاوزت تاريخ الاستحقاق وما زال عليها متبقٍّ
   const isOverdue = !!invoice.due_date
@@ -185,6 +197,32 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
     router.refresh()
   }
 
+  async function handleDeleteInvoice() {
+    const ok = await confirm({
+      title: 'حذف الفاتورة نهائياً',
+      message: `هل أنت متأكد من حذف الفاتورة ${invoice.invoice_number}؟ سيتم إعادة الكميات للمخزون وعكس أثر الفاتورة من كشف حساب العميل وحذف سندات القبض المرتبطة بها. لا يمكن التراجع عن هذا الإجراء!`,
+      confirmLabel: 'نعم، حذف الفاتورة',
+      cancelLabel: 'إلغاء',
+      danger: true,
+    })
+    if (!ok) return
+    setDeleting(true)
+    try {
+      const res = await deleteInvoice(invoice.id)
+      if (res.ok) {
+        toast('تم حذف الفاتورة بنجاح وإعادة المخزون')
+        router.push('/dashboard/accounting/invoices')
+        router.refresh()
+      } else {
+        toast(res.error || 'فشل حذف الفاتورة', 'error')
+      }
+    } catch (err: any) {
+      toast(err.message || 'خطأ أثناء حذف الفاتورة', 'error')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   async function handleSendEmail(e: React.FormEvent) {
     e.preventDefault()
     setSending(true)
@@ -202,6 +240,11 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
 
   return (
     <>
+      {/* زر العودة إلى لوحة إدارة المبيعات */}
+      <div className="mb-4 print:hidden">
+        <BackToDashboardButton href="/dashboard/sales" label="العودة إلى لوحة إدارة المبيعات" />
+      </div>
+
       {/* أدوات الصفحة — تختفي عند الطباعة */}
       <div className="mb-6 flex flex-wrap items-center gap-3 print:hidden">
         <Link href="/dashboard/accounting/invoices"
@@ -221,6 +264,24 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
           </Link>
         )}
         <div className="flex-1" />
+
+        {/* تعديل الفاتورة */}
+        <Link
+          href={`/dashboard/accounting/invoices/${invoice.id}/edit`}
+          className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3.5 py-2 text-sm font-medium text-sky-300 hover:bg-sky-500/20 transition"
+        >
+          ✏️ تعديل الفاتورة
+        </Link>
+
+        {/* حذف الفاتورة */}
+        <button
+          onClick={handleDeleteInvoice}
+          disabled={deleting}
+          className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2 text-sm font-medium text-rose-300 hover:bg-rose-500/20 disabled:opacity-50 transition"
+        >
+          🗑️ {deleting ? 'جارٍ الحذف...' : 'حذف'}
+        </button>
+
         {status === 'draft' && (
           <button onClick={advanceStatus} disabled={advancing}
             className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50">
@@ -249,10 +310,21 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
           className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 hover:bg-white/5">
           📧 إرسال بالإيميل
         </button>
-        <button onClick={() => window.print()}
-          className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300 hover:bg-white/5">
-          🖨️ طباعة
-        </button>
+
+        {/* طباعة عبر محرك PDF المدمج */}
+        <PrintButton
+          elementId="invoice-print"
+          filename={`invoice-${invoice.invoice_number}.pdf`}
+          label="🖨️ طباعة (PDF)"
+        />
+
+        <Link
+          href={`/dashboard/invoices/print/${invoice.id}`}
+          target="_blank"
+          className="rounded-xl border border-white/10 px-3 py-2 text-xs text-slate-400 hover:text-white transition"
+        >
+          📄 صفحة الطباعة الرسمية
+        </Link>
       </div>
 
       {/* فورم الإيميل */}
@@ -317,9 +389,20 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
       <div id="invoice-print" className="rounded-2xl border border-white/5 bg-slate-900 p-8 print:bg-white print:text-black print:border-0 print:p-6 print:rounded-none">
         {/* رأس الفاتورة */}
         <div className="mb-8 flex items-start justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-white print:text-black">فاتورة</h1>
-            <p className="mt-1 font-mono text-sky-400 print:text-sky-700" dir="ltr">{invoice.invoice_number}</p>
+          <div className="flex items-center gap-4">
+            {storeLogo && (
+              <img
+                src={storeLogo}
+                alt={storeName}
+                className="h-16 w-16 object-contain rounded-xl border border-white/10 bg-white/5 p-1 print:border-gray-300 print:bg-white"
+              />
+            )}
+            <div>
+              <h1 className="text-3xl font-bold text-white print:text-black">
+                {invoice.payment_method === 'credit' ? 'فاتورة مبيعات آجلة' : 'فاتورة مبيعات'}
+              </h1>
+              <p className="mt-1 font-mono text-sky-400 print:text-sky-700" dir="ltr">{invoice.invoice_number}</p>
+            </div>
           </div>
           <div className="text-left">
             <p className="text-lg font-semibold text-white print:text-black">{storeName}</p>
@@ -347,6 +430,20 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
                   <span className="text-white print:text-black">{new Date(invoice.due_date).toLocaleDateString('ar-u-nu-latn', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
                 </div>
               )}
+              <div className="flex justify-between gap-8">
+                <span className="text-slate-400 print:text-gray-500">طريقة الدفع</span>
+                <span className="font-semibold text-white print:text-black">
+                  {invoice.payment_method === 'credit'
+                    ? 'آجل (على الحساب)'
+                    : invoice.payment_method === 'check'
+                    ? 'شيك بنكي'
+                    : invoice.payment_method === 'card'
+                    ? 'بطاقة دفع'
+                    : invoice.payment_method === 'bank'
+                    ? 'تحويل بنكي'
+                    : 'نقداً'}
+                </span>
+              </div>
               <div className="flex justify-between gap-8">
                 <span className="text-slate-400 print:text-gray-500">الحالة</span>
                 <span className={`font-medium ${status === 'paid' ? 'text-emerald-400 print:text-emerald-700' : 'text-yellow-400 print:text-yellow-700'}`}>
@@ -395,7 +492,9 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, cur
             </div>
             {invoice.discount_amount > 0 && (
               <div className="flex justify-between">
-                <span className="text-slate-400 print:text-gray-500">خصم</span>
+                <span className="text-slate-400 print:text-gray-500">
+                  خصم {invoice.discount_type === 'percentage' && invoice.discount_value ? `(${invoice.discount_value}%)` : ''}
+                </span>
                 <span className="text-red-400 print:text-red-600" dir="ltr">- {fmt(invoice.discount_amount)} {currencyCode}</span>
               </div>
             )}

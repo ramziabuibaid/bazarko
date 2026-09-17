@@ -17,14 +17,14 @@ export default async function InvoiceDetailPage({ params }: Props) {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, currency_code, name, phone')
+    .select('id, currency_code, name, phone, logo_url')
     .eq('id', storeId)
     .single()
   if (!store) redirect('/onboarding')
 
   const { data: invoice } = await supabase
     .from('invoices')
-    .select('id, invoice_number, order_id, customer_name, customer_phone, customer_address, customer_id, issue_date, due_date, status, subtotal, discount_amount, total, amount_paid, notes, created_at')
+    .select('id, invoice_number, order_id, customer_name, customer_phone, customer_address, customer_id, issue_date, due_date, status, subtotal, discount_type, discount_value, discount_amount, total, amount_paid, payment_method, notes, created_at')
     .eq('id', params.id)
     .eq('store_id', store.id)
     .single()
@@ -47,12 +47,13 @@ export default async function InvoiceDetailPage({ params }: Props) {
   ])
 
   return (
-    <div className="p-4 sm:p-6 max-w-4xl">
+    <div className="p-4 sm:p-6 max-w-4xl" dir="rtl">
       <InvoiceView
-        invoice={invoice}
+        invoice={invoice as any}
         items={items ?? []}
         storeName={store.name}
         storePhone={(store as { phone?: string | null }).phone ?? null}
+        storeLogo={(store as { logo_url?: string | null }).logo_url ?? null}
         currencyCode={store.currency_code}
         linkedOrder={linkedOrder ?? null}
         storeId={store.id}

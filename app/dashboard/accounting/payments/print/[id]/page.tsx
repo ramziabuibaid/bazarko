@@ -22,7 +22,7 @@ export default async function PrintPaymentPage({ params }: { params: { id: strin
     { data: voucher }
   ] = await Promise.all([
     supabase.from('stores').select('*').eq('id', storeId).single(),
-    supabase.from('vouchers').select('*').eq('id', params.id).eq('store_id', storeId).eq('type', 'payment').single()
+    supabase.from('vouchers').select('*, purchase_invoices(invoice_number), cash_boxes(name)').eq('id', params.id).eq('store_id', storeId).eq('type', 'payment').single()
   ])
 
   if (!store || !voucher) notFound()
@@ -36,8 +36,11 @@ export default async function PrintPaymentPage({ params }: { params: { id: strin
     bank: 'تحويل بنكي',
     card: 'بطاقة ائتمانية',
     transfer: 'تحويل إلكتروني',
-    cheque: 'شيك مصرفي صادر',
+    cheque: 'شيكات مصرفية صادرة',
+    split: 'نقدي + شيكات (دفع مركب)',
   }
+
+  const checks: any[] = voucher.checks_data || []
 
   return (
     <div className="min-h-screen bg-slate-100 p-4 sm:p-8 text-slate-900 font-sans print:p-0 print:bg-white" dir="rtl">
@@ -49,17 +52,31 @@ export default async function PrintPaymentPage({ params }: { params: { id: strin
         >
           ← العودة لسندات الصرف
         </Link>
-        <PrintButton label="🖨️ طباعة السند (Print / PDF)" className="rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white hover:bg-red-500 transition" />
+        <PrintButton
+          elementId="payment-print-canvas"
+          filename={`سند-صرف-${voucher.voucher_number}.pdf`}
+          label="🖨️ طباعة السند (Print / PDF)"
+          className="rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white hover:bg-red-500 transition"
+        />
       </div>
 
       {/* ── Official Paper Canvas ── */}
-      <div className="mx-auto max-w-3xl rounded-2xl border-2 border-slate-900 bg-white p-8 shadow-md print:border-none print:shadow-none print:p-4">
+      <div id="payment-print-canvas" className="mx-auto max-w-3xl rounded-2xl border-2 border-slate-900 bg-white p-8 shadow-md print:border-none print:shadow-none print:p-4">
         {/* Header */}
         <div className="flex items-start justify-between border-b-2 border-slate-900 pb-5">
-          <div>
-            <h1 className="text-2xl font-black text-slate-950">{store.name}</h1>
-            <p className="text-xs text-slate-600 mt-0.5">{store.address || 'فلسطين'}</p>
-            {store.phone && <p className="text-xs text-slate-600">هاتف: {store.phone}</p>}
+          <div className="flex items-center gap-4">
+            {store.logo_url && (
+              <img
+                src={store.logo_url}
+                alt={store.name}
+                className="h-16 w-16 rounded-xl object-contain border border-slate-200"
+              />
+            )}
+            <div>
+              <h1 className="text-2xl font-black text-slate-950">{store.name}</h1>
+              <p className="text-xs text-slate-600 mt-0.5">{store.address || 'فلسطين'}</p>
+              {store.phone && <p className="text-xs text-slate-600">هاتف: {store.phone}</p>}
+            </div>
           </div>
 
           <div className="text-center">
@@ -79,11 +96,11 @@ export default async function PrintPaymentPage({ params }: { params: { id: strin
 
         {/* Voucher Body */}
         <div className="my-6 space-y-4 text-sm">
-          {/* Paid To */}
+          {/* Pay To */}
           <div className="flex items-center gap-3 border-b border-slate-200 pb-3">
-            <span className="font-bold text-slate-700 min-w-36">ادفعوا للسيد / الجهة:</span>
+            <span className="font-bold text-slate-700 min-w-36">يُصرف إلى السيد / السادة:</span>
             <span className="flex-1 font-bold text-base text-slate-950 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
-              {voucher.party_name || 'مستفيد عام'}
+              {voucher.party_name || 'مصاريف عامة'}
             </span>
           </div>
 
@@ -97,12 +114,60 @@ export default async function PrintPaymentPage({ params }: { params: { id: strin
             </div>
 
             <div className="flex items-center gap-3 border-b border-slate-200 pb-3">
-              <span className="font-bold text-slate-700">طريقة الصرف:</span>
+              <span className="font-bold text-slate-700">طريقة الصرف والدفع:</span>
               <span className="font-bold text-slate-900 bg-slate-50 px-3 py-1 rounded-lg border border-slate-200">
                 {paymentMethodLabel[voucher.payment_method] || voucher.payment_method}
               </span>
             </div>
           </div>
+
+          {/* Breakdown for Cash & Cheques if Split or Cheque */}
+          {(voucher.payment_method === 'split' || voucher.payment_method === 'cheque') && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+              <h4 className="text-xs font-black text-slate-800 border-b border-slate-200 pb-1.5">
+                تفاصيل وسائل الصرف المرفقة بالسند:
+              </h4>
+
+              {voucher.cash_amount > 0 && (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-700">المبلغ المصروف نقداً:</span>
+                  <span className="font-mono font-bold text-slate-950" dir="ltr">
+                    {Number(voucher.cash_amount).toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currency}
+                  </span>
+                </div>
+              )}
+
+              {checks.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="font-bold text-xs text-slate-700 block">بيانات الشيكات الصادرة:</span>
+                  <table className="w-full text-right text-xs border border-slate-200 bg-white">
+                    <thead>
+                      <tr className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700">
+                        <th className="p-1.5">رقم الشيك</th>
+                        <th className="p-1.5">البنك</th>
+                        <th className="p-1.5">تاريخ الاستحقاق</th>
+                        <th className="p-1.5">المستفيد</th>
+                        <th className="p-1.5 text-left">المبلغ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-mono">
+                      {checks.map((chk: any, idx: number) => (
+                        <tr key={idx}>
+                          <td className="p-1.5 font-bold" dir="ltr">{chk.check_number}</td>
+                          <td className="p-1.5 font-sans">{chk.bank_name}</td>
+                          <td className="p-1.5">{chk.due_date}</td>
+                          <td className="p-1.5 font-sans">{chk.payee_name || '—'}</td>
+                          <td className="p-1.5 text-left font-bold" dir="ltr">
+                            {Number(chk.amount).toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currency}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Tafqeet Words */}
           <div className="flex items-start gap-3 border-b border-slate-200 pb-3">
@@ -120,8 +185,21 @@ export default async function PrintPaymentPage({ params }: { params: { id: strin
             </span>
           </div>
 
-          {/* Reference / Category */}
-          <div className="grid grid-cols-2 gap-4 text-xs">
+          {/* Reference / Category / Linked Purchase */}
+          <div className="grid grid-cols-3 gap-4 text-xs">
+            {voucher.purchase_invoices?.invoice_number ? (
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 font-bold">فاتورة الشراء المسددة:</span>
+                <span className="font-mono font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200" dir="ltr">
+                  {voucher.purchase_invoices.invoice_number}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 font-bold">الربط:</span>
+                <span className="text-slate-600 font-medium">قيد مباشر على حساب المورد</span>
+              </div>
+            )}
             {voucher.reference && (
               <div className="flex items-center gap-2">
                 <span className="text-slate-500 font-bold">رقم المرجع:</span>
@@ -144,11 +222,11 @@ export default async function PrintPaymentPage({ params }: { params: { id: strin
             <p className="border-t border-dashed border-slate-400 pt-1">التوقيع</p>
           </div>
           <div>
-            <p className="text-slate-500 mb-10">المدير المالي / الاعتماد</p>
-            <p className="border-t border-dashed border-slate-400 pt-1">التوقيع والختم</p>
+            <p className="text-slate-500 mb-10">مدير الحسابات / الاعتماد</p>
+            <p className="border-t border-dashed border-slate-400 pt-1">التوقيع</p>
           </div>
           <div>
-            <p className="text-slate-500 mb-10">توقيع المستلم</p>
+            <p className="text-slate-500 mb-10">المستلم / المستفيد</p>
             <p className="border-t border-dashed border-slate-400 pt-1">التوقيع</p>
           </div>
         </div>

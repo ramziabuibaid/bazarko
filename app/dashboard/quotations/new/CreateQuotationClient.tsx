@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
 
 interface Customer {
   id: string
@@ -152,6 +153,11 @@ export default function CreateQuotationClient({ store, customers, products }: Pr
 
   return (
     <div className="space-y-6">
+      {/* ── Back to Sales Hub ── */}
+      <div>
+        <BackToDashboardButton href="/dashboard/sales" label="العودة إلى لوحة إدارة المبيعات" />
+      </div>
+
       {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <div>

@@ -27,7 +27,7 @@ export default async function DashboardPage() {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, currency_code, secondary_currency_code, exchange_rate, is_active, suspended_at, logo_url, phone, whatsapp, subdomain, country_code')
+    .select('id, currency_code, secondary_currency_code, exchange_rate, is_active, suspended_at, logo_url, phone, whatsapp, subdomain, country_code, plan')
     .eq('id', storeId)
     .single()
   if (!store) redirect('/onboarding')
@@ -53,12 +53,19 @@ export default async function DashboardPage() {
   thirtyDaysAgo.setHours(0, 0, 0, 0)
   const thirtyDaysAgoStr = thirtyDaysAgo.toISOString()
 
+  const todayDateStr = now.toISOString().slice(0, 10)
+  const threeDaysLater = new Date(now)
+  threeDaysLater.setDate(threeDaysLater.getDate() + 3)
+  const threeDaysLaterStr = threeDaysLater.toISOString().slice(0, 10)
+
   const [
     ordersRes, customersRes, productsRes, revenueRes,
     todayOrdersRes, todayRevenueRes,
     twoWeeksOrdersRes, recentOrdersRes,
     processingRes, paidOrderIdsRes,
     newOrdersRes, lowStockRes, debtCustomersRes,
+    todayVouchersRes, todayInvoicesRes, todayPurchasesRes,
+    overdueInvoicesRes, supplierPayablesRes, checksRes,
   ] = await Promise.all([
     supabase.from('orders').select('id', { count: 'exact', head: true }).eq('store_id', storeId),
     supabase.from('customers').select('id', { count: 'exact', head: true }).eq('store_id', storeId),
@@ -74,6 +81,13 @@ export default async function DashboardPage() {
     supabase.from('orders').select('id', { count: 'exact', head: true }).eq('store_id', storeId).eq('status', 'pending'),
     supabase.from('products').select('id, stock_available, low_stock_alert').eq('store_id', storeId).eq('track_stock', true).eq('is_active', true),
     supabase.from('customers').select('balance').eq('store_id', storeId).gt('balance', 0),
+    // النبض المالي والتنبيهات
+    supabase.from('vouchers').select('type, amount').eq('store_id', storeId).eq('date', todayDateStr),
+    supabase.from('invoices').select('total').eq('store_id', storeId).eq('issue_date', todayDateStr).neq('status', 'cancelled'),
+    supabase.from('purchase_invoices').select('total_amount').eq('store_id', storeId).eq('invoice_date', todayDateStr),
+    supabase.from('invoices').select('id, invoice_number, total, amount_paid, due_date').eq('store_id', storeId).neq('status', 'paid').neq('status', 'cancelled').lt('due_date', todayDateStr),
+    supabase.from('suppliers').select('balance').eq('store_id', storeId).gt('balance', 0),
+    supabase.from('checks').select('id, check_number, amount, due_date, bank_name, status, type').eq('store_id', storeId).in('status', ['in_portfolio', 'bounced']),
   ])
 
   // Top products — sequential query using paid order IDs
@@ -128,6 +142,31 @@ export default async function DashboardPage() {
   const quickLowStock   = (allTrackedProducts as { id: string; stock_available: number; low_stock_alert: number | null }[]).filter(p =>
     p.stock_available <= 0 || (p.low_stock_alert != null && p.low_stock_alert > 0 && p.stock_available <= p.low_stock_alert)
   ).length
+
+  // ── النبض المالي ومحفظة الشيكات ──
+  const todayVouchers = (todayVouchersRes.data ?? []) as { type: string; amount: number }[]
+  const todayReceipts = todayVouchers.filter(v => v.type === 'receipt').reduce((s, v) => s + Number(v.amount || 0), 0)
+  const todayPayments = todayVouchers.filter(v => v.type === 'payment').reduce((s, v) => s + Number(v.amount || 0), 0)
+  const todayNetCash = todayReceipts - todayPayments
+  const todayInvoiceSales = (todayInvoicesRes.data ?? []).reduce((s: number, i: { total: number | null }) => s + Number(i.total || 0), 0)
+  const todayPurchasesTotal = (todayPurchasesRes.data ?? []).reduce((s: number, p: { total_amount: number | null }) => s + Number(p.total_amount || 0), 0)
+
+  const totalCustomerDebt = quickDebtTotal
+  const totalSupplierDebt = (supplierPayablesRes.data ?? []).reduce((s: number, sup: { balance: number | null }) => s + Number(sup.balance || 0), 0)
+  const supplierDebtCount = supplierPayablesRes.data?.length ?? 0
+
+  type CheckItemRow = { id: string; check_number: string; amount: number; due_date: string; bank_name: string; status: string; type: string }
+  const allChecks = (checksRes.data ?? []) as CheckItemRow[]
+  const checksPortfolio = allChecks.filter(c => c.status === 'in_portfolio')
+  const checksPortfolioTotal = checksPortfolio.reduce((s, c) => s + Number(c.amount || 0), 0)
+  const checksDueSoon = checksPortfolio.filter(c => c.due_date && c.due_date >= todayDateStr && c.due_date <= threeDaysLaterStr)
+  const checksDueSoonTotal = checksDueSoon.reduce((s, c) => s + Number(c.amount || 0), 0)
+  const checksBounced = allChecks.filter(c => c.status === 'bounced')
+  const checksBouncedTotal = checksBounced.reduce((s, c) => s + Number(c.amount || 0), 0)
+
+  type OverdueInvRow = { id: string; invoice_number: string; total: number; amount_paid: number; due_date: string }
+  const overdueInvoices = (overdueInvoicesRes.data ?? []) as OverdueInvRow[]
+  const overdueInvoicesTotal = overdueInvoices.reduce((s, i) => s + Math.max(0, Number(i.total || 0) - Number(i.amount_paid || 0)), 0)
 
   // Core metrics
   const totalRevenue    = (revenueRes.data ?? []).reduce((s: number, o: { total_amount: number | null }) => s + (o.total_amount ?? 0), 0)
@@ -241,6 +280,95 @@ export default async function DashboardPage() {
         />
       )}
 
+      {/* ── شريط التنبيهات الذكية الاستباقية ── */}
+      {(checksDueSoon.length > 0 || overdueInvoices.length > 0 || checksBounced.length > 0) && (
+        <div className="space-y-2.5">
+          {checksDueSoon.length > 0 && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/15 via-slate-900 to-slate-900 p-4 shadow-lg shadow-amber-500/5">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/20 text-xl border border-amber-500/30">
+                  ⏳
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="font-bold text-white text-sm">شيكات تستحق خلال 3 أيام</p>
+                    <span className="rounded-full bg-amber-500/20 border border-amber-500/30 px-2 py-0.5 text-[11px] font-bold text-amber-400">
+                      مطلوب تحصيل / صرف
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    يوجد <span className="font-mono font-bold text-amber-400">{checksDueSoon.length}</span> شيك بقيمة إجمالية{' '}
+                    <span className="font-mono font-bold text-white">{fmt(checksDueSoonTotal)} {cc}</span> تستحق في موعد أقصاه {threeDaysLaterStr}
+                  </p>
+                </div>
+              </div>
+              <Link
+                href="/dashboard/cheques"
+                className="shrink-0 rounded-xl bg-amber-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-amber-400 transition text-center"
+              >
+                متابعة محفظة الشيكات ←
+              </Link>
+            </div>
+          )}
+
+          {overdueInvoices.length > 0 && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-rose-500/30 bg-gradient-to-r from-rose-500/15 via-slate-900 to-slate-900 p-4 shadow-lg shadow-rose-500/5">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-500/20 text-xl border border-rose-500/30">
+                  🚨
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="font-bold text-white text-sm">فواتير مبيعات متأخرة عن موعد السداد</p>
+                    <span className="rounded-full bg-rose-500/20 border border-rose-500/30 px-2 py-0.5 text-[11px] font-bold text-rose-400">
+                      ذمم مستحقة
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    يوجد <span className="font-mono font-bold text-rose-400">{overdueInvoices.length}</span> فاتورة مبيعات تجاوزت تاريخ الاستحقاق بقيمة غير مسددة{' '}
+                    <span className="font-mono font-bold text-white">{fmt(overdueInvoicesTotal)} {cc}</span>
+                  </p>
+                </div>
+              </div>
+              <Link
+                href="/dashboard/accounting/invoices"
+                className="shrink-0 rounded-xl bg-rose-500 px-4 py-2 text-xs font-bold text-white hover:bg-rose-600 transition text-center"
+              >
+                عرض الفواتير المتأخرة ←
+              </Link>
+            </div>
+          )}
+
+          {checksBounced.length > 0 && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-red-500/30 bg-gradient-to-r from-red-500/15 via-slate-900 to-slate-900 p-4 shadow-lg shadow-red-500/5">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-500/20 text-xl border border-red-500/30">
+                  ⚠️
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="font-bold text-white text-sm">شيكات راجعة / مرتجعة تحتاج تسوية</p>
+                    <span className="rounded-full bg-red-500/20 border border-red-500/30 px-2 py-0.5 text-[11px] font-bold text-red-400">
+                      شيك مرتجع
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    يوجد <span className="font-mono font-bold text-red-400">{checksBounced.length}</span> شيك مرتجع بقيمة{' '}
+                    <span className="font-mono font-bold text-white">{fmt(checksBouncedTotal)} {cc}</span> لم يتم تسويتها بعد
+                  </p>
+                </div>
+              </div>
+              <Link
+                href="/dashboard/cheques"
+                className="shrink-0 rounded-xl border border-red-500/40 bg-red-500/20 px-4 py-2 text-xs font-bold text-red-300 hover:bg-red-500/30 transition text-center"
+              >
+                تسوية الشيكات المرتجعة ←
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── بطاقة الحالة السريعة ── */}
       {!isNewStore && (
         <div className="rounded-2xl border border-white/5 bg-slate-900 p-4">
@@ -352,6 +480,281 @@ export default async function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* ── نبض اليوم المالي والتشغيلي ── */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+            <span>⚡</span> نبض اليوم المالي والتشغيلي
+          </h2>
+          <span className="text-xs text-slate-400">تحديث لحظي للمقبوضات والمدفوعات وصافي النقد</span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          {/* مبيعات اليوم */}
+          <div className="rounded-2xl border border-sky-500/20 bg-slate-900 p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-400">مبيعات اليوم</span>
+              <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-bold text-sky-400">فواتير + متجر</span>
+            </div>
+            <p className="mt-2 text-xl font-black text-white font-mono">
+              {fmt(todayRevenue + todayInvoiceSales)}{' '}
+              <span className="text-xs text-sky-400 font-bold">{cc}</span>
+            </p>
+            <p className="mt-1 text-[11px] text-slate-500 truncate">
+              {todayOrders} طلب متجر · مبيعات اليوم
+            </p>
+          </div>
+
+          {/* مقبوضات اليوم */}
+          <div className="rounded-2xl border border-emerald-500/20 bg-slate-900 p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-emerald-400">مقبوضات اليوم</span>
+              <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400">سند قبض</span>
+            </div>
+            <p className="mt-2 text-xl font-black text-emerald-400 font-mono">
+              {fmt(todayReceipts)}{' '}
+              <span className="text-xs text-emerald-300 font-bold">{cc}</span>
+            </p>
+            <p className="mt-1 text-[11px] text-slate-500 truncate">نقد + شيكات مقبوضة</p>
+          </div>
+
+          {/* مدفوعات ومصروفات اليوم */}
+          <div className="rounded-2xl border border-rose-500/20 bg-slate-900 p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-rose-400">مدفوعات اليوم</span>
+              <span className="rounded-md bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-bold text-rose-400">سند صرف</span>
+            </div>
+            <p className="mt-2 text-xl font-black text-rose-400 font-mono">
+              {fmt(todayPayments)}{' '}
+              <span className="text-xs text-rose-300 font-bold">{cc}</span>
+            </p>
+            <p className="mt-1 text-[11px] text-slate-500 truncate">صرف ومصاريف وموردين</p>
+          </div>
+
+          {/* مشتريات اليوم */}
+          <div className="rounded-2xl border border-blue-500/20 bg-slate-900 p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-blue-400">مشتريات اليوم</span>
+              <span className="rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-bold text-blue-400">فواتير شراء</span>
+            </div>
+            <p className="mt-2 text-xl font-black text-blue-400 font-mono">
+              {fmt(todayPurchasesTotal)}{' '}
+              <span className="text-xs text-blue-300 font-bold">{cc}</span>
+            </p>
+            <p className="mt-1 text-[11px] text-slate-500 truncate">بضاعة واردة للمستودع</p>
+          </div>
+
+          {/* صافي السيولة النقدية اليوم */}
+          <div className={`col-span-2 sm:col-span-1 rounded-2xl border p-4 shadow-sm ${
+            todayNetCash >= 0 ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-rose-500/30 bg-rose-500/5'
+          }`}>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-300">صافي السيولة اليوم</span>
+              <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+                todayNetCash >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+              }`}>
+                {todayNetCash >= 0 ? 'فائض نقد' : 'عجز نقد'}
+              </span>
+            </div>
+            <p className={`mt-2 text-xl font-black font-mono ${todayNetCash >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {todayNetCash >= 0 ? `+${fmt(todayNetCash)}` : fmt(todayNetCash)}{' '}
+              <span className="text-xs font-bold">{cc}</span>
+            </p>
+            <p className="mt-1 text-[11px] text-slate-400 truncate">المقبوضات - المدفوعات</p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── مؤشرات الذمم ومحفظة الشيكات ── */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+            <span>⚖️</span> الذمم ومحفظة الشيكات
+          </h2>
+          <span className="text-xs text-slate-400">مراقبة السيولة والديون ومحفظة الشيكات</span>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {/* ذمم الزبائن والعملاء */}
+          <Link
+            href="/dashboard/customers"
+            className="group rounded-2xl border border-white/10 bg-slate-900 p-5 hover:border-sky-500/30 transition shadow-sm"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-400">ديون العملاء (الذمم المدينة)</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-500/10 text-sky-400 text-sm">
+                👥
+              </span>
+            </div>
+            <p className="mt-2 text-2xl font-black text-white font-mono">
+              {fmt(totalCustomerDebt)} <span className="text-xs text-sky-400 font-bold">{cc}</span>
+            </p>
+            <div className="mt-2 flex items-center justify-between text-xs text-slate-400 border-t border-white/5 pt-2">
+              <span>{quickDebtCount} عميل مدين</span>
+              <span className="font-bold text-sky-400 group-hover:underline">كشوف العملاء ←</span>
+            </div>
+          </Link>
+
+          {/* التزامات الموردين */}
+          <Link
+            href="/dashboard/suppliers"
+            className="group rounded-2xl border border-white/10 bg-slate-900 p-5 hover:border-amber-500/30 transition shadow-sm"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-400">مستحقات الموردين (الذمم الدائنة)</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 text-sm">
+                🏭
+              </span>
+            </div>
+            <p className="mt-2 text-2xl font-black text-amber-400 font-mono">
+              {fmt(totalSupplierDebt)} <span className="text-xs text-amber-300 font-bold">{cc}</span>
+            </p>
+            <div className="mt-2 flex items-center justify-between text-xs text-slate-400 border-t border-white/5 pt-2">
+              <span>{supplierDebtCount} مورد دائن</span>
+              <span className="font-bold text-amber-400 group-hover:underline">كشوف الموردين ←</span>
+            </div>
+          </Link>
+
+          {/* محفظة الشيكات */}
+          <Link
+            href="/dashboard/cheques"
+            className="group rounded-2xl border border-white/10 bg-slate-900 p-5 hover:border-purple-500/30 transition shadow-sm"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-400">محفظة الشيكات (برسم التحصيل)</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-500/10 text-purple-400 text-sm">
+                📑
+              </span>
+            </div>
+            <p className="mt-2 text-2xl font-black text-purple-400 font-mono">
+              {fmt(checksPortfolioTotal)} <span className="text-xs text-purple-300 font-bold">{cc}</span>
+            </p>
+            <div className="mt-2 flex items-center justify-between text-xs text-slate-400 border-t border-white/5 pt-2">
+              <span>{checksPortfolio.length} شيك بالمحفظة</span>
+              <span className="font-bold text-purple-400 group-hover:underline">إدارة المحفظة ←</span>
+            </div>
+          </Link>
+        </div>
+      </div>
+
+      {/* ── بوابات النظام الرئيسية (الخطة الاحترافية) ── */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+            <span>🗂️</span> أقسام ولوحات النظام الرئيسية
+          </h2>
+          <span className="text-xs text-slate-400">وصول مباشر للـ Dashboards المتخصصة</span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <Link
+            href="/dashboard/sales"
+            className="group flex flex-col justify-between rounded-2xl border border-sky-500/30 bg-gradient-to-br from-sky-500/15 via-slate-900 to-slate-900 p-4 transition-all duration-200 hover:-translate-y-1 hover:border-sky-400 hover:shadow-lg hover:shadow-sky-500/10"
+          >
+            <div>
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-500/20 text-2xl mb-3 shadow-inner">
+                📈
+              </span>
+              <h3 className="font-bold text-white text-sm group-hover:text-sky-400 transition-colors">إدارة المبيعات</h3>
+              <p className="mt-1 text-[11px] text-slate-400 line-clamp-2">الفواتير، المرتجعات، عروض الأسعار، POS، والعملاء</p>
+            </div>
+            <div className="mt-4 flex items-center justify-between text-[11px] font-bold text-sky-400">
+              <span>فتح اللوحة</span>
+              <span className="transition-transform group-hover:-translate-x-1">←</span>
+            </div>
+          </Link>
+
+          <Link
+            href="/dashboard/purchases-hub"
+            className="group flex flex-col justify-between rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-500/15 via-slate-900 to-slate-900 p-4 transition-all duration-200 hover:-translate-y-1 hover:border-blue-400 hover:shadow-lg hover:shadow-blue-500/10"
+          >
+            <div>
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-500/20 text-2xl mb-3 shadow-inner">
+                🛒
+              </span>
+              <h3 className="font-bold text-white text-sm group-hover:text-blue-400 transition-colors">إدارة المشتريات</h3>
+              <p className="mt-1 text-[11px] text-slate-400 line-clamp-2">فواتير الشراء، مردود المشتريات، ودليل الموردين</p>
+            </div>
+            <div className="mt-4 flex items-center justify-between text-[11px] font-bold text-blue-400">
+              <span>فتح اللوحة</span>
+              <span className="transition-transform group-hover:-translate-x-1">←</span>
+            </div>
+          </Link>
+
+          {(store.plan === 'pro' || store.plan === 'basic') && (
+            <Link
+              href="/dashboard/finance"
+              className="group flex flex-col justify-between rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/15 via-slate-900 to-slate-900 p-4 transition-all duration-200 hover:-translate-y-1 hover:border-emerald-400 hover:shadow-lg hover:shadow-emerald-500/10"
+            >
+              <div>
+                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/20 text-2xl mb-3 shadow-inner">
+                  💵
+                </span>
+                <h3 className="font-bold text-white text-sm group-hover:text-emerald-400 transition-colors">الإدارة المالية</h3>
+                <p className="mt-1 text-[11px] text-slate-400 line-clamp-2">الشيكات، البنوك، القبض والصرف، والصندوق</p>
+              </div>
+              <div className="mt-4 flex items-center justify-between text-[11px] font-bold text-emerald-400">
+                <span>فتح اللوحة</span>
+                <span className="transition-transform group-hover:-translate-x-1">←</span>
+              </div>
+            </Link>
+          )}
+
+          {(store.plan === 'pro' || store.plan === 'basic') && (
+            <Link
+              href="/dashboard/accounting-hub"
+              className="group flex flex-col justify-between rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/15 via-slate-900 to-slate-900 p-4 transition-all duration-200 hover:-translate-y-1 hover:border-purple-400 hover:shadow-lg hover:shadow-purple-500/10"
+            >
+              <div>
+                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-purple-500/20 text-2xl mb-3 shadow-inner">
+                  ⚖️
+                </span>
+                <h3 className="font-bold text-white text-sm group-hover:text-purple-400 transition-colors">المحاسبة والتقارير</h3>
+                <p className="mt-1 text-[11px] text-slate-400 line-clamp-2">شجرة الحسابات، قيود اليومية، والقوائم الختامية</p>
+              </div>
+              <div className="mt-4 flex items-center justify-between text-[11px] font-bold text-purple-400">
+                <span>فتح اللوحة</span>
+                <span className="transition-transform group-hover:-translate-x-1">←</span>
+              </div>
+            </Link>
+          )}
+
+          <Link
+            href="/dashboard/inventory-hub"
+            className="group flex flex-col justify-between rounded-2xl border border-teal-500/30 bg-gradient-to-br from-teal-500/15 via-slate-900 to-slate-900 p-4 transition-all duration-200 hover:-translate-y-1 hover:border-teal-400 hover:shadow-lg hover:shadow-teal-500/10"
+          >
+            <div>
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-teal-500/20 text-2xl mb-3 shadow-inner">
+                📦
+              </span>
+              <h3 className="font-bold text-white text-sm group-hover:text-teal-400 transition-colors">إدارة المخزون</h3>
+              <p className="mt-1 text-[11px] text-slate-400 line-clamp-2">المنتجات، الحركات، التنبيهات، والماركات</p>
+            </div>
+            <div className="mt-4 flex items-center justify-between text-[11px] font-bold text-teal-400">
+              <span>فتح اللوحة</span>
+              <span className="transition-transform group-hover:-translate-x-1">←</span>
+            </div>
+          </Link>
+
+          <Link
+            href="/dashboard/store-hub"
+            className="group flex flex-col justify-between rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-500/15 via-slate-900 to-slate-900 p-4 transition-all duration-200 hover:-translate-y-1 hover:border-indigo-400 hover:shadow-lg hover:shadow-indigo-500/10"
+          >
+            <div>
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-500/20 text-2xl mb-3 shadow-inner">
+                🌐
+              </span>
+              <h3 className="font-bold text-white text-sm group-hover:text-indigo-400 transition-colors">المتجر الإلكتروني</h3>
+              <p className="mt-1 text-[11px] text-slate-400 line-clamp-2">الطلبيات، العروض، حملات WhatsApp، والتقييمات</p>
+            </div>
+            <div className="mt-4 flex items-center justify-between text-[11px] font-bold text-indigo-400">
+              <span>فتح اللوحة</span>
+              <span className="transition-transform group-hover:-translate-x-1">←</span>
+            </div>
+          </Link>
+        </div>
+      </div>
 
       {/* ── خطوات البدء السريع ── */}
       {showSetup && (

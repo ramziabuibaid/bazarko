@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
 import FeatureGate from '@/components/dashboard/FeatureGate'
+import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
 
 export const metadata = {
   title: 'عروض الأسعار — Bazarko ERP',
@@ -47,6 +48,11 @@ export default async function QuotationsPage() {
       icon="📑"
     >
     <div className="space-y-6">
+      {/* ── Back to Sales Hub ── */}
+      <div>
+        <BackToDashboardButton href="/dashboard/sales" label="العودة إلى لوحة إدارة المبيعات" />
+      </div>
+
       {/* ── Header ── */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -78,7 +84,7 @@ export default async function QuotationsPage() {
                 <th className="p-3.5">ساري حتى</th>
                 <th className="p-3.5">الحالة</th>
                 <th className="p-3.5">المبلغ الإجمالي</th>
-                <th className="p-3.5 text-center">الطباعة</th>
+                <th className="p-3.5 text-center">الإجراءات</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5 text-slate-200">
@@ -123,13 +129,22 @@ export default async function QuotationsPage() {
                       </td>
 
                       <td className="p-3.5 text-center">
-                        <Link
-                          href={`/dashboard/quotations/print/${q.id}`}
-                          className="rounded-lg border border-white/10 bg-white/5 p-1.5 text-slate-400 hover:text-white transition"
-                          title="طباعة عرض السعر"
-                        >
-                          🖨️
-                        </Link>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <Link
+                            href={`/dashboard/accounting/invoices/new?from_quotation=${q.id}`}
+                            className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-2 py-1 text-[11px] font-bold text-emerald-400 hover:bg-emerald-500/20 transition whitespace-nowrap"
+                            title="تحويل عرض السعر إلى فاتورة مبيعات"
+                          >
+                            🧾 تحويل لفاتورة
+                          </Link>
+                          <Link
+                            href={`/dashboard/quotations/print/${q.id}`}
+                            className="rounded-lg border border-white/10 bg-white/5 p-1.5 text-slate-400 hover:text-white transition"
+                            title="طباعة عرض السعر"
+                          >
+                            🖨️
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   )

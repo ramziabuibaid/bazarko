@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
+import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
 
 export const metadata = {
   title: 'فواتير المشتريات — Bazarko ERP',
@@ -32,6 +33,11 @@ export default async function PurchasesPage() {
 
   return (
     <div className="space-y-6">
+      {/* ── Back to Purchases Hub ── */}
+      <div>
+        <BackToDashboardButton href="/dashboard/purchases-hub" label="العودة إلى لوحة إدارة المشتريات" />
+      </div>
+
       {/* ── Header ── */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

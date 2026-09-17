@@ -22,7 +22,7 @@ export default async function PrintReceiptPage({ params }: { params: { id: strin
     { data: voucher }
   ] = await Promise.all([
     supabase.from('stores').select('*').eq('id', storeId).single(),
-    supabase.from('vouchers').select('*').eq('id', params.id).eq('store_id', storeId).eq('type', 'receipt').single()
+    supabase.from('vouchers').select('*, invoices(invoice_number), cash_boxes(name)').eq('id', params.id).eq('store_id', storeId).eq('type', 'receipt').single()
   ])
 
   if (!store || !voucher) notFound()
@@ -47,8 +47,11 @@ export default async function PrintReceiptPage({ params }: { params: { id: strin
     bank: 'تحويل بنكي',
     card: 'بطاقة ائتمانية',
     transfer: 'تحويل إلكتروني',
-    cheque: 'شيك مصرفي',
+    cheque: 'شيكات مصرفية',
+    split: 'نقدي + شيكات (دفع مركب)',
   }
+
+  const checks: any[] = voucher.checks_data || []
 
   return (
     <div className="min-h-screen bg-slate-100 p-4 sm:p-8 text-slate-900 font-sans print:p-0 print:bg-white" dir="rtl">
@@ -60,17 +63,31 @@ export default async function PrintReceiptPage({ params }: { params: { id: strin
         >
           ← العودة لسندات القبض
         </Link>
-        <PrintButton label="🖨️ طباعة السند (Print / PDF)" className="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 transition" />
+        <PrintButton
+          elementId="receipt-print-canvas"
+          filename={`سند-قبض-${voucher.voucher_number}.pdf`}
+          label="🖨️ طباعة السند (Print / PDF)"
+          className="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 transition"
+        />
       </div>
 
       {/* ── Official Paper Canvas ── */}
-      <div className="mx-auto max-w-3xl rounded-2xl border-2 border-slate-900 bg-white p-8 shadow-md print:border-none print:shadow-none print:p-4">
+      <div id="receipt-print-canvas" className="mx-auto max-w-3xl rounded-2xl border-2 border-slate-900 bg-white p-8 shadow-md print:border-none print:shadow-none print:p-4">
         {/* Header */}
         <div className="flex items-start justify-between border-b-2 border-slate-900 pb-5">
-          <div>
-            <h1 className="text-2xl font-black text-slate-950">{store.name}</h1>
-            <p className="text-xs text-slate-600 mt-0.5">{store.address || 'فلسطين'}</p>
-            {store.phone && <p className="text-xs text-slate-600">هاتف: {store.phone}</p>}
+          <div className="flex items-center gap-4">
+            {store.logo_url && (
+              <img
+                src={store.logo_url}
+                alt={store.name}
+                className="h-16 w-16 rounded-xl object-contain border border-slate-200"
+              />
+            )}
+            <div>
+              <h1 className="text-2xl font-black text-slate-950">{store.name}</h1>
+              <p className="text-xs text-slate-600 mt-0.5">{store.address || 'فلسطين'}</p>
+              {store.phone && <p className="text-xs text-slate-600">هاتف: {store.phone}</p>}
+            </div>
           </div>
 
           <div className="text-center">
@@ -115,6 +132,54 @@ export default async function PrintReceiptPage({ params }: { params: { id: strin
             </div>
           </div>
 
+          {/* Breakdown for Cash & Cheques if Split or Cheque */}
+          {(voucher.payment_method === 'split' || voucher.payment_method === 'cheque') && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+              <h4 className="text-xs font-black text-slate-800 border-b border-slate-200 pb-1.5">
+                تفاصيل وسائل القبض المرفقة بالسند:
+              </h4>
+
+              {voucher.cash_amount > 0 && (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-700">المبلغ المقبوض نقداً:</span>
+                  <span className="font-mono font-bold text-slate-950" dir="ltr">
+                    {Number(voucher.cash_amount).toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currency}
+                  </span>
+                </div>
+              )}
+
+              {checks.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="font-bold text-xs text-slate-700 block">بيانات الشيكات:</span>
+                  <table className="w-full text-right text-xs border border-slate-200 bg-white">
+                    <thead>
+                      <tr className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700">
+                        <th className="p-1.5">رقم الشيك</th>
+                        <th className="p-1.5">البنك المسحوب عليه</th>
+                        <th className="p-1.5">تاريخ الاستحقاق</th>
+                        <th className="p-1.5">الساحب</th>
+                        <th className="p-1.5 text-left">المبلغ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-mono">
+                      {checks.map((chk: any, idx: number) => (
+                        <tr key={idx}>
+                          <td className="p-1.5 font-bold" dir="ltr">{chk.check_number}</td>
+                          <td className="p-1.5 font-sans">{chk.bank_name}</td>
+                          <td className="p-1.5">{chk.due_date}</td>
+                          <td className="p-1.5 font-sans">{chk.drawer_name || '—'}</td>
+                          <td className="p-1.5 text-left font-bold" dir="ltr">
+                            {Number(chk.amount).toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currency}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Tafqeet Words */}
           <div className="flex items-start gap-3 border-b border-slate-200 pb-3">
             <span className="font-bold text-slate-700 min-w-36 pt-1">المبلغ كتابة بالحروف:</span>
@@ -131,8 +196,21 @@ export default async function PrintReceiptPage({ params }: { params: { id: strin
             </span>
           </div>
 
-          {/* Reference / Category */}
-          <div className="grid grid-cols-2 gap-4 text-xs">
+          {/* Reference / Category / Linked Invoice */}
+          <div className="grid grid-cols-3 gap-4 text-xs">
+            {voucher.invoices?.invoice_number ? (
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 font-bold">الفاتورة المسددة:</span>
+                <span className="font-mono font-bold text-sky-800 bg-sky-50 px-2 py-0.5 rounded border border-sky-200" dir="ltr">
+                  {voucher.invoices.invoice_number}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 font-bold">الربط:</span>
+                <span className="text-slate-600 font-medium">قيد مباشر على كشف الحساب</span>
+              </div>
+            )}
             {voucher.reference && (
               <div className="flex items-center gap-2">
                 <span className="text-slate-500 font-bold">رقم المرجع:</span>

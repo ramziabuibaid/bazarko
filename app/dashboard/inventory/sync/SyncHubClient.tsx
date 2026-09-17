@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
@@ -223,6 +224,31 @@ export default function SyncHubClient({ store, initialLogs, totalProductsCount }
           <p className="mt-2 text-base font-bold text-sky-400">🛡️ تخزين سحابي دائم</p>
           <p className="mt-1 text-xs text-slate-500">يتم تحميل وتخزين الصور محلياً حتى لا تختفي</p>
         </div>
+      </div>
+
+      {/* ── Shamel ERP Direct Importer Banner ── */}
+      <div className="rounded-2xl bg-gradient-to-l from-indigo-900 via-indigo-950 to-slate-900 border border-indigo-500/30 p-5 shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-2xl shrink-0">
+            🔄
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold text-white">هل تستخدم نظام الشامل المحاسبي (Al-Shamel ERP)؟</h3>
+              <span className="bg-indigo-500/30 text-indigo-300 text-[10px] font-bold px-2 py-0.5 rounded-full">سحابي 100%</span>
+            </div>
+            <p className="text-xs text-slate-300 mt-1">
+              استورد الحسابات، المخزون، الشيكات، والزبائن مباشرة من ملفات الشامل (.DAT أو ZIP)، أو فعّل المزامنة السحابية اليومية مع Google Drive.
+            </p>
+          </div>
+        </div>
+        <Link
+          href="/dashboard/accounting/shamel"
+          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition shadow-md shrink-0 flex items-center gap-2"
+        >
+          <span>معالج الشامل السحابي</span>
+          <span>←</span>
+        </Link>
       </div>
 
       {/* ── API Configuration Card ── */}

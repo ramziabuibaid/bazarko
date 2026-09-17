@@ -4,6 +4,8 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
+import { postPurchaseInvoiceEntry } from '@/lib/accounting/engine'
 
 interface Supplier {
   id: string
@@ -15,6 +17,8 @@ interface Supplier {
 interface Product {
   id: string
   name: string
+  sku?: string | null
+  barcode?: string | null
   price: number
   cost_price: number | null
   stock_quantity: number
@@ -45,32 +49,56 @@ export default function CreatePurchaseClient({ store, suppliers, products }: Pro
   const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [productSearch, setProductSearch] = useState('')
 
+  // البدء بصف فارغ تماماً بدون اختيار تلقائي لأي صنف
   const [items, setItems] = useState<PurchaseItemRow[]>([
     {
-      product_id: products[0]?.id || '',
-      product_name: products[0]?.name || '',
+      product_id: '',
+      product_name: '',
       quantity: 1,
-      unit_price: products[0]?.cost_price || products[0]?.price || 0,
+      unit_price: 0,
     },
   ])
 
   const addItemRow = () => {
-    const firstProd = products[0]
     setItems(prev => [
       ...prev,
       {
-        product_id: firstProd?.id || '',
-        product_name: firstProd?.name || '',
+        product_id: '',
+        product_name: '',
         quantity: 1,
-        unit_price: firstProd?.cost_price || firstProd?.price || 0,
+        unit_price: 0,
       },
     ])
   }
 
+  const handleQuickAddProduct = (prod: Product) => {
+    setItems(prev => {
+      if (prev.length === 1 && !prev[0].product_id) {
+        return [{
+          product_id: prod.id,
+          product_name: prod.name,
+          quantity: 1,
+          unit_price: prod.cost_price || prod.price || 0,
+        }]
+      }
+      return [
+        ...prev,
+        {
+          product_id: prod.id,
+          product_name: prod.name,
+          quantity: 1,
+          unit_price: prod.cost_price || prod.price || 0,
+        },
+      ]
+    })
+    setProductSearch('')
+  }
+
   const removeItemRow = (idx: number) => {
     if (items.length <= 1) return
-    setItems(prev => prev.filter((_, i) => i !== idx),)
+    setItems(prev => prev.filter((_, i) => i !== idx))
   }
 
   const updateItemRow = (idx: number, field: string, val: any) => {
@@ -82,8 +110,8 @@ export default function CreatePurchaseClient({ store, suppliers, products }: Pro
           return {
             ...item,
             product_id: val,
-            product_name: selected?.name || item.product_name,
-            unit_price: selected?.cost_price || selected?.price || item.unit_price,
+            product_name: selected?.name || '',
+            unit_price: selected?.cost_price || selected?.price || 0,
           }
         }
         return { ...item, [field]: val }
@@ -91,12 +119,13 @@ export default function CreatePurchaseClient({ store, suppliers, products }: Pro
     )
   }
 
-  const totalAmount = items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0)
+  const validItems = items.filter(item => item.product_id && Number(item.quantity) > 0)
+  const totalAmount = validItems.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (totalAmount <= 0) {
-      setError('يرجى إضافة أصناف ومبالغ صحيحة')
+    if (validItems.length === 0 || totalAmount <= 0) {
+      setError('يرجى اختيار صنف واحد على الأقل وتحديد الكمية وسعر التكلفة')
       return
     }
 
@@ -130,7 +159,7 @@ export default function CreatePurchaseClient({ store, suppliers, products }: Pro
       if (purchaseErr) throw purchaseErr
 
       // 2. Insert Items
-      const itemPayloads = items.map(item => ({
+      const itemPayloads = validItems.map(item => ({
         purchase_invoice_id: purchase.id,
         product_id: item.product_id || null,
         product_name: item.product_name,
@@ -179,6 +208,13 @@ export default function CreatePurchaseClient({ store, suppliers, products }: Pro
         await supabase.from('suppliers').update({ balance: newBal }).eq('id', supplierId)
       }
 
+      // 4. الترحيل التلقائي لدفتر الأستاذ العام
+      try {
+        await postPurchaseInvoiceEntry(purchase.id)
+      } catch (glErr) {
+        console.error('Error posting purchase GL:', glErr)
+      }
+
       router.push('/dashboard/purchases')
       router.refresh()
     } catch (err: any) {
@@ -190,6 +226,11 @@ export default function CreatePurchaseClient({ store, suppliers, products }: Pro
 
   return (
     <div className="space-y-6">
+      {/* ── Back to Purchases Hub ── */}
+      <div>
+        <BackToDashboardButton href="/dashboard/purchases-hub" label="العودة إلى لوحة إدارة المشتريات" />
+      </div>
+
       {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <div>
@@ -205,7 +246,7 @@ export default function CreatePurchaseClient({ store, suppliers, products }: Pro
           href="/dashboard/purchases"
           className="rounded-xl border border-white/10 bg-slate-800 px-4 py-2 text-xs font-bold text-slate-300 hover:bg-slate-700 transition"
         >
-          ← العودة للمشتريات
+          ← فواتير المشتريات
         </Link>
       </div>
 
@@ -277,6 +318,62 @@ export default function CreatePurchaseClient({ store, suppliers, products }: Pro
           </select>
         </div>
 
+        {/* Quick Search & Select by Name or Barcode */}
+        <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-sky-300">
+              🔍 البحث اليدوي عن صنف وإضافته (بالاسم أو الكود / الباركود):
+            </label>
+            {productSearch && (
+              <button
+                type="button"
+                onClick={() => setProductSearch('')}
+                className="text-[11px] text-slate-400 hover:text-white"
+              >
+                مسح البحث ✕
+              </button>
+            )}
+          </div>
+          <input
+            type="text"
+            placeholder="اكتب اسم الصنف أو الباركود أو SKU..."
+            value={productSearch}
+            onChange={e => setProductSearch(e.target.value)}
+            className="w-full rounded-lg border border-white/10 bg-slate-800 p-2 text-xs text-white placeholder:text-slate-500 outline-none focus:border-sky-500"
+          />
+          {productSearch.trim() && (
+            <div className="max-h-40 overflow-y-auto rounded-lg border border-white/10 bg-slate-900 divide-y divide-white/5">
+              {products
+                .filter(p =>
+                  p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
+                  (p.sku && p.sku.toLowerCase().includes(productSearch.toLowerCase())) ||
+                  (p.barcode && p.barcode.toLowerCase().includes(productSearch.toLowerCase()))
+                )
+                .slice(0, 10)
+                .map(p => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => handleQuickAddProduct(p)}
+                    className="w-full flex items-center justify-between p-2 text-xs text-right text-slate-200 hover:bg-sky-500/20 hover:text-white transition"
+                  >
+                    <div>
+                      <span className="font-bold">{p.name}</span>
+                      {(p.sku || p.barcode) && (
+                        <span className="mr-2 font-mono text-[10px] text-sky-400">
+                          [{p.sku || p.barcode}]
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px] text-slate-400">
+                      تكلفة: {p.cost_price || p.price || 0} ₪ | مخزون: {p.stock_quantity}
+                    </span>
+                  </button>
+                ))}
+            </div>
+          )}
+        </div>
+
         {/* Items Table */}
         <div className="space-y-2 border-t border-white/10 pt-4">
           <div className="flex items-center justify-between">
@@ -299,9 +396,10 @@ export default function CreatePurchaseClient({ store, suppliers, products }: Pro
                 onChange={e => updateItemRow(idx, 'product_id', e.target.value)}
                 className="flex-1 rounded-lg border border-white/10 bg-slate-800 p-2 text-xs text-white outline-none focus:border-sky-500"
               >
+                <option value="">-- ابحث أو اختر الصنف بالاسم أو الكود --</option>
                 {products.map(p => (
                   <option key={p.id} value={p.id}>
-                    {p.name} (المخزون الحالي: {p.stock_quantity})
+                    {p.name} {p.sku || p.barcode ? `[${p.sku || p.barcode}]` : ''} (المخزون الحالي: {p.stock_quantity})
                   </option>
                 ))}
               </select>

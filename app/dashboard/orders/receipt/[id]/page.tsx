@@ -77,6 +77,9 @@ export default async function OrderReceiptPage({ params }: { params: { id: strin
         </Link>
         <div className="flex items-center gap-3">
           <PrintButton
+            elementId="pos-thermal-receipt"
+            format="thermal"
+            filename={`receipt-${order.order_number}.pdf`}
             label="🖨️ طباعة الإيصال (Thermal / PDF)"
             className="flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 transition shadow"
           />
@@ -84,9 +87,16 @@ export default async function OrderReceiptPage({ params }: { params: { id: strin
       </div>
 
       {/* ── Thermal Receipt Layout (80mm) ── */}
-      <div className="mx-auto w-[80mm] max-w-full bg-white p-4 border border-slate-300 rounded-xl shadow-md print:border-none print:shadow-none print:w-[78mm] print:p-1">
+      <div id="pos-thermal-receipt" className="mx-auto w-[80mm] max-w-full bg-white p-4 border border-slate-300 rounded-xl shadow-md print:border-none print:shadow-none print:w-[78mm] print:p-1">
         {/* Store Header */}
         <div className="text-center border-b-2 border-dashed border-black pb-3">
+          {store.logo_url && (
+            <img
+              src={store.logo_url}
+              alt={store.name}
+              className="mx-auto mb-2 h-14 w-14 object-contain"
+            />
+          )}
           <h1 className="text-xl font-black tracking-tight">{store.name}</h1>
           {store.address && (
             <p className="text-xs font-sans mt-0.5 text-neutral-700">{store.address}</p>
@@ -187,14 +197,14 @@ export default async function OrderReceiptPage({ params }: { params: { id: strin
 
           {/* Payment Status Badges */}
           {isCash && isPaid && (
-            <div className="my-1 rounded bg-black text-white text-center py-1 font-black text-sm tracking-wider">
-              ✓ مدفوعة نقداً / PAID CASH
+            <div className="my-1 rounded bg-black text-white text-center py-1.5 font-black text-xs tracking-wider">
+              ✓ تم الدفع / مدفوعة نقداً (PAID CASH)
             </div>
           )}
 
           {isCredit && (
-            <div className="my-1 rounded border-2 border-black bg-white text-center py-1 font-black text-sm tracking-wider">
-              ⚠️ على الحساب (ذمة) / CREDIT ON ACCOUNT
+            <div className="my-1 rounded border-2 border-black bg-white text-center py-1.5 font-black text-xs tracking-wider">
+              ⚠️ على الحساب (آجل وغير مدفوعة) / CREDIT ON ACCOUNT
             </div>
           )}
 

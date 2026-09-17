@@ -25,6 +25,7 @@ export default async function CreateJournalPage() {
       .select('id, code, name, type')
       .eq('store_id', storeId)
       .eq('is_group', false)
+      .eq('is_active', true)
       .order('code', { ascending: true })
   ])
 

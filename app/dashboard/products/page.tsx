@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import ProductsTable from '@/components/dashboard/products/ProductsTable'
 import BulkImportExport from '@/components/dashboard/products/BulkImportExport'
+import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
 
 export default async function ProductsPage({
   searchParams,
@@ -84,8 +85,12 @@ export default async function ProductsPage({
   }
 
   return (
-    <div className="p-4 sm:p-6">
-      <div className="mb-6 flex items-center justify-between">
+    <div className="p-4 sm:p-6 space-y-4">
+      <div>
+        <BackToDashboardButton href="/dashboard/inventory-hub" label="العودة إلى لوحة إدارة المخزون والمستودعات" />
+      </div>
+
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-white">المنتجات</h1>
           <p className="mt-1 text-sm text-slate-400">{stats.total} منتج في متجرك</p>

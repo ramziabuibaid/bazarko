@@ -22,7 +22,7 @@ export default async function NewPurchasePage() {
   ] = await Promise.all([
     supabase.from('stores').select('id, name, currency_code').eq('id', storeId).single(),
     supabase.from('suppliers').select('id, name, phone, balance').eq('store_id', storeId).order('name'),
-    supabase.from('products').select('id, name, price, cost_price, stock_quantity').eq('store_id', storeId).order('name')
+    supabase.from('products').select('id, name, sku, barcode, price, cost_price, stock_quantity').eq('store_id', storeId).order('name')
   ])
 
   return (

@@ -3,6 +3,7 @@ import { getStoreForUser } from '@/lib/supabase/getStore'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import OrdersTable from '@/components/dashboard/orders/OrdersTable'
+import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
 
 interface Props {
   searchParams: {
@@ -76,8 +77,12 @@ export default async function OrdersPage({ searchParams }: Props) {
   }
 
   return (
-    <div className="p-4 sm:p-6">
-      <div className="mb-6 flex items-center justify-between">
+    <div className="p-4 sm:p-6 space-y-4">
+      <div>
+        <BackToDashboardButton href="/dashboard/store-hub" label="العودة إلى لوحة إدارة المتجر الإلكتروني" />
+      </div>
+
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-white">الطلبيات</h1>
           <p className="mt-1 text-sm text-slate-400">إجمالي {count ?? 0} طلبية</p>

@@ -4,6 +4,7 @@ import { useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { recordAuditEvent } from '@/app/dashboard/accounting/audit-actions'
+import { postSalesInvoiceEntry } from '@/lib/accounting/engine'
 
 interface Product {
   id: string
@@ -48,11 +49,15 @@ interface PrefillItem {
 }
 
 interface Prefill {
-  orderId: string
-  orderNumber: string
+  orderId?: string
+  orderNumber?: string
+  quotationId?: string
+  quotationNumber?: string
   customerId: string | null
   customerName: string
   customerPhone: string
+  discountAmount?: number
+  notes?: string
   items: PrefillItem[]
 }
 
@@ -96,16 +101,26 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
       : [{ key: keySeq++, product_id: null, name: '', sku: '', quantity: 1, unit_price: 0 }]
   )
 
+  // ── طريقة الدفع ──────────────────────────────────────────────
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'credit' | 'bank' | 'check' | 'card'>('cash')
+
+  // ── الخصم: نوعين (مبلغ ثابت ₪ / نسبة مئوية %) ────────────────
+  const [discountType, setDiscountType]   = useState<'amount' | 'percent'>('amount')
+  const [discountValue, setDiscountValue] = useState<number>(prefill?.discountAmount || 0)
+
   // ── الإجماليات ────────────────────────────────────────────────
-  const [discountAmount, setDiscountAmount] = useState(0)
   const [issueDate, setIssueDate]           = useState(new Date().toISOString().slice(0, 10))
   const [dueDate, setDueDate]               = useState('')
-  const [notes, setNotes]                   = useState('')
+  const [notes, setNotes]                   = useState(prefill?.notes || '')
   const [amountPaid, setAmountPaid]         = useState(0)
   const [saving, setSaving]                 = useState(false)
   const [error, setError]                   = useState('')
 
-  const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0)
+  const subtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0)
+  const computedDiscount = discountType === 'percent'
+    ? (subtotal * (Number(discountValue) || 0)) / 100
+    : (Number(discountValue) || 0)
+  const discountAmount = Math.min(subtotal, Math.max(0, computedDiscount))
   const total    = Math.max(0, subtotal - discountAmount)
   const fmt      = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })
 
@@ -178,6 +193,22 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
 
     setSaving(true)
 
+    // التحقق من قفل الفترة المحاسبية لتاريخ الفاتورة
+    const { data: closedPeriod } = await supabase
+      .from('accounting_periods')
+      .select('period_name')
+      .eq('store_id', storeId)
+      .eq('is_closed', true)
+      .lte('start_date', issueDate)
+      .gte('end_date', issueDate)
+      .maybeSingle()
+
+    if (closedPeriod) {
+      setSaving(false)
+      setError(`لا يمكن إنشاء فاتورة تقع ضمن فترة محاسبية مقفلة (${closedPeriod.period_name})`)
+      return
+    }
+
     const { data: lastInv } = await supabase
       .from('invoices')
       .select('invoice_number')
@@ -196,21 +227,41 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
 
     const invoiceNumber = `INV-${String(nextNum).padStart(4, '0')}`
 
+    // ضبط حالة السداد والمبلغ المدفوع
+    let effectivePaid = amountPaid
+    let effectiveStatus = 'draft'
+
+    if (paymentMethod === 'credit') {
+      effectivePaid = 0
+      effectiveStatus = 'draft'
+    } else if (paymentMethod === 'cash') {
+      effectivePaid = total
+      effectiveStatus = 'paid'
+    } else {
+      effectiveStatus = effectivePaid >= total ? 'paid' : effectivePaid > 0 ? 'partial' : 'draft'
+    }
+
     const { data: inv, error: invErr } = await supabase
       .from('invoices')
       .insert({
         store_id:         storeId,
         invoice_number:   invoiceNumber,
         order_id:         prefill?.orderId ?? null,
+        quotation_id:     prefill?.quotationId ?? null,
         customer_id:      selectedCustomer?.id ?? null,
         customer_name:    (selectedCustomer?.name ?? (customerMode === 'manual' ? customerName.trim() : null)) || null,
+        customer_phone:   activePhone || null,
+        customer_address: customerAddress.trim() || null,
         issue_date:       issueDate,
         due_date:         dueDate || null,
-        status:           amountPaid >= total ? 'paid' : 'draft',
+        payment_method:   paymentMethod,
+        status:           effectiveStatus,
         subtotal,
+        discount_type:    discountType,
+        discount_value:   Number(discountValue) || 0,
         discount_amount:  discountAmount,
         total,
-        amount_paid:      amountPaid,
+        amount_paid:      effectivePaid,
         notes:            notes.trim() || null,
         created_by:       userId,
       })
@@ -224,6 +275,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
       return
     }
 
+    // إدراج بنود الفاتورة
     await supabase.from('invoice_items').insert(
       items.map(i => ({
         invoice_id: inv.id,
@@ -236,6 +288,44 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
       }))
     )
 
+    // خصم الكميات من المخزون وتسجيل حركات المخزون
+    for (const item of items) {
+      if (item.product_id) {
+        const { data: p } = await supabase.from('products').select('stock_quantity').eq('id', item.product_id).single()
+        if (p) {
+          const newStock = Math.max(0, Number(p.stock_quantity || 0) - Number(item.quantity))
+          await supabase.from('products').update({ stock_quantity: newStock }).eq('id', item.product_id)
+
+          await supabase.from('inventory_movements').insert({
+            store_id: storeId,
+            product_id: item.product_id,
+            movement_type: 'sale',
+            document_number: invoiceNumber,
+            document_type: 'فاتورة مبيعات',
+            ref_id: inv.id,
+            entity_name: selectedCustomer?.name || customerName || 'عميل نقدي',
+            quantity_in: 0,
+            quantity_out: Number(item.quantity),
+            balance_after: newStock,
+            unit_price: Number(item.unit_price),
+            movement_date: issueDate,
+          })
+        }
+      }
+    }
+
+    // إذا تم التحويل من عرض سعر — تحديث حالة عرض السعر إلى "تم تحويله لفاتورة"
+    if (prefill?.quotationId) {
+      await supabase
+        .from('quotations')
+        .update({
+          status: 'converted',
+          converted_invoice_id: inv.id,
+        })
+        .eq('id', prefill.quotationId)
+    }
+
+    // كشف حساب العميل والذمم
     if (selectedCustomer) {
       const { data: custData } = await supabase
         .from('customers')
@@ -259,14 +349,14 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
       let finalBalance = balanceAfter
       let finalPaid    = currentPaid
 
-      if (amountPaid > 0) {
-        finalBalance = balanceAfter - amountPaid
-        finalPaid    = currentPaid + amountPaid
+      if (effectivePaid > 0) {
+        finalBalance = balanceAfter - effectivePaid
+        finalPaid    = currentPaid + effectivePaid
         await supabase.from('customer_ledger').insert({
           store_id: storeId, customer_id: selectedCustomer.id,
           type: 'payment', date: issueDate,
           description: `دفعة على فاتورة ${invoiceNumber}`,
-          debit: 0, credit: amountPaid, balance: finalBalance,
+          debit: 0, credit: effectivePaid, balance: finalBalance,
           reference_id: inv.id, reference_type: 'invoice', created_by: userId,
         })
       }
@@ -281,8 +371,15 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
     await recordAuditEvent({
       entityType: 'invoice', entityId: inv.id, entityLabel: invoiceNumber,
       action: 'create',
-      details: { total, amountPaid, items: items.length, customer: selectedCustomer?.name ?? null },
+      details: { total, amountPaid: effectivePaid, paymentMethod, items: items.length, customer: selectedCustomer?.name ?? null },
     })
+
+    // الترحيل التلقائي إلى دفتر الأستاذ العام
+    try {
+      await postSalesInvoiceEntry(inv.id, userId)
+    } catch (glErr) {
+      console.error('Error posting GL for invoice:', glErr)
+    }
 
     router.push(`/dashboard/accounting/invoices/${inv.id}`)
   }
@@ -622,38 +719,93 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
         </button>
       </div>
 
-      {/* ── الإجماليات ── */}
-      <div className="rounded-2xl border border-white/5 bg-slate-900 p-5 space-y-3">
-        <div className="flex items-center justify-between text-sm">
+      {/* ── طريقة الدفع والإجماليات ── */}
+      <div className="rounded-2xl border border-white/5 bg-slate-900 p-5 space-y-4">
+        <div>
+          <label className="mb-1 block text-xs font-semibold text-slate-300">طريقة الدفع *</label>
+          <select
+            value={paymentMethod}
+            onChange={e => setPaymentMethod(e.target.value as any)}
+            className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white outline-none focus:border-sky-500 font-bold"
+          >
+            <option value="cash">نقداً (دفع فوري بالكامل)</option>
+            <option value="credit">على الحساب (بيع آجل / ذمة عميل)</option>
+            <option value="bank">تحويل بنكي</option>
+            <option value="check">شيك بنكي</option>
+            <option value="card">بطاقة دفع</option>
+          </select>
+        </div>
+
+        <div className="flex items-center justify-between text-sm border-t border-white/5 pt-3">
           <span className="text-slate-400">المجموع الفرعي</span>
-          <span className="text-white" dir="ltr">{fmt(subtotal)} {currencyCode}</span>
+          <span className="text-white font-mono font-bold" dir="ltr">{fmt(subtotal)} {currencyCode}</span>
         </div>
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-slate-400">خصم</span>
-          <input
-            type="number" min="0" max={subtotal} step="0.01"
-            value={discountAmount || ''}
-            onChange={e => setDiscountAmount(Math.max(0, parseFloat(e.target.value) || 0))}
-            placeholder="0"
-            dir="ltr"
-            className="w-28 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-left text-sm text-white outline-none focus:border-sky-500/50"
-          />
+
+        {/* نوع وقيمة الخصم */}
+        <div className="rounded-xl border border-white/10 bg-slate-800/60 p-3 space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold text-slate-300">الخصم التجاري الممنوح:</span>
+            <div className="flex rounded-lg bg-slate-900 p-0.5 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setDiscountType('amount')}
+                className={`rounded px-2.5 py-0.5 font-bold transition ${
+                  discountType === 'amount' ? 'bg-sky-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                مبلغ ثابت ({currencyCode})
+              </button>
+              <button
+                type="button"
+                onClick={() => setDiscountType('percent')}
+                className={`rounded px-2.5 py-0.5 font-bold transition ${
+                  discountType === 'percent' ? 'bg-sky-500 text-slate-950' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                نسبة مئوية (%)
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={discountValue || ''}
+              onChange={e => setDiscountValue(Math.max(0, parseFloat(e.target.value) || 0))}
+              placeholder={discountType === 'percent' ? 'مثال: 5%' : `مثال: 50 ${currencyCode}`}
+              dir="ltr"
+              className="flex-1 rounded-lg border border-white/10 bg-slate-900 px-3 py-1.5 text-sm text-white font-mono outline-none focus:border-sky-500/50"
+            />
+            <span className="text-amber-400 font-mono font-bold text-xs" dir="ltr">
+              - {fmt(discountAmount)} {currencyCode}
+            </span>
+          </div>
         </div>
+
         <div className="flex items-center justify-between border-t border-white/5 pt-3 text-base font-bold">
-          <span className="text-white">الإجمالي</span>
-          <span className="text-emerald-400" dir="ltr">{fmt(total)} {currencyCode}</span>
+          <span className="text-white">الإجمالي المستحق</span>
+          <span className="text-emerald-400 font-mono text-lg" dir="ltr">{fmt(total)} {currencyCode}</span>
         </div>
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-slate-400">المبلغ المدفوع</span>
-          <input
-            type="number" min="0" step="0.01" max={total}
-            value={amountPaid || ''}
-            onChange={e => setAmountPaid(Math.min(total, Math.max(0, parseFloat(e.target.value) || 0)))}
-            placeholder="0"
-            dir="ltr"
-            className="w-28 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-left text-sm text-white outline-none focus:border-sky-500/50"
-          />
-        </div>
+
+        {paymentMethod === 'credit' ? (
+          <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-2.5 text-center text-xs font-semibold text-amber-300">
+            ⚠️ بيع آجل (على الدين): لن يتم تسجيل قبض بالصندوق، وسيتم تسجيل كامل المبلغ {fmt(total)} {currencyCode} كذمم مدينة على العميل.
+          </div>
+        ) : (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate-400">المبلغ المدفوع فوراً</span>
+            <input
+              type="number" min="0" step="0.01"
+              value={amountPaid || ''}
+              onChange={e => setAmountPaid(Math.max(0, parseFloat(e.target.value) || 0))}
+              placeholder="0"
+              dir="ltr"
+              className="w-28 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-left text-sm text-white font-mono outline-none focus:border-sky-500/50"
+            />
+          </div>
+        )}
         {amountPaid > 0 && amountPaid < total && (
           <div className="flex items-center justify-between text-sm">
             <span className="text-yellow-400">متبقي</span>

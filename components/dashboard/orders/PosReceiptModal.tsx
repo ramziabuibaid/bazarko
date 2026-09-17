@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { generateAndPrintPdf } from '@/lib/pdf/printPdf'
 
 export interface ReceiptItem {
   name: string
@@ -50,6 +51,7 @@ const PAYMENT_METHOD_NAMES: Record<string, { ar: string; en: string }> = {
 
 export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }: Props) {
   const [printLayout, setPrintLayout] = useState<'thermal' | 'a4'>('thermal')
+  const [printing, setPrinting] = useState(false)
 
   if (!isOpen) return null
 
@@ -82,8 +84,35 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
     en: receipt.paymentMethod,
   }
 
-  const handlePrint = () => {
-    window.print()
+  const handlePrint = async () => {
+    setPrinting(true)
+    try {
+      await generateAndPrintPdf({
+        elementId: 'pos-receipt-print-area',
+        format: printLayout,
+        filename: `receipt-${receipt.orderNumber}.pdf`,
+        action: 'print',
+      })
+    } catch (e) {
+      console.error(e)
+      window.print()
+    } finally {
+      setPrinting(false)
+    }
+  }
+
+  const handleDownloadPdf = async () => {
+    setPrinting(true)
+    try {
+      await generateAndPrintPdf({
+        elementId: 'pos-receipt-print-area',
+        format: printLayout,
+        filename: `receipt-${receipt.orderNumber}.pdf`,
+        action: 'download',
+      })
+    } finally {
+      setPrinting(false)
+    }
   }
 
   return (
@@ -129,9 +158,19 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
 
             <button
               onClick={handlePrint}
-              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 transition shadow"
+              disabled={printing}
+              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-500 transition shadow disabled:opacity-50"
             >
-              <span>🖨️</span> طباعة فورية
+              <span>🖨️</span> {printing ? 'جارٍ الطباعة...' : 'طباعة (PDF)'}
+            </button>
+
+            <button
+              onClick={handleDownloadPdf}
+              disabled={printing}
+              title="تنزيل كملف PDF"
+              className="rounded-lg border border-white/10 bg-slate-800 px-2.5 py-1.5 text-xs font-bold text-slate-200 hover:bg-slate-700 transition"
+            >
+              ⬇️
             </button>
 
             {onNewSale && (
@@ -272,15 +311,15 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
 
               {/* Cash Paid Badge */}
               {isCash && isPaid && (
-                <div className="my-1 rounded bg-black text-white text-center py-1 font-black text-sm tracking-wider">
-                  ✓ مدفوعة نقداً / PAID CASH
+                <div className="my-1 rounded bg-black text-white text-center py-1.5 font-black text-sm tracking-wider">
+                  ✓ تم الدفع / مدفوعة نقداً (PAID CASH)
                 </div>
               )}
 
               {/* On Account / Credit Badge */}
               {isCredit && (
-                <div className="my-1 rounded border-2 border-black bg-white text-center py-1 font-black text-sm tracking-wider">
-                  ⚠️ على الحساب (ذمة) / CREDIT ON ACCOUNT
+                <div className="my-1 rounded border-2 border-black bg-white text-center py-1.5 font-black text-sm tracking-wider">
+                  ⚠️ على الحساب (غير مدفوعة) / CREDIT ON ACCOUNT
                 </div>
               )}
 

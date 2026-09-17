@@ -3,6 +3,7 @@ import { getStoreForUser } from '@/lib/supabase/getStore'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import CustomersTable from '@/components/dashboard/customers/CustomersTable'
+import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
 
 interface Props {
   searchParams: { q?: string; type?: string; sort?: string; add?: string }
@@ -92,8 +93,12 @@ export default async function CustomersPage({ searchParams }: Props) {
   const overLimit  = debtRows.filter(c => (c.credit_limit ?? 0) > 0 && c.balance > (c.credit_limit ?? 0))
 
   return (
-    <div className="p-4 sm:p-6">
-      <div className="mb-6 flex items-center justify-between">
+    <div className="p-4 sm:p-6 space-y-4">
+      <div>
+        <BackToDashboardButton href="/dashboard/sales" label="العودة إلى لوحة إدارة المبيعات" />
+      </div>
+
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-white">إدارة الزبائن</h1>
           <p className="mt-1 text-sm text-slate-400">{count ?? 0} زبون مسجّل</p>

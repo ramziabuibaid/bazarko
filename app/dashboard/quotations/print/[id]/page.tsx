@@ -50,19 +50,41 @@ export default async function PrintQuotationPage({ params }: { params: { id: str
         >
           ← العودة لعروض الأسعار
         </Link>
-        <PrintButton label="🖨️ طباعة عرض السعر (Print / PDF)" className="rounded-lg bg-sky-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-sky-400 transition" />
+        <div className="flex items-center gap-3">
+          <Link
+            href={`/dashboard/accounting/invoices/new?from_quotation=${quote.id}`}
+            className="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 transition"
+          >
+            🧾 تحويل إلى فاتورة مبيعات
+          </Link>
+          <PrintButton
+            elementId="quotation-print-canvas"
+            filename={`quotation-${quote.quotation_number}.pdf`}
+            label="🖨️ طباعة عرض السعر (Print / PDF)"
+            className="rounded-lg bg-sky-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-sky-400 transition"
+          />
+        </div>
       </div>
 
       {/* ── Official Paper Canvas ── */}
-      <div className="mx-auto max-w-4xl rounded-2xl border border-slate-300 bg-white p-8 shadow-sm print:border-none print:shadow-none print:p-4">
+      <div id="quotation-print-canvas" className="mx-auto max-w-4xl rounded-2xl border border-slate-300 bg-white p-8 shadow-sm print:border-none print:shadow-none print:p-4">
         {/* Header */}
         <div className="flex items-start justify-between border-b-2 border-slate-900 pb-5">
-          <div>
-            <h1 className="text-2xl font-black text-slate-950">{store.name}</h1>
-            <p className="text-xs text-slate-600 mt-0.5">{store.address || 'فلسطين'}</p>
-            {store.phone && <p className="text-xs text-slate-600">هاتف: {store.phone}</p>}
-            {store.tax_number && <p className="text-xs text-slate-600">الرقم الضريبي / المشتغل: {store.tax_number}</p>}
-            {store.email && <p className="text-xs text-slate-600">بريد: {store.email}</p>}
+          <div className="flex items-center gap-4">
+            {store.logo_url && (
+              <img
+                src={store.logo_url}
+                alt={store.name}
+                className="h-16 w-16 object-contain rounded-lg border border-slate-200 p-1"
+              />
+            )}
+            <div>
+              <h1 className="text-2xl font-black text-slate-950">{store.name}</h1>
+              <p className="text-xs text-slate-600 mt-0.5">{store.address || 'فلسطين'}</p>
+              {store.phone && <p className="text-xs text-slate-600">هاتف: {store.phone}</p>}
+              {store.tax_number && <p className="text-xs text-slate-600">الرقم الضريبي / المشتغل: {store.tax_number}</p>}
+              {store.email && <p className="text-xs text-slate-600">بريد: {store.email}</p>}
+            </div>
           </div>
 
           <div className="text-center">

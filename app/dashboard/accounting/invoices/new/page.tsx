@@ -4,7 +4,10 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import NewInvoiceForm from '@/components/dashboard/accounting/NewInvoiceForm'
 
-interface SearchParams { from_order?: string }
+interface SearchParams {
+  from_order?: string
+  from_quotation?: string
+}
 
 export default async function NewInvoicePage({ searchParams }: { searchParams: SearchParams }) {
   const supabase = createClient()
@@ -21,10 +24,11 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: S
     .single()
   if (!store) redirect('/onboarding')
 
-  // إذا جاء المستخدم من صفحة طلبية — جلب بياناتها لملء الفاتورة تلقائياً
   let prefill: {
-    orderId: string; orderNumber: string
+    orderId?: string; orderNumber?: string
+    quotationId?: string; quotationNumber?: string
     customerId: string | null; customerName: string; customerPhone: string
+    discountAmount?: number; notes?: string
     items: { product_id: string | null; name: string; sku: string; quantity: number; unit_price: number }[]
   } | undefined
 
@@ -48,7 +52,7 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: S
         customerId:    order.customer_id ?? null,
         customerName:  order.customer_name ?? '',
         customerPhone: order.customer_phone ?? '',
-        items: (orderItems ?? []).map((i: { product_id?: string | null; product_name: string; quantity: number; unit_price: number }) => ({
+        items: (orderItems ?? []).map((i: any) => ({
           product_id: i.product_id ?? null,
           name:       i.product_name,
           sku:        '',
@@ -57,18 +61,53 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: S
         })),
       }
     }
+  } else if (searchParams.from_quotation) {
+    const { data: quote } = await supabase
+      .from('quotations')
+      .select('id, quotation_number, customer_id, discount, notes, customer:customers(id, name, phone), items:quotation_items(*)')
+      .eq('id', searchParams.from_quotation)
+      .eq('store_id', store.id)
+      .single()
+
+    if (quote) {
+      prefill = {
+        quotationId:     quote.id,
+        quotationNumber: quote.quotation_number,
+        customerId:      quote.customer_id || null,
+        customerName:    (quote.customer as any)?.name || '',
+        customerPhone:   (quote.customer as any)?.phone || '',
+        discountAmount:  Number(quote.discount || 0),
+        notes:           quote.notes || `فاتورة صادرة بناءً على عرض السعر رقم #${quote.quotation_number}`,
+        items: (quote.items || []).map((i: any) => ({
+          product_id: i.product_id || null,
+          name:       i.product_name,
+          sku:        '',
+          quantity:   Number(i.quantity || 1),
+          unit_price: Number(i.unit_price || 0),
+        })),
+      }
+    }
   }
 
   return (
-    <div className="p-4 sm:p-6 max-w-3xl">
-      <div className="mb-6 flex items-center gap-3">
-        <Link
-          href={prefill ? `/dashboard/orders/${prefill.orderId}` : '/dashboard/accounting/invoices'}
-          className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-slate-400 hover:text-white"
-        >
-          ← {prefill ? 'الطلبية' : 'الفواتير'}
-        </Link>
-        <h1 className="text-xl font-semibold text-white">فاتورة جديدة</h1>
+    <div className="p-4 sm:p-6 max-w-3xl" dir="rtl">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Link
+            href="/dashboard/sales"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-800/80 px-3.5 py-1.5 text-xs font-bold text-slate-300 hover:bg-slate-700 hover:text-white transition shadow-sm"
+          >
+            <span className="text-sky-400">←</span>
+            <span>العودة إلى لوحة إدارة المبيعات</span>
+          </Link>
+          <h1 className="text-xl font-black text-white">فاتورة مبيعات جديدة</h1>
+        </div>
+
+        {prefill?.quotationNumber && (
+          <span className="rounded-full bg-purple-500/20 border border-purple-500/30 px-3 py-1 text-xs font-bold text-purple-300">
+            📑 تحويل من عرض سعر #{prefill.quotationNumber}
+          </span>
+        )}
       </div>
 
       <NewInvoiceForm

@@ -88,14 +88,15 @@ export default async function InvoicesPage({ searchParams }: Props) {
   ]
 
   return (
-    <div className="p-4 sm:p-6 space-y-5">
-      <div className="flex items-center justify-between">
+    <div className="p-4 sm:p-6 space-y-5" dir="rtl">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <Link href="/dashboard/accounting" className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-slate-400 hover:text-white">
-              ← المحاسبة
+            <Link href="/dashboard/sales" className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-800/80 px-3.5 py-1.5 text-xs font-bold text-slate-300 hover:bg-slate-700 hover:text-white transition shadow-sm">
+              <span className="text-sky-400">←</span>
+              <span>العودة إلى لوحة إدارة المبيعات</span>
             </Link>
-            <h1 className="text-xl font-semibold text-white">الفواتير</h1>
+            <h1 className="text-xl font-black text-white">فواتير المبيعات</h1>
           </div>
         </div>
         <Link href="/dashboard/accounting/invoices/new"

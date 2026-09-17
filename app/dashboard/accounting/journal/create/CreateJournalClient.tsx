@@ -89,6 +89,22 @@ export default function CreateJournalClient({ store, accounts }: Props) {
     setError('')
 
     try {
+      // التحقق من قفل الفترة المحاسبية
+      const { data: closedPeriod } = await supabase
+        .from('accounting_periods')
+        .select('period_name')
+        .eq('store_id', store.id)
+        .eq('is_closed', true)
+        .lte('start_date', date)
+        .gte('end_date', date)
+        .maybeSingle()
+
+      if (closedPeriod) {
+        setError(`لا يمكن تسجيل قيد يومية في فترة محاسبية مقفلة (${closedPeriod.period_name})`)
+        setLoading(false)
+        return
+      }
+
       // 1. Insert Journal Entry
       const { data: entry, error: entryErr } = await supabase
         .from('journal_entries')

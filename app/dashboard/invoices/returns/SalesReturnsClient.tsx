@@ -4,6 +4,10 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { useToast } from '@/components/ui/Toast'
+import { useConfirm } from '@/components/ui/Confirm'
+import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
+import { deleteSalesReturn, updateSalesReturn } from './return-actions'
 
 interface SalesReturnItem {
   id: string
@@ -69,9 +73,14 @@ export default function SalesReturnsClient({
 }: Props) {
   const router = useRouter()
   const supabase = createClient()
+  const toast = useToast()
+  const confirm = useConfirm()
 
   const [returns, setReturns] = useState<SalesReturn[]>(initialReturns)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [editingReturn, setEditingReturn] = useState<SalesReturn | null>(null)
+  const [editFormData, setEditFormData] = useState<any>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -236,6 +245,80 @@ export default function SalesReturnsClient({
     }
   }
 
+  const handleStartEdit = (ret: SalesReturn) => {
+    setEditingReturn(ret)
+    setEditFormData({
+      return_number: ret.return_number,
+      return_date: ret.return_date,
+      customer_id: ret.customer_id || '',
+      refund_method: ret.refund_method || 'credit',
+      reason: ret.reason || '',
+      notes: ret.notes || '',
+      items: (ret.items && ret.items.length > 0)
+        ? ret.items.map(it => ({
+            product_id: it.product_id || '',
+            product_name: it.product_name,
+            quantity: it.quantity,
+            unit_price: it.unit_price,
+          }))
+        : [{ product_id: products[0]?.id || '', product_name: products[0]?.name || '', quantity: 1, unit_price: products[0]?.price || 0 }],
+    })
+  }
+
+  const handleDeleteReturn = async (ret: SalesReturn) => {
+    const ok = await confirm({
+      title: 'حذف سند المرتجع',
+      message: `هل أنت متأكد من حذف سند المرتجع #${ret.return_number} بقيمة ${Number(ret.total_amount).toLocaleString('ar-u-nu-latn')} ₪؟ سيتم عكس أثر المخزون ورصيد حساب العميل بالكامل.`,
+      confirmLabel: 'نعم، حذف المرتجع',
+      cancelLabel: 'إلغاء',
+      danger: true,
+    })
+    if (!ok) return
+
+    setDeletingId(ret.id)
+    try {
+      const res = await deleteSalesReturn(ret.id)
+      if (res.ok) {
+        toast('تم حذف سند المرتجع وعكس أثر المخزون والحسابات')
+        setReturns(prev => prev.filter(r => r.id !== ret.id))
+        router.refresh()
+      } else {
+        toast(res.error || 'فشل حذف المرتجع', 'error')
+      }
+    } catch (err: any) {
+      toast(err.message || 'خطأ أثناء حذف المرتجع', 'error')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  const handleSubmitEdit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingReturn || !editFormData) return
+
+    const editTotal = editFormData.items.reduce((s: number, it: any) => s + Number(it.quantity || 0) * Number(it.unit_price || 0), 0)
+    if (editTotal <= 0) {
+      toast('يرجى تحديد أصناف وكميات صحيحة', 'error')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const res = await updateSalesReturn(editingReturn.id, editFormData)
+      if (res.ok) {
+        toast('تم تحديث سند المرتجع بنجاح')
+        setEditingReturn(null)
+        router.refresh()
+      } else {
+        toast(res.error || 'فشل تحديث سند المرتجع', 'error')
+      }
+    } catch (err: any) {
+      toast(err.message || 'خطأ أثناء تحديث المرتجع', 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const filteredReturns = returns.filter(r => {
     if (!searchQuery) return true
     const q = searchQuery.toLowerCase()
@@ -250,6 +333,11 @@ export default function SalesReturnsClient({
 
   return (
     <div className="space-y-6">
+      {/* ── Return to Sales Dashboard ── */}
+      <div>
+        <BackToDashboardButton href="/dashboard/sales" label="العودة إلى لوحة إدارة المبيعات" />
+      </div>
+
       {/* ── Header ── */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -313,7 +401,7 @@ export default function SalesReturnsClient({
                 <th className="p-3.5">طريقة التسوية</th>
                 <th className="p-3.5">سبب الإرجاع</th>
                 <th className="p-3.5">المبلغ الإجمالي</th>
-                <th className="p-3.5 text-center">الطباعة</th>
+                <th className="p-3.5 text-center">الإجراءات</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5 text-slate-200">
@@ -356,13 +444,32 @@ export default function SalesReturnsClient({
                     </td>
 
                     <td className="p-3.5 text-center">
-                      <Link
-                        href={`/dashboard/invoices/returns/print/${ret.id}`}
-                        className="rounded-lg border border-white/10 bg-white/5 p-1.5 text-slate-400 hover:text-white transition"
-                        title="طباعة سند المرتجع"
-                      >
-                        🖨️
-                      </Link>
+                      <div className="flex items-center justify-center gap-1.5">
+                        <Link
+                          href={`/dashboard/invoices/returns/print/${ret.id}`}
+                          className="rounded-lg border border-white/10 bg-white/5 p-1.5 text-slate-400 hover:text-white transition"
+                          title="طباعة سند المرتجع"
+                        >
+                          🖨️
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => handleStartEdit(ret)}
+                          className="rounded-lg border border-sky-500/20 bg-sky-500/10 p-1.5 text-sky-400 hover:bg-sky-500/20 transition"
+                          title="تعديل سند المرتجع"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          type="button"
+                          disabled={deletingId === ret.id}
+                          onClick={() => handleDeleteReturn(ret)}
+                          className="rounded-lg border border-rose-500/20 bg-rose-500/10 p-1.5 text-rose-400 hover:bg-rose-500/20 disabled:opacity-50 transition"
+                          title="حذف سند المرتجع"
+                        >
+                          {deletingId === ret.id ? '⏳' : '🗑️'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -531,6 +638,214 @@ export default function SalesReturnsClient({
                   className="flex-1 rounded-xl bg-sky-500 py-2.5 text-xs font-bold text-slate-950 hover:bg-sky-400 transition disabled:opacity-50"
                 >
                   {loading ? 'جارٍ الحفظ...' : 'حفظ سند المرتجع'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: تعديل مرتجع مبيعات ── */}
+      {editingReturn && editFormData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <span>✏️</span> تعديل مرتجع مبيعات #{editingReturn.return_number}
+            </h2>
+
+            <form onSubmit={handleSubmitEdit} className="mt-5 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-300">رقم سند المرتجع *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editFormData.return_number}
+                    onChange={e => setEditFormData({ ...editFormData, return_number: e.target.value })}
+                    className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500 font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-300">تاريخ الإرجاع *</label>
+                  <input
+                    type="date"
+                    required
+                    value={editFormData.return_date}
+                    onChange={e => setEditFormData({ ...editFormData, return_date: e.target.value })}
+                    className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-300">العميل المرتبط</label>
+                  <select
+                    value={editFormData.customer_id}
+                    onChange={e => setEditFormData({ ...editFormData, customer_id: e.target.value })}
+                    className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500"
+                  >
+                    <option value="">عميل نقدي عام</option>
+                    {customers.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} {c.phone ? `(${c.phone})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-300">طريقة تسوية المرتجع</label>
+                  <select
+                    value={editFormData.refund_method}
+                    onChange={e => setEditFormData({ ...editFormData, refund_method: e.target.value })}
+                    className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500 font-bold"
+                  >
+                    <option value="credit">رصيد دائن بحساب العميل (خصم من الدين)</option>
+                    <option value="cash">استرداد نقدي من الصندوق</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-300">سبب الإرجاع</label>
+                <input
+                  type="text"
+                  value={editFormData.reason}
+                  onChange={e => setEditFormData({ ...editFormData, reason: e.target.value })}
+                  className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500"
+                />
+              </div>
+
+              {/* Items List */}
+              <div className="space-y-2 border-t border-white/10 pt-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-white">الأصناف المرتجعة للمستودع</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const firstProd = products[0]
+                      setEditFormData((prev: any) => ({
+                        ...prev,
+                        items: [
+                          ...prev.items,
+                          {
+                            product_id: firstProd?.id || '',
+                            product_name: firstProd?.name || '',
+                            quantity: 1,
+                            unit_price: firstProd?.price || 0,
+                          },
+                        ],
+                      }))
+                    }}
+                    className="text-xs font-bold text-sky-400 hover:text-sky-300"
+                  >
+                    ➕ إضافة صنف آخر
+                  </button>
+                </div>
+
+                {editFormData.items.map((item: any, idx: number) => (
+                  <div key={idx} className="flex items-center gap-2 rounded-xl bg-slate-800/60 p-2.5">
+                    <select
+                      value={item.product_id}
+                      onChange={e => {
+                        const val = e.target.value
+                        const selected = products.find(p => p.id === val)
+                        setEditFormData((prev: any) => ({
+                          ...prev,
+                          items: prev.items.map((it: any, i: number) =>
+                            i === idx
+                              ? { ...it, product_id: val, product_name: selected?.name || it.product_name, unit_price: selected?.price || it.unit_price }
+                              : it
+                          ),
+                        }))
+                      }}
+                      className="flex-1 rounded-lg border border-white/10 bg-slate-800 p-2 text-xs text-white outline-none focus:border-sky-500"
+                    >
+                      {products.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.price} ₪)
+                        </option>
+                      ))}
+                    </select>
+
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="الكمية"
+                      value={item.quantity}
+                      onChange={e => {
+                        const val = Number(e.target.value)
+                        setEditFormData((prev: any) => ({
+                          ...prev,
+                          items: prev.items.map((it: any, i: number) => (i === idx ? { ...it, quantity: val } : it)),
+                        }))
+                      }}
+                      className="w-20 rounded-lg border border-white/10 bg-slate-800 p-2 text-xs text-white outline-none font-mono"
+                    />
+
+                    <input
+                      type="number"
+                      step="any"
+                      placeholder="السعر"
+                      value={item.unit_price}
+                      onChange={e => {
+                        const val = Number(e.target.value)
+                        setEditFormData((prev: any) => ({
+                          ...prev,
+                          items: prev.items.map((it: any, i: number) => (i === idx ? { ...it, unit_price: val } : it)),
+                        }))
+                      }}
+                      className="w-24 rounded-lg border border-white/10 bg-slate-800 p-2 text-xs text-white outline-none font-mono"
+                    />
+
+                    <span className="w-24 text-left font-mono font-bold text-white text-xs">
+                      {(Number(item.quantity || 0) * Number(item.unit_price || 0)).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪
+                    </span>
+
+                    {editFormData.items.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditFormData((prev: any) => ({
+                            ...prev,
+                            items: prev.items.filter((_: any, i: number) => i !== idx),
+                          }))
+                        }}
+                        className="text-slate-500 hover:text-rose-400 font-bold px-1"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Total Summary */}
+              <div className="rounded-xl bg-slate-950 p-3 flex justify-between items-center text-xs">
+                <span className="font-bold text-slate-300">إجمالي قيمة المرتجع المعدل:</span>
+                <span className="font-mono font-black text-lg text-emerald-400">
+                  {editFormData.items
+                    .reduce((sum: number, it: any) => sum + Number(it.quantity || 0) * Number(it.unit_price || 0), 0)
+                    .toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪
+                </span>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingReturn(null)}
+                  className="flex-1 rounded-xl border border-white/10 py-2.5 text-xs font-bold text-slate-400 hover:bg-slate-800 transition"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 rounded-xl bg-sky-500 py-2.5 text-xs font-bold text-slate-950 hover:bg-sky-400 transition disabled:opacity-50"
+                >
+                  {loading ? 'جارٍ الحفظ...' : 'حفظ التعديلات'}
                 </button>
               </div>
             </form>

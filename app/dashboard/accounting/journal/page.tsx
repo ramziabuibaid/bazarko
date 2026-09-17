@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
+import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
 
 export const metadata = {
   title: 'قيود اليومية — Bazarko ERP',
@@ -54,6 +55,11 @@ export default async function JournalEntriesPage({ searchParams }: { searchParam
 
   return (
     <div className="space-y-6">
+      {/* ── Back to Accounting Hub ── */}
+      <div>
+        <BackToDashboardButton href="/dashboard/accounting-hub" label="العودة إلى لوحة الإدارة المالية والمحاسبية" />
+      </div>
+
       {/* ── Header ── */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

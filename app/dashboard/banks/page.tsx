@@ -32,6 +32,7 @@ export default async function BanksPage() {
       .select('id, code, name')
       .eq('store_id', storeId)
       .eq('type', 'asset')
+      .eq('is_active', true)
       .order('code', { ascending: true })
   ])
 

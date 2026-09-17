@@ -9,20 +9,26 @@ export interface PlanFeature {
 
 export const FREE_ALLOWED_ROUTES = [
   '/dashboard',
+  '/dashboard/sales',
+  '/dashboard/pos',
   '/dashboard/accounting/invoices',
   '/dashboard/invoices/returns',
   '/dashboard/orders/receipt',
+  '/dashboard/purchases-hub',
   '/dashboard/purchases',
   '/dashboard/purchases/returns',
   '/dashboard/accounting/receipts',
   '/dashboard/accounting/payments',
   '/dashboard/customers',
   '/dashboard/suppliers',
+  '/dashboard/inventory-hub',
   '/dashboard/products',
   '/dashboard/categories',
+  '/dashboard/store-hub',
   '/dashboard/orders',
   '/dashboard/delivery',
   '/dashboard/settings',
+  '/dashboard/accounting/shamel',
   '/dashboard/upgrade',
 ]
 

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
 
 interface Supplier {
   id: string
@@ -94,6 +95,11 @@ export default function SuppliersClient({ store, initialSuppliers }: Props) {
 
   return (
     <div className="space-y-6">
+      {/* ── Back to Purchases Hub ── */}
+      <div>
+        <BackToDashboardButton href="/dashboard/purchases-hub" label="العودة إلى لوحة إدارة المشتريات" />
+      </div>
+
       {/* ── Header ── */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

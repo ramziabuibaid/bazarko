@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { sendInvoiceEmail } from '@/lib/email/invoice-email'
 import { getStoreForUser } from '@/lib/supabase/getStore'
 import { logFinancialEvent } from '@/lib/accounting/audit'
+import { checkIsPeriodClosed } from '@/app/dashboard/accounting/periods/period-actions'
+import { reverseJournalEntry } from '@/lib/accounting/engine'
 import { revalidatePath } from 'next/cache'
 
 type PayMethod = 'cash' | 'bank' | 'card' | 'transfer'
@@ -27,6 +29,12 @@ export async function recordInvoicePayment(
 
   const storeId = await getStoreForUser(supabase, user.id)
   if (!storeId) return { ok: false, error: 'المتجر غير موجود' }
+
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const periodCheck = await checkIsPeriodClosed(storeId, todayStr)
+  if (periodCheck.isClosed) {
+    return { ok: false, error: `لا يمكن تسجيل دفعة في فترة محاسبية مقفلة (${periodCheck.periodName})` }
+  }
 
   const { data: inv } = await supabase
     .from('invoices')
@@ -159,5 +167,126 @@ export async function emailInvoice(invoiceId: string, toEmail: string): Promise<
     currencyCode:   store.currency_code,
   })
 
+  return { ok: true }
+}
+
+/**
+ * حذف فاتورة المبيعات مع عكس المخزون، عكس كشف حساب الزبون، وإلغاء القيود المرتبطة
+ */
+export async function deleteInvoice(invoiceId: string): Promise<{ ok: boolean; error?: string }> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: 'غير مصرح' }
+
+  const storeId = await getStoreForUser(supabase, user.id)
+  if (!storeId) return { ok: false, error: 'المتجر غير موجود' }
+
+  // 1. جلب الفاتورة وبنودها
+  const { data: inv } = await supabase
+    .from('invoices')
+    .select('*')
+    .eq('id', invoiceId)
+    .eq('store_id', storeId)
+    .single()
+  if (!inv) return { ok: false, error: 'الفاتورة غير موجودة' }
+
+  // التحقق من قفل الفترة المحاسبية لتاريخ الفاتورة
+  const periodCheck = await checkIsPeriodClosed(storeId, inv.issue_date)
+  if (periodCheck.isClosed) {
+    return { ok: false, error: `لا يمكن حذف فاتورة تقع ضمن فترة محاسبية مقفلة (${periodCheck.periodName})` }
+  }
+
+  const { data: items } = await supabase
+    .from('invoice_items')
+    .select('*')
+    .eq('invoice_id', invoiceId)
+
+  // 2. إعادة المخزون المباع للأصناف
+  if (items && items.length > 0) {
+    for (const item of items) {
+      if (item.product_id) {
+        const { data: prod } = await supabase
+          .from('products')
+          .select('stock_quantity')
+          .eq('id', item.product_id)
+          .single()
+        if (prod) {
+          const restoredStock = Number(prod.stock_quantity || 0) + Number(item.quantity)
+          await supabase.from('products').update({ stock_quantity: restoredStock }).eq('id', item.product_id)
+
+          await supabase
+            .from('inventory_movements')
+            .delete()
+            .eq('ref_id', invoiceId)
+            .eq('product_id', item.product_id)
+        }
+      }
+    }
+  }
+
+  // 3. عكس كشف حساب الزبون ورصيده
+  if (inv.customer_id) {
+    const { data: cust } = await supabase
+      .from('customers')
+      .select('balance, total_invoiced, total_paid')
+      .eq('id', inv.customer_id)
+      .single()
+
+    if (cust) {
+      const remainingDebt = Math.max(0, Number(inv.total || 0) - Number(inv.amount_paid || 0))
+      const newBalance = Math.max(0, Number(cust.balance || 0) - remainingDebt)
+      const newInvoiced = Math.max(0, Number(cust.total_invoiced || 0) - Number(inv.total || 0))
+      const newPaid = Math.max(0, Number(cust.total_paid || 0) - Number(inv.amount_paid || 0))
+
+      await supabase.from('customers').update({
+        balance: newBalance,
+        total_invoiced: newInvoiced,
+        total_paid: newPaid,
+      }).eq('id', inv.customer_id)
+
+      await supabase
+        .from('customer_ledger')
+        .delete()
+        .eq('reference_id', invoiceId)
+        .eq('reference_type', 'invoice')
+    }
+  }
+
+  // 4. حذف سندات القبض المرتبطة بالفاتورة من الصندوق إن وجدت
+  await supabase
+    .from('vouchers')
+    .delete()
+    .eq('reference', inv.invoice_number)
+    .eq('store_id', storeId)
+
+  // 5. توثيق العملية في سجل التدقيق المالي
+  await logFinancialEvent({
+    storeId,
+    entityType: 'invoice',
+    entityId: inv.id,
+    entityLabel: inv.invoice_number,
+    action: 'delete',
+    actorId: user.id,
+    details: { total: inv.total, invoiceNumber: inv.invoice_number, itemsCount: items?.length || 0 },
+  })
+
+  // 5.5. عكس القيد المحاسبي في دفتر الأستاذ العام
+  try {
+    await reverseJournalEntry(inv.id, `حذف فاتورة مبيعات #${inv.invoice_number}`, user.id)
+  } catch (glErr) {
+    console.error('Error reversing invoice GL entry:', glErr)
+  }
+
+  // 6. حذف الفاتورة
+  const { error: delErr } = await supabase
+    .from('invoices')
+    .delete()
+    .eq('id', invoiceId)
+    .eq('store_id', storeId)
+
+  if (delErr) return { ok: false, error: delErr.message }
+
+  revalidatePath('/dashboard/accounting/invoices')
+  revalidatePath('/dashboard/sales')
   return { ok: true }
 }

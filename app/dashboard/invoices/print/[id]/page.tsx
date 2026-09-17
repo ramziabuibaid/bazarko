@@ -42,18 +42,32 @@ export default async function PrintInvoicePage({ params }: { params: { id: strin
         >
           ← العودة لفواتير المبيعات
         </Link>
-        <PrintButton label="🖨️ طباعة الفاتورة (Print / PDF)" className="rounded-lg bg-sky-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-sky-400 transition" />
+        <PrintButton
+          elementId="invoice-official-canvas"
+          filename={`invoice-${invoice.invoice_number}.pdf`}
+          label="🖨️ طباعة الفاتورة (Print / PDF)"
+          className="rounded-lg bg-sky-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-sky-400 transition"
+        />
       </div>
 
       {/* ── Official Paper Canvas ── */}
-      <div className="mx-auto max-w-4xl rounded-2xl border border-slate-300 bg-white p-8 shadow-sm print:border-none print:shadow-none print:p-4">
+      <div id="invoice-official-canvas" className="mx-auto max-w-4xl rounded-2xl border border-slate-300 bg-white p-8 shadow-sm print:border-none print:shadow-none print:p-4">
         {/* Header */}
         <div className="flex items-start justify-between border-b-2 border-slate-900 pb-5">
-          <div>
-            <h1 className="text-2xl font-black text-slate-950">{store.name}</h1>
-            <p className="text-xs text-slate-600 mt-0.5">{store.address || 'فلسطين'}</p>
-            {store.phone && <p className="text-xs text-slate-600">هاتف: {store.phone}</p>}
-            {store.tax_number && <p className="text-xs text-slate-600">الرقم الضريبي / المشتغل: {store.tax_number}</p>}
+          <div className="flex items-center gap-4">
+            {store.logo_url && (
+              <img
+                src={store.logo_url}
+                alt={store.name}
+                className="h-16 w-16 object-contain rounded-lg border border-slate-200 p-1"
+              />
+            )}
+            <div>
+              <h1 className="text-2xl font-black text-slate-950">{store.name}</h1>
+              <p className="text-xs text-slate-600 mt-0.5">{store.address || 'فلسطين'}</p>
+              {store.phone && <p className="text-xs text-slate-600">هاتف: {store.phone}</p>}
+              {store.tax_number && <p className="text-xs text-slate-600">الرقم الضريبي / المشتغل: {store.tax_number}</p>}
+            </div>
           </div>
 
           <div className="text-center">
@@ -157,7 +171,7 @@ export default async function PrintInvoicePage({ params }: { params: { id: strin
             </div>
             {Number(invoice.discount_amount) > 0 && (
               <div className="flex justify-between text-rose-600">
-                <span>الخصم الممنوح:</span>
+                <span>الخصم الممنوح {invoice.discount_type === 'percentage' && invoice.discount_value ? `(${invoice.discount_value}%)` : ''}:</span>
                 <span className="font-mono font-bold" dir="ltr">
                   - {Number(invoice.discount_amount).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪
                 </span>

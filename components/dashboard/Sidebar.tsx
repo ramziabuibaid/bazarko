@@ -26,8 +26,10 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    title: 'المبيعات والعملاء',
+    title: 'إدارة المبيعات',
     items: [
+      { href: '/dashboard/sales', label: 'لوحة المبيعات (Hub)', icon: '📈' },
+      { href: '/dashboard/pos', label: 'نقطة البيع (POS)', icon: '⚡' },
       { href: '/dashboard/accounting/invoices', label: 'فواتير المبيعات', icon: '🧾' },
       { href: '/dashboard/invoices/returns', label: 'مردودات المبيعات', icon: '↩️' },
       { href: '/dashboard/quotations', label: 'عروض الأسعار', icon: '📑' },
@@ -36,8 +38,9 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    title: 'المشتريات والموردين',
+    title: 'إدارة المشتريات',
     items: [
+      { href: '/dashboard/purchases-hub', label: 'لوحة المشتريات (Hub)', icon: '🏬' },
       { href: '/dashboard/purchases', label: 'فواتير المشتريات', icon: '🛒' },
       { href: '/dashboard/purchases/returns', label: 'مردودات المشتريات', icon: '🔁' },
       { href: '/dashboard/suppliers', label: 'دليل الموردين', icon: '🏭' },
@@ -52,22 +55,24 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    title: 'المحاسبة والمالية',
+    title: 'الإدارة المالية والمحاسبة',
     items: [
-      { href: '/dashboard/accounting', label: 'اللوحة المالية', icon: '💰' },
+      { href: '/dashboard/finance', label: 'لوحة الإدارة المالية', icon: '💵' },
+      { href: '/dashboard/accounting-hub', label: 'لوحة المحاسبة والتقارير', icon: '⚖️' },
       { href: '/dashboard/accounting/accounts', label: 'شجرة الحسابات (دليل)', icon: '🌳' },
       { href: '/dashboard/accounting/journal', label: 'قيود اليومية العامة', icon: '⚖️' },
+      { href: '/dashboard/accounting/reports', label: 'التقارير المالية والختامية', icon: '📊' },
       { href: '/dashboard/accounting/receipts', label: 'سندات القبض', icon: '📥' },
       { href: '/dashboard/accounting/payments', label: 'سندات الصرف', icon: '📤' },
       { href: '/dashboard/accounting/treasury', label: 'الصندوق والخزينة', icon: '💼' },
-      { href: '/dashboard/accounting/expenses', label: 'المصروفات', icon: '💸' },
-      { href: '/dashboard/accounting/reports', label: 'التقارير المالية', icon: '📈' },
+      { href: '/dashboard/accounting/shamel', label: 'مستورد ومزامنة الشامل ERP', icon: '🔄' },
       { href: '/dashboard/accounting/audit', label: 'سجل العمليات والرقابة', icon: '🛡️' },
     ],
   },
   {
-    title: 'المخزون والمنتجات',
+    title: 'إدارة المخزون والمنتجات',
     items: [
+      { href: '/dashboard/inventory-hub', label: 'لوحة المخزون (Hub)', icon: '📦' },
       { href: '/dashboard/products', label: 'قائمة المنتجات', icon: '🛍️' },
       { href: '/dashboard/inventory/statement', label: 'كشف حركات صنف', icon: '🔍' },
       { href: '/dashboard/inventory/brands', label: 'الماركات والبراندات', icon: '🏷️' },
@@ -81,6 +86,7 @@ const navGroups: NavGroup[] = [
   {
     title: 'المتجر الإلكتروني',
     items: [
+      { href: '/dashboard/store-hub', label: 'لوحة المتجر (Hub)', icon: '🌐' },
       { href: '/dashboard/orders', label: 'طلبيات المتجر', icon: '📦' },
       { href: '/dashboard/offers', label: 'العروض الحصرية', icon: '🎁' },
       { href: '/dashboard/marketing/ads', label: 'إعلانات وحملات WhatsApp', icon: '📢' },
@@ -228,41 +234,41 @@ function NavContent({
       <nav className="flex-1 overflow-y-auto px-3 py-4">
         {navGroups
           .filter(group => !group.module || store.modules?.[group.module])
-          .map((group, gi) => (
-          <div key={gi} className={gi > 0 ? 'mt-6' : ''}>
-            {group.title && (
-              <p className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-widest text-slate-600">
-                {group.title}
-              </p>
-            )}
-            <ul className="space-y-0.5">
-              {group.items.map(item => {
-                const isAllowed = isRouteAllowed(item.href, store.plan)
-                return (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      onClick={onNavClick}
-                      className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
-                        isActive(item.href)
-                          ? 'bg-sky-500/15 text-sky-400'
-                          : 'text-slate-400 hover:bg-white/5 hover:text-white'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-base leading-none">{item.icon}</span>
-                        <span>{item.label}</span>
-                      </div>
-                      {!isAllowed && (
-                        <span className="text-xs text-amber-400/90" title="ميزة متوفرة في النسخة الكاملة">🔒</span>
-                      )}
-                    </Link>
-                  </li>
-                )
-              })}
-            </ul>
-          </div>
-        ))}
+          .map((group, gi) => {
+            const isPro = store.plan === 'pro' || store.plan === 'basic'
+            const visibleItems = group.items.filter(item => isPro || isRouteAllowed(item.href, store.plan))
+            if (visibleItems.length === 0) return null
+
+            return (
+              <div key={gi} className={gi > 0 ? 'mt-6' : ''}>
+                {group.title && (
+                  <p className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-widest text-slate-600">
+                    {group.title}
+                  </p>
+                )}
+                <ul className="space-y-0.5">
+                  {visibleItems.map(item => (
+                    <li key={item.href}>
+                      <Link
+                        href={item.href}
+                        onClick={onNavClick}
+                        className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
+                          isActive(item.href)
+                            ? 'bg-sky-500/15 text-sky-400'
+                            : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-base leading-none">{item.icon}</span>
+                          <span>{item.label}</span>
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
+          })}
       </nav>
 
       {/* أسفل السايدبار */}

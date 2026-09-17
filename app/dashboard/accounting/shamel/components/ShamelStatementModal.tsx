@@ -1,0 +1,1056 @@
+'use client'
+
+import { Fragment, useEffect, useState } from 'react'
+
+interface Props {
+  isOpen: boolean
+  onClose: () => void
+  customerCode: string
+  customerName?: string
+  storeName: string
+  currencyCode: string
+}
+
+interface StatementRow {
+  day: string
+  document: string
+  line_index: number
+  document_type?: string
+  description?: string
+  debit: number
+  credit: number
+  running_balance: number
+  original_currency?: string
+  original_amount?: number
+  exchange_rate?: number
+}
+
+interface ChequeRow {
+  id: string
+  document: string
+  cheque_number: string
+  bank_code: string
+  bank_name?: string
+  branch_code?: string
+  due_date: string | null
+  amount: number
+  currency: string
+  status: string
+  status_name: string
+  target_account?: string
+  target_name?: string
+}
+
+interface StatementData {
+  customer: {
+    code: string
+    name: string
+    phone?: string
+    address?: string
+    balance: number
+    equivalent_balance?: number
+  }
+  has_ledger_entries: boolean
+  opening_balance: number
+  period_debit: number
+  period_credit: number
+  closing_balance: number
+  currency: string
+  total: number
+  rows: StatementRow[]
+  cheques: ChequeRow[]
+}
+
+interface DocumentDetails {
+  document: string
+  items: Array<{
+    line_index: number
+    day: string
+    item_code: string
+    item_name: string
+    quantity: number
+    price: number
+    total: number
+    location: number
+  }>
+  cheques: Array<{
+    cheque_number: string
+    due_date: string | null
+    bank_name?: string
+    amount: number
+    currency: string
+  }>
+}
+
+const PALESTINIAN_BANKS: Record<string, string> = {
+  '0089': 'بنك فلسطين',
+  '0049': 'البنك الإسلامي الفلسطيني',
+  '0081': 'البنك الإسلامي العربي',
+  '0027': 'البنك العربي',
+  '0073': 'بنك القدس',
+  '0082': 'البنك الوطني',
+  '0066': 'بنك القاهرة عمان',
+  '0076': 'بنك الصفا',
+  '0037': 'بنك الأردن',
+  '0043': 'بنك الإسكان للتجارة',
+  '0067': 'البنك الأهلي الأردني',
+  '0078': 'بنك الاستثمار الفلسطيني',
+  '0012': 'بنك لئومي',
+  '0010': 'بنك هبوعليم',
+  '0011': 'بنك ديسكونت',
+  '0020': 'بنك مزراحي تفاحوت',
+  '0031': 'البنك الدولي الأول',
+}
+
+const money = (n: number) =>
+  Number(n || 0).toLocaleString('ar-u-nu-latn', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+const escapeHtml = (s: unknown) =>
+  String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
+
+function getDefaultFromDate(): string {
+  const prevYear = new Date().getFullYear() - 1
+  return `${prevYear}-01-01`
+}
+
+function getTodayDate(): string {
+  const d = new Date()
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+export default function ShamelStatementModal({
+  isOpen,
+  onClose,
+  customerCode,
+  customerName,
+  storeName,
+  currencyCode,
+}: Props) {
+  const [from, setFrom] = useState(getDefaultFromDate())
+  const [to, setTo] = useState(getTodayDate())
+  const [currency, setCurrency] = useState('NIS')
+  const [isDetailed, setIsDetailed] = useState(true)
+  const [data, setData] = useState<StatementData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [printing, setPrinting] = useState(false)
+  const [exportingExcel, setExportingExcel] = useState(false)
+
+  // Document details drilldown
+  const [expandedDoc, setExpandedDoc] = useState<string | null>(null)
+  const [docDetails, setDocDetails] = useState<Record<string, DocumentDetails>>({})
+  const [loadingDocDetails, setLoadingDocDetails] = useState<string | null>(null)
+
+  const [viewTab, setViewTab] = useState<'movements' | 'cheques'>('movements')
+
+  useEffect(() => {
+    if (!isOpen || !customerCode) return
+
+    setLoading(true)
+    setError(null)
+    const params = new URLSearchParams({
+      kind: 'statement',
+      code: customerCode,
+      currency,
+      from,
+      to,
+      limit: '300',
+    })
+
+    fetch(`/api/shamel/query?${params.toString()}`)
+      .then(async res => {
+        const body = await res.json()
+        if (!res.ok) throw new Error(body.error || body.message || 'فشل جلب كشف الحساب')
+        return body as StatementData
+      })
+      .then(stmt => {
+        setData(stmt)
+      })
+      .catch(err => {
+        console.error('Statement error:', err)
+        setError(err.message || 'تعذر تحميل كشف الحساب')
+      })
+      .finally(() => setLoading(false))
+  }, [isOpen, customerCode, from, to, currency])
+
+  if (!isOpen) return null
+
+  const toggleDocDetails = async (doc: string) => {
+    if (expandedDoc === doc) {
+      setExpandedDoc(null)
+      return
+    }
+    setExpandedDoc(doc)
+    if (!docDetails[doc]) {
+      setLoadingDocDetails(doc)
+      try {
+        const res = await fetch(`/api/shamel/query?kind=details&document=${encodeURIComponent(doc)}`)
+        const body = await res.json()
+        if (res.ok) {
+          setDocDetails(prev => ({ ...prev, [doc]: body }))
+        }
+      } catch (err) {
+        console.error('Failed to load document details:', err)
+      } finally {
+        setLoadingDocDetails(null)
+      }
+    }
+  }
+
+  const printStatement = async (detailed = false) => {
+    if (!data) return
+    const win = window.open('', '_blank')
+    if (!win) {
+      alert('يرجى السماح بالنوافذ المنبثقة للتمكن من الطباعة.')
+      return
+    }
+    win.document.body.textContent = 'جارٍ تجهيز كشف الحساب للطباعة...'
+    setPrinting(true)
+
+    try {
+      const rows = data.rows || []
+
+      // If detailed print is requested, fetch details for invoices and receipts
+      const printDetails: Record<string, DocumentDetails> = { ...docDetails }
+      if (detailed) {
+        win.document.body.textContent = 'جارٍ جلب تفاصيل الفواتير والشيكات...'
+        const uniqueDocs = Array.from(new Set(rows.map(r => r.document)))
+        for (const d of uniqueDocs) {
+          if (!printDetails[d]) {
+            try {
+              const res = await fetch(`/api/shamel/query?kind=details&document=${encodeURIComponent(d)}`)
+              if (res.ok) {
+                printDetails[d] = await res.json()
+              }
+            } catch {
+              // Ignore individual failure
+            }
+          }
+        }
+      }
+
+      const detailedHtml = (doc: string) => {
+        const d = printDetails[doc]
+        if (!d) return ''
+        let out = ''
+        if (d.items && d.items.length > 0) {
+          out += `
+            <div style="margin:6px 0; padding:8px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px;">
+              <b>📦 بنود الفاتورة:</b>
+              <table style="margin-top:6px; font-size:11px; width:100%; border-collapse:collapse; background:#fff;">
+                <thead>
+                  <tr style="background:#f1f5f9; border-bottom:1px solid #cbd5e1;">
+                    <th style="padding:4px 6px; text-align:right;">#</th>
+                    <th style="padding:4px 6px; text-align:right;">كود الصنف</th>
+                    <th style="padding:4px 6px; text-align:right;">اسم الصنف</th>
+                    <th style="padding:4px 6px; text-align:center;">الكمية</th>
+                    <th style="padding:4px 6px; text-align:left;">السعر</th>
+                    <th style="padding:4px 6px; text-align:left;">الإجمالي</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${d.items.map((it, idx) => `
+                    <tr style="border-bottom:1px solid #f1f5f9;">
+                      <td style="padding:4px 6px;">${idx + 1}</td>
+                      <td style="padding:4px 6px; font-family:monospace;">${escapeHtml(it.item_code)}</td>
+                      <td style="padding:4px 6px;">${escapeHtml(it.item_name)}</td>
+                      <td style="padding:4px 6px; text-align:center;">${it.quantity}</td>
+                      <td style="padding:4px 6px; text-align:left; font-family:monospace;">${money(it.price)}</td>
+                      <td style="padding:4px 6px; text-align:left; font-family:monospace; font-weight:bold;">${money(it.total)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `
+        }
+        if (d.cheques && d.cheques.length > 0) {
+          out += `
+            <div style="margin:6px 0; padding:8px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px;">
+              <b>🏦 بيانات الشيكات:</b>
+              <table style="margin-top:6px; font-size:11px; width:100%; border-collapse:collapse; background:#fff;">
+                <thead>
+                  <tr style="background:#f1f5f9; border-bottom:1px solid #cbd5e1;">
+                    <th style="padding:4px 6px; text-align:right;">#</th>
+                    <th style="padding:4px 6px; text-align:right;">رقم الشيك</th>
+                    <th style="padding:4px 6px; text-align:right;">تاريخ الاستحقاق</th>
+                    <th style="padding:4px 6px; text-align:right;">البنك</th>
+                    <th style="padding:4px 6px; text-align:left;">المبلغ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${d.cheques.map((c, idx) => `
+                    <tr style="border-bottom:1px solid #f1f5f9;">
+                      <td style="padding:4px 6px;">${idx + 1}</td>
+                      <td style="padding:4px 6px; font-family:monospace;">${escapeHtml(c.cheque_number)}</td>
+                      <td style="padding:4px 6px;">${c.due_date ? new Date(c.due_date).toLocaleDateString('ar-u-nu-latn') : '—'}</td>
+                      <td style="padding:4px 6px;">${escapeHtml(c.bank_name || 'بنك')}</td>
+                      <td style="padding:4px 6px; text-align:left; font-family:monospace; font-weight:bold;">${money(c.amount)} ${c.currency}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `
+        }
+        return out
+      }
+
+      win.document.open()
+      win.document.write(`
+        <!doctype html>
+        <html lang="ar" dir="rtl">
+        <head>
+          <meta charset="utf-8">
+          <title>كشف حساب — ${escapeHtml(data.customer.name)} (${escapeHtml(data.customer.code)})</title>
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #0f172a; padding: 24px; direction: rtl; }
+            h1 { font-size: 20px; margin: 0 0 6px 0; color: #1e1b4b; }
+            .header-box { border-bottom: 2px solid #e2e8f0; padding-bottom: 14px; margin-bottom: 16px; }
+            .meta-grid { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: #475569; }
+            .summary-box { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; border-radius: 8px; margin: 16px 0; text-align: center; }
+            .summary-title { font-size: 11px; color: #64748b; }
+            .summary-val { font-size: 16px; font-weight: bold; margin-top: 4px; font-family: monospace; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            th, td { padding: 8px 6px; border-bottom: 1px solid #cbd5e1; text-align: right; }
+            th { background: #f1f5f9; color: #334155; font-weight: bold; }
+            .num { direction: ltr; text-align: left; font-family: monospace; white-space: nowrap; }
+            @page { size: A4 portrait; margin: 10mm; }
+          </style>
+        </head>
+        <body>
+          <div class="header-box">
+            <h1>${escapeHtml(storeName)} — كشف حساب الزبون (الشامل المحاسبي) ${detailed ? '— تفصيلي' : ''}</h1>
+            <div class="meta-grid">
+              <div><b>الزبون:</b> ${escapeHtml(data.customer.name)}</div>
+              <div><b>الكود:</b> <span style="font-family:monospace;">${escapeHtml(data.customer.code)}</span></div>
+              <div><b>الهاتف:</b> ${escapeHtml(data.customer.phone || '—')}</div>
+              <div><b>العنوان:</b> ${escapeHtml(data.customer.address || '—')}</div>
+              <div><b>الفترة:</b> ${escapeHtml(from || 'من البداية')} إلى ${escapeHtml(to || 'الآن')}</div>
+              <div><b>العملة:</b> ${escapeHtml(currency)}</div>
+              <div><b>تاريخ الطباعة:</b> ${new Date().toLocaleDateString('ar-u-nu-latn')}</div>
+            </div>
+          </div>
+
+          <div class="summary-box">
+            <div>
+              <div class="summary-title">الرصيد الافتتاحي / السابق</div>
+              <div class="summary-val">${money(data.opening_balance)}</div>
+            </div>
+            <div>
+              <div class="summary-title">مدين الفترة (+)</div>
+              <div class="summary-val" style="color:#b91c1c;">${money(data.period_debit)}</div>
+            </div>
+            <div>
+              <div class="summary-title">دائن الفترة (-)</div>
+              <div class="summary-val" style="color:#047857;">${money(data.period_credit)}</div>
+            </div>
+            <div>
+              <div class="summary-title">الرصيد الختامي المستحق</div>
+              <div class="summary-val" style="color:#1e1b4b;">${money(data.closing_balance)}</div>
+            </div>
+          </div>
+
+          ${rows.length > 0 ? `
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:70px;">التاريخ</th>
+                  <th style="width:75px;">المستند</th>
+                  <th style="width:75px;">النوع</th>
+                  <th>البيان</th>
+                  <th style="width:90px; text-align:left;">مدين</th>
+                  <th style="width:90px; text-align:left;">دائن</th>
+                  <th style="width:105px; text-align:left;">الرصيد التراكمي</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows.map(r => `
+                  <tr>
+                    <td>${escapeHtml(r.day)}</td>
+                    <td style="font-family:monospace; font-weight:bold;">${escapeHtml(r.document)}</td>
+                    <td>${escapeHtml(r.document_type || 'حركة')}</td>
+                    <td>${escapeHtml(r.description || '—')}</td>
+                    <td class="num">${r.debit > 0 ? money(r.debit) : '—'}</td>
+                    <td class="num">${r.credit > 0 ? money(r.credit) : '—'}</td>
+                    <td class="num" style="font-weight:bold;">${money(r.running_balance)}</td>
+                  </tr>
+                  ${detailed ? `
+                    <tr>
+                      <td colspan="7" style="padding:0 8px 8px 8px; border-bottom:2px solid #cbd5e1;">
+                        ${detailedHtml(r.document)}
+                      </td>
+                    </tr>
+                  ` : ''}
+                `).join('')}
+              </tbody>
+            </table>
+          ` : `
+            <div style="padding:20px; text-align:center; color:#64748b; background:#f8fafc; border-radius:8px;">
+              لا توجد قيود يومية تفصيلية مسجلة في هذه الفترة. رصيد الزبون المسجل: <b>${money(data.customer.balance)} ${currency}</b>.
+            </div>
+          `}
+
+          ${data.cheques && data.cheques.length > 0 ? `
+            <div style="margin-top:24px;">
+              <h3 style="font-size:14px; margin-bottom:8px; color:#1e1b4b;">شيكات الزبون المسجلة (${data.cheques.length} شيك)</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>رقم الشيك</th>
+                    <th>تاريخ الاستحقاق</th>
+                    <th>البنك والفرع</th>
+                    <th>المبلغ</th>
+                    <th>الحالة</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${data.cheques.map(c => `
+                    <tr>
+                      <td style="font-family:monospace; font-weight:bold;">${escapeHtml(c.cheque_number)}</td>
+                      <td>${c.due_date ? new Date(c.due_date).toLocaleDateString('ar-u-nu-latn') : '—'}</td>
+                      <td>${escapeHtml(c.bank_name || PALESTINIAN_BANKS[c.bank_code] || c.bank_code)}</td>
+                      <td class="num" style="font-weight:bold;">${money(c.amount)} ${c.currency}</td>
+                      <td>${escapeHtml(c.status_name)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : ''}
+
+          <div style="margin-top:28px; border-top:1px solid #e2e8f0; padding-top:10px; font-size:10px; color:#64748b; display:flex; justify-content:space-between;">
+            <span>ملاحظة: الموجب (+) مدين على الزبون، السالب (-) دائن له. مستخرج من نظام الشامل المحاسبي.</span>
+            <span>منصة بازاركو — Bazarko ERP</span>
+          </div>
+        </body>
+        </html>
+      `)
+      win.document.close()
+      win.focus()
+      win.print()
+    } catch (err: any) {
+      win.close()
+      alert(`حدث خطأ أثناء إعداد الطباعة: ${err.message}`)
+    } finally {
+      setPrinting(false)
+    }
+  }
+
+  // Generate RTL Excel document matching the detailed format
+  function buildExcelHtml(rows: StatementRow[], printDetails: Record<string, DocumentDetails>, detailed: boolean) {
+    if (!data) return ''
+    const detailedRow = (doc: string) => {
+      const d = printDetails[doc]
+      if (!d) return ''
+      let out = ''
+      if (d.items && d.items.length > 0) {
+        out += `
+          <tr style="background:#f8fafc;">
+            <td colspan="10" style="padding:6px 14px; border:1px solid #cbd5e1;">
+              <div style="font-weight:bold; color:#1e293b; margin-bottom:4px; font-size:11px;">📦 أصناف الفاتورة (${d.items.length} صنف):</div>
+              <table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:11px; border-color:#cbd5e1; background:#ffffff;">
+                <thead>
+                  <tr style="background:#f1f5f9; color:#334155; font-weight:bold;">
+                    <th style="width:30px; text-align:center;">#</th>
+                    <th style="width:90px; text-align:right;">كود الصنف</th>
+                    <th style="text-align:right;">اسم الصنف</th>
+                    <th style="width:60px; text-align:center;">الموقع</th>
+                    <th style="width:60px; text-align:left;">الكمية</th>
+                    <th style="width:70px; text-align:left;">السعر</th>
+                    <th style="width:80px; text-align:left;">الإجمالي</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${d.items.map((it, idx) => `
+                    <tr>
+                      <td style="text-align:center; color:#64748b;">${idx + 1}</td>
+                      <td style="mso-number-format:'\\@'; direction:ltr; text-align:right;">${escapeHtml(it.item_code)}</td>
+                      <td style="font-weight:600; text-align:right;">${escapeHtml(it.item_name)}</td>
+                      <td style="text-align:center;">${it.location === 1 ? 'مستودع' : 'محل'}</td>
+                      <td class="num">${money(it.quantity)}</td>
+                      <td class="num">${money(it.price)}</td>
+                      <td class="num" style="font-weight:bold;">${money(it.total)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </td>
+          </tr>
+        `
+      }
+      if (d.cheques && d.cheques.length > 0) {
+        out += `
+          <tr style="background:#f8fafc;">
+            <td colspan="10" style="padding:6px 14px; border:1px solid #cbd5e1;">
+              <div style="font-weight:bold; color:#1e293b; margin-bottom:4px; font-size:11px;">🏦 تفاصيل الشيكات (${d.cheques.length} شيك):</div>
+              <table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:11px; border-color:#cbd5e1; background:#ffffff;">
+                <thead>
+                  <tr style="background:#f1f5f9; color:#334155; font-weight:bold;">
+                    <th style="width:30px; text-align:center;">#</th>
+                    <th style="width:100px; text-align:right;">رقم الشيك</th>
+                    <th style="width:90px; text-align:center;">تاريخ الاستحقاق</th>
+                    <th style="text-align:right;">البنك والفرع</th>
+                    <th style="width:90px; text-align:left;">المبلغ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${d.cheques.map((c, idx) => `
+                    <tr>
+                      <td style="text-align:center; color:#64748b;">${idx + 1}</td>
+                      <td style="font-weight:bold; color:#312e81; mso-number-format:'\\@'; direction:ltr; text-align:right;">${escapeHtml(c.cheque_number)}</td>
+                      <td style="mso-number-format:'yyyy\\-mm\\-dd'; text-align:center;">${escapeHtml(c.due_date ? new Date(c.due_date).toLocaleDateString('en-GB') : '—')}</td>
+                      <td style="text-align:right;">${escapeHtml(c.bank_name || 'بنك')}</td>
+                      <td class="num font-bold" style="color:#065f46;">${money(c.amount)} ${escapeHtml(c.currency)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </td>
+          </tr>
+        `
+      } else if (doc.startsWith('R') || doc.startsWith('قبض')) {
+        out += `
+          <tr style="background:#f0fdf4;">
+            <td colspan="10" style="padding:6px 14px; border:1px solid #bbf7d0; font-size:11px; color:#166534; font-weight:600;">
+              💵 طريقة القبض: قبض نقدي مسجل في الصندوق الرئيسي
+            </td>
+          </tr>
+        `
+      }
+      return out
+    }
+
+    return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40" dir="rtl" lang="ar">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<!--[if gte mso 9]>
+<xml>
+ <x:ExcelWorkbook>
+  <x:ExcelWorksheets>
+   <x:ExcelWorksheet>
+    <x:Name>كشف الحساب</x:Name>
+    <x:WorksheetOptions>
+     <x:DisplayRightToLeft/>
+    </x:WorksheetOptions>
+   </x:ExcelWorksheet>
+  </x:ExcelWorksheets>
+ </x:ExcelWorkbook>
+</xml>
+<![endif]-->
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Arabic", Arial, sans-serif; font-size: 11px; }
+  th, td { border: 1px solid #cbd5e1; padding: 6px 8px; vertical-align: middle; }
+  .num { mso-number-format:'\\#\\,\\#\\#0\\.00'; text-align: left; direction: ltr; font-family: monospace; white-space: nowrap; }
+  .font-bold { font-weight: 700; }
+</style>
+</head>
+<body dir="rtl">
+  <table border="0" cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse; margin-bottom:12px;">
+    <tr>
+      <td colspan="10" style="border:none; font-size:18px; font-weight:bold; color:#0f172a; padding:6px 0;">
+        ${escapeHtml(storeName)}
+      </td>
+    </tr>
+    <tr>
+      <td colspan="10" style="border:none; font-size:14px; font-weight:bold; color:#475569; padding-bottom:10px;">
+        كشف حساب زبون (نظام الشامل للمحاسبة) ${detailed ? '— تفصيلي بالأصناف والشيكات' : '— ملخص'}
+      </td>
+    </tr>
+    <tr style="background:#f8fafc;">
+      <td colspan="5" style="padding:8px; border:1px solid #cbd5e1;">
+        <b>الزبون:</b> ${escapeHtml(data.customer.name)} | <b>الكود:</b> ${escapeHtml(data.customer.code)} | <b>الهاتف:</b> ${escapeHtml(data.customer.phone || '—')}
+      </td>
+      <td colspan="5" style="padding:8px; border:1px solid #cbd5e1; text-align:left;">
+        <b>الفترة:</b> ${escapeHtml(from || 'من البداية')} إلى ${escapeHtml(to || 'حتى اليوم')} | <b>العملة:</b> ${escapeHtml(currency === 'NIS' ? 'الشيكل NIS (موحد عام)' : currency)} | <b>تاريخ التصدير:</b> ${new Date().toLocaleDateString('en-GB')}
+      </td>
+    </tr>
+    <tr style="background:#f1f5f9; font-weight:bold; text-align:center;">
+      <td colspan="2" style="padding:8px; border:1px solid #cbd5e1;">الرصيد السابق: ${money(data.opening_balance)}</td>
+      <td colspan="3" style="padding:8px; border:1px solid #cbd5e1; color:#991b1b;">مجموع مدين: ${money(data.period_debit)}</td>
+      <td colspan="3" style="padding:8px; border:1px solid #cbd5e1; color:#065f46;">مجموع دائن: ${money(data.period_credit)}</td>
+      <td colspan="2" style="padding:8px; border:1px solid #cbd5e1; background:#e0e7ff; color:#1e1b4b;">الرصيد الختامي: ${money(data.closing_balance)}</td>
+    </tr>
+  </table>
+
+  <table border="1" cellpadding="6" cellspacing="0" style="width:100%; border-collapse:collapse; border-color:#cbd5e1; font-size:11px;">
+    <thead>
+      <tr style="background:#e2e8f0; color:#1e293b; font-weight:bold;">
+        <th style="width:80px; text-align:center;">التاريخ</th>
+        <th style="width:85px; text-align:center;">رقم المستند</th>
+        <th style="width:75px; text-align:center;">النوع</th>
+        <th>البيان والتفاصيل</th>
+        <th style="width:70px; text-align:center;">العملة الأصلية</th>
+        <th style="width:80px; text-align:left;">المبلغ الأصلي</th>
+        <th style="width:65px; text-align:center;">سعر الصرف</th>
+        <th style="width:90px; text-align:left;">مدين (+)</th>
+        <th style="width:90px; text-align:left;">دائن (-)</th>
+        <th style="width:100px; text-align:left; background:#f1f5f9;">الرصيد التراكمي</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows.map(r => {
+        const isInv = r.document.startsWith('I') || (r.document_type || '').includes('مبيعات')
+        const isRec = r.document.startsWith('R') || (r.document_type || '').includes('قبض')
+        return `
+          <tr>
+            <td style="mso-number-format:'yyyy\\-mm\\-dd'; text-align:center;">${escapeHtml(r.day)}</td>
+            <td style="mso-number-format:'\\@'; text-align:center; font-weight:bold;">${escapeHtml(r.document)}</td>
+            <td style="text-align:center;">${escapeHtml(r.document_type || (isInv ? 'فاتورة' : isRec ? 'سند قبض' : 'حركة'))}</td>
+            <td>${escapeHtml(r.description || '—')}</td>
+            <td style="text-align:center;">${escapeHtml(r.original_currency || 'NIS')}</td>
+            <td class="num">${r.original_amount !== undefined ? money(r.original_amount) : '—'}</td>
+            <td style="text-align:center;">${r.exchange_rate || 1}</td>
+            <td class="num" style="${r.debit > 0 ? 'color:#991b1b; font-weight:bold;' : ''}">${r.debit > 0 ? money(r.debit) : '—'}</td>
+            <td class="num" style="${r.credit > 0 ? 'color:#065f46; font-weight:bold;' : ''}">${r.credit > 0 ? money(r.credit) : '—'}</td>
+            <td class="num font-bold" style="background:#f8fafc; color:#0f172a;">${money(r.running_balance)}</td>
+          </tr>
+          ${detailed ? detailedRow(r.document) : ''}
+        `
+      }).join('')}
+    </tbody>
+  </table>
+</body>
+</html>`
+  }
+
+  // Direct Excel download (.xls with RTL format)
+  async function downloadExcel(detailed = true) {
+    if (!data) return
+    setExportingExcel(true)
+    setError(null)
+    try {
+      const rows = data.rows || []
+      const printDetails: Record<string, DocumentDetails> = { ...docDetails }
+      if (detailed) {
+        const uniqueDocs = Array.from(new Set(rows.map(r => r.document)))
+        for (const d of uniqueDocs) {
+          if (!printDetails[d]) {
+            try {
+              const res = await fetch(`/api/shamel/query?kind=details&document=${encodeURIComponent(d)}`)
+              if (res.ok) {
+                printDetails[d] = await res.json()
+              }
+            } catch {
+              // Ignore individual failure
+            }
+          }
+        }
+      }
+      const excelHtml = buildExcelHtml(rows, printDetails, detailed)
+      const blob = new Blob([excelHtml], { type: 'application/vnd.ms-excel;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      const cleanName = data.customer.name.replace(/[\\/:*?"<>|]/g, '_').trim()
+      link.download = `كشف_حساب_${cleanName}_${data.customer.code}_${detailed ? 'تفصيلي' : 'ملخص'}_${new Date().toISOString().slice(0, 10)}.xls`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      setError(err.message || 'تعذر تصدير ملف Excel')
+    } finally {
+      setExportingExcel(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 md:p-6 overflow-y-auto" dir="rtl">
+      <div className="bg-slate-900 border border-white/10 text-white rounded-2xl w-full max-w-5xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+        {/* Modal Header */}
+        <div className="p-5 border-b border-white/10 bg-slate-800/70 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xl">📄</span>
+              <h2 className="text-lg font-bold text-white">
+                كشف حساب الزبون: <span className="text-sky-400">{customerName || data?.customer.name || customerCode}</span>
+              </h2>
+              <span className="font-mono text-xs bg-sky-500/20 text-sky-300 border border-sky-500/30 px-2 py-0.5 rounded-full font-bold">
+                {customerCode}
+              </span>
+            </div>
+            {data && (
+              <p className="text-xs text-slate-400 mt-1">
+                الهاتف: {data.customer.phone || '—'} • العنوان: {data.customer.address || '—'}
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Detailed / Summary Toggle */}
+            <button
+              onClick={() => setIsDetailed(!isDetailed)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 ${
+                isDetailed
+                  ? 'bg-sky-500/20 text-sky-300 border-sky-500/40'
+                  : 'bg-slate-800 text-slate-400 border-white/10 hover:text-white'
+              }`}
+              title="تفعيل إدراج أصناف الفواتير والشيكات في الطباعة والتصدير"
+            >
+              <span>{isDetailed ? '☑️ تفصيلي (أصناف وشيكات)' : '◻️ كشف ملخص'}</span>
+            </button>
+
+            {/* Excel Export Button */}
+            <button
+              onClick={() => downloadExcel(isDetailed)}
+              disabled={loading || exportingExcel || !data}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-xs disabled:opacity-50 transition flex items-center gap-1.5"
+            >
+              <span>{exportingExcel ? '⏳ جاري التصدير...' : '📊 تصدير Excel'}</span>
+            </button>
+
+            {/* Print / PDF Button */}
+            <button
+              onClick={() => printStatement(isDetailed)}
+              disabled={loading || printing || !data}
+              className="px-3.5 py-1.5 bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-bold rounded-xl shadow-xs disabled:opacity-50 transition flex items-center gap-1.5"
+            >
+              <span>{printing ? '⏳ جاري الإعداد...' : '🖨️ طباعة / PDF'}</span>
+            </button>
+
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center font-bold text-sm transition border border-white/10 mr-1"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* Filter Toolbar */}
+        <div className="p-4 border-b border-white/10 bg-slate-950/60 flex flex-wrap items-center gap-3 text-xs">
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-400 font-bold">من تاريخ:</span>
+            <input
+              type="date"
+              value={from}
+              onChange={e => setFrom(e.target.value)}
+              className="px-2.5 py-1.5 border border-white/10 bg-slate-900 text-white rounded-lg text-xs outline-none focus:border-sky-500"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-400 font-bold">إلى تاريخ:</span>
+            <input
+              type="date"
+              value={to}
+              onChange={e => setTo(e.target.value)}
+              className="px-2.5 py-1.5 border border-white/10 bg-slate-900 text-white rounded-lg text-xs outline-none focus:border-sky-500"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-400 font-bold">العملة:</span>
+            <select
+              value={currency}
+              onChange={e => setCurrency(e.target.value)}
+              className="px-2.5 py-1.5 border border-white/10 bg-slate-900 text-white rounded-lg text-xs outline-none focus:border-sky-500"
+            >
+              <option value="NIS">الشيكل NIS (موحد عام)</option>
+              <option value="JOD">دينار أردني (JOD)</option>
+              <option value="USD">دولار أمريكي (USD)</option>
+              <option value="EUR">يورو (EUR)</option>
+            </select>
+          </div>
+
+          {(from || to) && (
+            <button
+              onClick={() => { setFrom(''); setTo('') }}
+              className="text-sky-400 hover:text-sky-300 font-bold text-xs"
+            >
+              إعادة ضبط الفترة
+            </button>
+          )}
+
+          {/* View Tab selector */}
+          <div className="mr-auto flex gap-1 bg-slate-800 p-0.5 rounded-lg border border-white/10">
+            <button
+              onClick={() => setViewTab('movements')}
+              className={`px-3 py-1 rounded text-xs font-bold transition ${
+                viewTab === 'movements' ? 'bg-sky-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              الحركات المالية ({data?.rows.length || 0})
+            </button>
+            <button
+              onClick={() => setViewTab('cheques')}
+              className={`px-3 py-1 rounded text-xs font-bold transition ${
+                viewTab === 'cheques' ? 'bg-sky-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              الشيكات المرتبطة ({data?.cheques.length || 0})
+            </button>
+          </div>
+        </div>
+
+        {/* Modal Body */}
+        <div className="p-5 overflow-y-auto flex-1 space-y-4">
+          {error && (
+            <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl text-xs font-semibold">
+              ⚠️ {error}
+            </div>
+          )}
+
+          {loading ? (
+            <div className="py-16 text-center text-slate-400 text-xs">
+              <div className="text-2xl animate-spin mb-2">⏳</div>
+              جاري احتساب كشف الحساب من قيود الشامل...
+            </div>
+          ) : data ? (
+            <div className="space-y-4">
+              {/* 4 Summary Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+                <div className="bg-slate-800/60 p-3.5 rounded-xl border border-white/10">
+                  <div className="text-[11px] text-slate-400 font-medium">الرصيد السابق / الافتتاحي</div>
+                  <div className="text-lg font-mono font-bold text-white mt-1">
+                    {money(data.opening_balance)} {data.currency}
+                  </div>
+                </div>
+
+                <div className="bg-rose-500/10 p-3.5 rounded-xl border border-rose-500/20">
+                  <div className="text-[11px] text-rose-400 font-bold">مدين الفترة (+)</div>
+                  <div className="text-lg font-mono font-bold text-rose-400 mt-1">
+                    {money(data.period_debit)} {data.currency}
+                  </div>
+                </div>
+
+                <div className="bg-emerald-500/10 p-3.5 rounded-xl border border-emerald-500/20">
+                  <div className="text-[11px] text-emerald-400 font-bold">دائن الفترة (-)</div>
+                  <div className="text-lg font-mono font-bold text-emerald-400 mt-1">
+                    {money(data.period_credit)} {data.currency}
+                  </div>
+                </div>
+
+                <div className="bg-sky-500/10 p-3.5 rounded-xl border border-sky-500/20">
+                  <div className="text-[11px] text-sky-300 font-bold">الرصيد الختامي المستحق</div>
+                  <div className="text-lg font-mono font-black text-sky-400 mt-1">
+                    {money(data.closing_balance)} {data.currency}
+                  </div>
+                </div>
+              </div>
+
+              {/* View 1: Movements */}
+              {viewTab === 'movements' && (
+                <div className="border border-white/10 rounded-xl overflow-hidden shadow-xl bg-slate-900">
+                  {data.rows.length === 0 ? (
+                    <div className="py-12 text-center text-slate-500 text-xs">
+                      {data.has_ledger_entries
+                        ? 'لا توجد حركات خلال الفترة الزمنية المحددة.'
+                        : 'لم يتم استيراد قيود الحركات التفصيلية (ctrans.dat) بعد. الرصيد الإجمالي للزبون مسجل في الشامل.'}
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-right text-xs">
+                        <thead className="bg-slate-800/60 text-slate-400 border-b border-white/10">
+                          <tr>
+                            <th className="py-3 px-3 font-bold">التاريخ</th>
+                            <th className="py-3 px-3 font-bold">رقم المستند</th>
+                            <th className="py-3 px-3 font-bold">النوع</th>
+                            <th className="py-3 px-3 font-bold">البيان</th>
+                            <th className="py-3 px-3 font-bold text-left">مدين (+)</th>
+                            <th className="py-3 px-3 font-bold text-left">دائن (-)</th>
+                            <th className="py-3 px-3 font-bold text-left">الرصيد التراكمي</th>
+                            <th className="py-3 px-3 font-bold text-center">التفاصيل</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5 text-slate-200">
+                          {data.rows.map(r => {
+                            const isExpanded = expandedDoc === r.document
+                            const details = docDetails[r.document]
+                            const isInvoice = r.document.startsWith('I') || r.document.startsWith('فاتورة')
+                            const isReceipt = r.document.startsWith('R') || r.document.startsWith('قبض')
+
+                            return (
+                              <Fragment key={`${r.document}-${r.line_index}`}>
+                                <tr className={`hover:bg-slate-800/50 transition-colors ${isExpanded ? 'bg-sky-950/30' : ''}`}>
+                                  <td className="py-2.5 px-3 font-mono text-slate-400">{r.day}</td>
+                                  <td className="py-2.5 px-3 font-mono font-bold text-sky-400">{r.document}</td>
+                                  <td className="py-2.5 px-3">
+                                    <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                                      isInvoice ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                                      isReceipt ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                                      'bg-slate-800 text-slate-300 border border-white/5'
+                                    }`}>
+                                      {r.document_type || (isInvoice ? 'فاتورة' : isReceipt ? 'سند قبض' : 'قيد')}
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-3 text-slate-300 max-w-xs">
+                                    <div className="truncate">{r.description || '—'}</div>
+                                    {r.original_currency && r.original_currency !== 'NIS' && (
+                                      <div className="text-[10px] text-amber-400 mt-0.5 font-mono">
+                                        (العملة الأصلية: {money(r.original_amount || 0)} {r.original_currency} @ صرف: {r.exchange_rate})
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-left font-mono font-bold text-rose-400">
+                                    {r.debit > 0 ? money(r.debit) : '—'}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-left font-mono font-bold text-emerald-400">
+                                    {r.credit > 0 ? money(r.credit) : '—'}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-left font-mono font-black text-white">
+                                    {money(r.running_balance)}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center">
+                                    <button
+                                      onClick={() => toggleDocDetails(r.document)}
+                                      className={`px-2.5 py-1 rounded text-[10px] font-bold transition ${
+                                        isExpanded
+                                          ? 'bg-sky-500 text-slate-950'
+                                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-white/10'
+                                      }`}
+                                    >
+                                      {isExpanded ? '▲ إخفاء' : '▼ بنود'}
+                                    </button>
+                                  </td>
+                                </tr>
+
+                                {/* Expanded sub-row for invoice items / cheques */}
+                                {isExpanded && (
+                                  <tr className="bg-slate-950/60 border-b-2 border-sky-500/30">
+                                    <td colSpan={8} className="p-3">
+                                      {loadingDocDetails === r.document ? (
+                                        <div className="py-2 text-center text-xs text-sky-400 font-bold animate-pulse">
+                                          جاري جلب تفاصيل المستند...
+                                        </div>
+                                      ) : details ? (
+                                        <div className="space-y-3 bg-slate-900 p-3 rounded-lg border border-white/10 text-xs text-white">
+                                          {details.items && details.items.length > 0 && (
+                                            <div>
+                                              <div className="font-bold text-slate-300 mb-1.5">📦 بنود الفاتورة ({details.items.length} صنف):</div>
+                                              <table className="w-full text-right text-[11px] border border-white/10 rounded">
+                                                <thead className="bg-slate-800/80 text-slate-400">
+                                                  <tr>
+                                                    <th className="p-1.5">كود الصنف</th>
+                                                    <th className="p-1.5">اسم الصنف</th>
+                                                    <th className="p-1.5 text-center">الكمية</th>
+                                                    <th className="p-1.5 text-left">السعر</th>
+                                                    <th className="p-1.5 text-left">الإجمالي</th>
+                                                  </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-white/5 text-slate-200">
+                                                  {details.items.map((it, idx) => (
+                                                    <tr key={idx}>
+                                                      <td className="p-1.5 font-mono text-sky-400">{it.item_code}</td>
+                                                      <td className="p-1.5 font-bold text-white">{it.item_name}</td>
+                                                      <td className="p-1.5 text-center font-mono">{it.quantity}</td>
+                                                      <td className="p-1.5 text-left font-mono">{money(it.price)}</td>
+                                                      <td className="p-1.5 text-left font-mono font-bold text-sky-300">{money(it.total)}</td>
+                                                    </tr>
+                                                  ))}
+                                                </tbody>
+                                              </table>
+                                            </div>
+                                          )}
+
+                                          {details.cheques && details.cheques.length > 0 && (
+                                            <div>
+                                              <div className="font-bold text-slate-300 mb-1.5">🏦 شيكات تابعة للسند:</div>
+                                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                {details.cheques.map((c, idx) => (
+                                                  <div key={idx} className="p-2 bg-slate-800/60 rounded border border-white/10 flex justify-between items-center text-xs">
+                                                    <div>
+                                                      <span className="font-bold text-white font-mono">{c.cheque_number}</span>
+                                                      <span className="text-slate-400 mr-2">{c.bank_name || 'بنك'}</span>
+                                                    </div>
+                                                    <span className="font-mono font-bold text-sky-400">{money(c.amount)} {c.currency}</span>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          )}
+
+                                          {!details.items?.length && !details.cheques?.length && (
+                                            <div className="text-slate-500 text-center py-1 text-xs">
+                                              لا توجد تفاصيل إضافية لهذا السند.
+                                            </div>
+                                          )}
+                                        </div>
+                                      ) : null}
+                                    </td>
+                                  </tr>
+                                )}
+                              </Fragment>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* View 2: Customer Cheques */}
+              {viewTab === 'cheques' && (
+                <div className="border border-white/10 rounded-xl overflow-hidden shadow-xl bg-slate-900">
+                  {data.cheques.length === 0 ? (
+                    <div className="py-12 text-center text-slate-500 text-xs">
+                      لا توجد شيكات مرتبطة بهذا الزبون في مستودع الشامل.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-right text-xs">
+                        <thead className="bg-slate-800/60 text-slate-400 border-b border-white/10">
+                          <tr>
+                            <th className="py-3 px-3.5 font-bold">السند</th>
+                            <th className="py-3 px-3.5 font-bold">رقم الشيك</th>
+                            <th className="py-3 px-3.5 font-bold">البنك والفرع</th>
+                            <th className="py-3 px-3.5 font-bold">تاريخ الاستحقاق</th>
+                            <th className="py-3 px-3.5 font-bold text-left">المبلغ</th>
+                            <th className="py-3 px-3.5 font-bold">الحالة</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5 text-slate-200">
+                          {data.cheques.map(c => (
+                            <tr key={c.id} className="hover:bg-slate-800/50">
+                              <td className="py-2.5 px-3.5 font-mono font-bold text-slate-400">{c.document}</td>
+                              <td className="py-2.5 px-3.5 font-mono font-black text-sky-400">{c.cheque_number}</td>
+                              <td className="py-2.5 px-3.5 text-slate-300">
+                                <div>{c.bank_name || PALESTINIAN_BANKS[c.bank_code] || `بنك (${c.bank_code})`}</div>
+                                {c.branch_code && <div className="text-[10px] text-slate-500">فرع: {c.branch_code}</div>}
+                              </td>
+                              <td className="py-2.5 px-3.5 font-mono text-slate-400">
+                                {c.due_date ? new Date(c.due_date).toLocaleDateString('ar-u-nu-latn') : '—'}
+                              </td>
+                              <td className="py-2.5 px-3.5 text-left font-mono font-black text-white">
+                                {money(c.amount)} {c.currency}
+                              </td>
+                              <td className="py-2.5 px-3.5">
+                                <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold border ${
+                                  c.status === 'collected' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                  c.status === 'bounced' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' :
+                                  c.status === 'endorsed' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
+                                  'bg-sky-500/10 text-sky-400 border-sky-500/20'
+                                }`}>
+                                  {c.status_name}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        {/* Modal Footer */}
+        <div className="p-4 border-t border-white/10 bg-slate-800/40 flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition border border-white/10"
+          >
+            إغلاق
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}

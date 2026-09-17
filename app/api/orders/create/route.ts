@@ -47,7 +47,9 @@ export async function POST(req: NextRequest) {
   // حساب المجاميع
   const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0)
   const totalAmount = subtotal
-  const effectiveAmountPaid = mode === 'pos' ? totalAmount : amountPaid
+  const effectiveAmountPaid = paymentMethod === 'credit'
+    ? Math.min(amountPaid || 0, totalAmount)
+    : (mode === 'pos' ? totalAmount : amountPaid)
   const paymentStatus = effectiveAmountPaid >= totalAmount ? 'paid'
     : effectiveAmountPaid > 0 ? 'partial'
     : 'unpaid'
@@ -141,9 +143,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // إضافة للذمة إذا account mode وتوجد ذمة متبقية
+  // إضافة للذمة إذا كان الطلب بالآجل أو بنمط الحساب وتوجد ذمة متبقية
   const amountRemaining = totalAmount - effectiveAmountPaid
-  if (mode === 'account' && customerId && amountRemaining > 0) {
+  if ((mode === 'account' || paymentMethod === 'credit') && customerId && amountRemaining > 0) {
     // جلب الرصيد الحالي للزبون
     const { data: customer } = await supabase
       .from('customers')
