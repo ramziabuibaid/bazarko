@@ -26,11 +26,45 @@ export default function DashboardShell({
   notifications?: DashNotification[]
   children: React.ReactNode
 }) {
-  const [sidebarOpen, setSidebarOpen] = useState(true)
-  const storeUrl = `${store.subdomain}.${process.env.NEXT_PUBLIC_DOMAIN ?? 'bazarko.app'}`
+  const [isCollapsed, setIsCollapsed] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
 
+  // Load user preference for sidebar collapse state from localStorage
   useEffect(() => {
-    if (window.innerWidth < 1024) setSidebarOpen(false)
+    try {
+      const saved = localStorage.getItem('bazarko_sidebar_collapsed')
+      if (saved !== null) {
+        setIsCollapsed(saved === 'true')
+      }
+    } catch {
+      // ignore in SSR or restricted environments
+    }
+  }, [])
+
+  const toggleCollapse = () => {
+    setIsCollapsed(prev => {
+      const next = !prev
+      try {
+        localStorage.setItem('bazarko_sidebar_collapsed', String(next))
+      } catch {}
+      return next
+    })
+  }
+
+  // Keyboard shortcut: Cmd/Ctrl + B to toggle sidebar
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault()
+        if (window.innerWidth < 1024) {
+          setMobileOpen(m => !m)
+        } else {
+          toggleCollapse()
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
 
   return (
@@ -39,27 +73,35 @@ export default function DashboardShell({
     <StaffActivityTracker storeId={store.id} />
     <div className="flex h-screen overflow-hidden bg-slate-950 text-white" dir="rtl">
       {/* طبقة خلفية للموبايل عند فتح السايدبار */}
-      {sidebarOpen && (
+      {mobileOpen && (
         <div
-          className="fixed inset-0 z-20 bg-black/60 backdrop-blur-sm lg:hidden"
-          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 z-20 bg-black/60 backdrop-blur-sm lg:hidden transition-opacity"
+          onClick={() => setMobileOpen(false)}
         />
       )}
 
       <Sidebar
         store={store}
-        isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-        onToggle={() => setSidebarOpen(s => !s)}
+        isCollapsed={isCollapsed}
+        onToggleCollapse={toggleCollapse}
+        mobileOpen={mobileOpen}
+        onMobileClose={() => setMobileOpen(false)}
       />
 
-      <div className="flex flex-1 flex-col overflow-hidden min-w-0">
+      <div className="flex flex-1 flex-col overflow-hidden min-w-0 transition-all duration-300">
         {/* شريط علوي — بحث + إشعارات (كل الأحجام) */}
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-white/5 bg-slate-900 px-4">
           <button
-            onClick={() => setSidebarOpen(s => !s)}
+            onClick={() => {
+              if (window.innerWidth < 1024) {
+                setMobileOpen(s => !s)
+              } else {
+                toggleCollapse()
+              }
+            }}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white/5 hover:text-white transition-colors"
             aria-label="تبديل القائمة الجانبية"
+            title="تبديل القائمة الجانبية (Ctrl+B)"
           >
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <line x1="3" y1="5" x2="17" y2="5" />
@@ -76,7 +118,7 @@ export default function DashboardShell({
       </div>
 
       {/* شريط تنقّل سفلي — موبايل فقط (إحساس تطبيق) */}
-      <MobileBottomNav onMore={() => setSidebarOpen(true)} />
+      <MobileBottomNav onMore={() => setMobileOpen(true)} />
     </div>
     </ConfirmProvider>
     </ToastProvider>
