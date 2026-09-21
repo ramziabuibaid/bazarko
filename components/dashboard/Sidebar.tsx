@@ -135,6 +135,91 @@ const navGroups: NavGroup[] = [
   },
 ]
 
+export interface RailHub {
+  id: string
+  href: string
+  label: string
+  icon: string
+  subroutes: string[]
+}
+
+export const railMainHubs: RailHub[] = [
+  {
+    id: 'sales',
+    href: '/dashboard/sales',
+    label: 'لوحة المبيعات',
+    icon: '📈',
+    subroutes: [
+      '/dashboard/sales',
+      '/dashboard/pos',
+      '/dashboard/accounting/invoices',
+      '/dashboard/invoices',
+      '/dashboard/quotations',
+      '/dashboard/customers',
+    ],
+  },
+  {
+    id: 'purchases',
+    href: '/dashboard/purchases-hub',
+    label: 'لوحة المشتريات',
+    icon: '🏬',
+    subroutes: [
+      '/dashboard/purchases-hub',
+      '/dashboard/purchases',
+      '/dashboard/suppliers',
+    ],
+  },
+  {
+    id: 'finance',
+    href: '/dashboard/finance',
+    label: 'لوحة الإدارة المالية',
+    icon: '💵',
+    subroutes: [
+      '/dashboard/finance',
+      '/dashboard/cheques',
+      '/dashboard/banks',
+    ],
+  },
+  {
+    id: 'inventory',
+    href: '/dashboard/inventory-hub',
+    label: 'لوحة المخزون',
+    icon: '📦',
+    subroutes: [
+      '/dashboard/inventory-hub',
+      '/dashboard/inventory',
+      '/dashboard/products',
+      '/dashboard/categories',
+      '/dashboard/attributes',
+    ],
+  },
+  {
+    id: 'store',
+    href: '/dashboard/store-hub',
+    label: 'لوحة المتجر الإلكتروني',
+    icon: '🌐',
+    subroutes: [
+      '/dashboard/store-hub',
+      '/dashboard/orders',
+      '/dashboard/offers',
+      '/dashboard/marketing',
+      '/dashboard/reviews',
+      '/dashboard/delivery',
+      '/dashboard/analytics',
+    ],
+  },
+  {
+    id: 'accounting',
+    href: '/dashboard/accounting-hub',
+    label: 'المحاسبة والتقارير',
+    icon: '⚖️',
+    subroutes: [
+      '/dashboard/accounting-hub',
+      '/dashboard/accounting',
+    ],
+  },
+]
+
 export interface SidebarProps {
   store: Store
   // Desktop collapsed mode state
@@ -198,6 +283,17 @@ export default function Sidebar({
   function isActive(href: string) {
     if (href === '/dashboard') return pathname === '/dashboard'
     return pathname.startsWith(href)
+  }
+
+  function isRailHubActive(hub: RailHub) {
+    if (pathname === hub.href) return true
+    if (hub.id === 'accounting') {
+      return (
+        pathname.startsWith('/dashboard/accounting-hub') ||
+        (pathname.startsWith('/dashboard/accounting') && !pathname.startsWith('/dashboard/accounting/invoices'))
+      )
+    }
+    return hub.subroutes.some(route => pathname.startsWith(route))
   }
 
   // Toggle group accordion in expanded mode
@@ -369,104 +465,98 @@ export default function Sidebar({
         )}
 
         {/* ─── Main Navigation Items ─── */}
-        <nav className="flex-1 overflow-y-auto px-2 py-3 scrollbar-none [&::-webkit-scrollbar]:hidden space-y-4">
-          {filteredGroups.map((group, gIdx) => {
-            const isGroupOpen = !collapsedGroups[group.id] || searchQuery.length > 0
+        <nav className="flex-1 overflow-y-auto px-2 py-3 scrollbar-none [&::-webkit-scrollbar]:hidden">
+          {isRail ? (
+            /* Collapsed Rail Mode: Only show the 6 main hubs requested */
+            <ul className="flex flex-col items-center space-y-2 pt-1">
+              {railMainHubs.map(hub => {
+                const active = isRailHubActive(hub)
 
-            return (
-              <div key={group.id} className="relative">
-                {/* Section Header or Divider */}
-                {isRail ? (
-                  /* Mini divider with subtle icon in Rail mode */
-                  gIdx > 0 && (
-                    <div className="my-2.5 flex items-center justify-center">
-                      <div className="h-px w-8 bg-gradient-to-r from-transparent via-white/15 to-transparent" />
-                    </div>
-                  )
-                ) : (
-                  /* Accordion Header in Expanded mode */
-                  group.title && (
-                    <button
-                      type="button"
-                      onClick={() => toggleGroup(group.id)}
-                      className="group/btn mb-1.5 flex w-full items-center justify-between px-2.5 py-1 text-right text-[11px] font-bold uppercase tracking-wider text-slate-500 hover:text-slate-300 transition-colors"
+                return (
+                  <li key={hub.href} className="w-full flex justify-center">
+                    <Link
+                      href={hub.href}
+                      onClick={onNavClick}
+                      onMouseEnter={e => {
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        setHoveredItem({
+                          item: { href: hub.href, label: hub.label, icon: hub.icon },
+                          groupTitle: 'اللوحة الرئيسية',
+                          top: rect.top,
+                          isActive: active,
+                        })
+                      }}
+                      onMouseLeave={() => setHoveredItem(null)}
+                      className={`group relative flex h-11 w-11 items-center justify-center rounded-2xl transition-all duration-200 ${
+                        active
+                          ? 'bg-gradient-to-br from-sky-500/25 to-sky-600/10 text-sky-300 ring-1 ring-sky-500/40 shadow-lg shadow-sky-500/15'
+                          : 'text-slate-400 hover:bg-white/[0.08] hover:text-white hover:scale-105 active:scale-95'
+                      }`}
+                      aria-label={hub.label}
                     >
-                      <span className="flex items-center gap-1.5">
-                        <span className="text-xs opacity-70">{group.icon}</span>
-                        <span>{group.title}</span>
+                      <span className="text-xl leading-none transition-transform duration-200 group-hover:scale-110">
+                        {hub.icon}
                       </span>
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className={`transition-transform duration-200 text-slate-600 group-hover/btn:text-slate-400 ${
-                          isGroupOpen ? 'rotate-0' : '-rotate-90'
-                        }`}
+                      {active && (
+                        <span className="absolute right-0 top-2.5 bottom-2.5 w-1 rounded-l-full bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.8)]" />
+                      )}
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : (
+            /* Expanded Mode: Full Group Accordions */
+            <div className="space-y-4">
+              {filteredGroups.map(group => {
+                const isGroupOpen = !collapsedGroups[group.id] || searchQuery.length > 0
+
+                return (
+                  <div key={group.id} className="relative">
+                    {group.title && (
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(group.id)}
+                        className="group/btn mb-1.5 flex w-full items-center justify-between px-2.5 py-1 text-right text-[11px] font-bold uppercase tracking-wider text-slate-500 hover:text-slate-300 transition-colors"
                       >
-                        <polyline points="6 9 12 15 18 9" />
-                      </svg>
-                    </button>
-                  )
-                )}
+                        <span className="flex items-center gap-1.5">
+                          <span className="text-xs opacity-70">{group.icon}</span>
+                          <span>{group.title}</span>
+                        </span>
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className={`transition-transform duration-200 text-slate-600 group-hover/btn:text-slate-400 ${
+                            isGroupOpen ? 'rotate-0' : '-rotate-90'
+                          }`}
+                        >
+                          <polyline points="6 9 12 15 18 9" />
+                        </svg>
+                      </button>
+                    )}
 
-                {/* Group Items */}
-                {(isRail || isGroupOpen) && (
-                  <ul className={`space-y-1 ${isRail ? 'flex flex-col items-center' : ''}`}>
-                    {group.items.map(item => {
-                      const active = isActive(item.href)
+                    {isGroupOpen && (
+                      <ul className="space-y-1">
+                        {group.items.map(item => {
+                          const active = isActive(item.href)
 
-                      return (
-                        <li key={item.href} className={isRail ? 'w-full flex justify-center' : ''}>
-                          <Link
-                            href={item.href}
-                            onClick={onNavClick}
-                            onMouseEnter={e => {
-                              if (isRail) {
-                                const rect = e.currentTarget.getBoundingClientRect()
-                                setHoveredItem({
-                                  item,
-                                  groupTitle: group.title,
-                                  top: rect.top,
-                                  isActive: active,
-                                })
-                              }
-                            }}
-                            onMouseLeave={() => {
-                              if (isRail) setHoveredItem(null)
-                            }}
-                            className={
-                              isRail
-                                ? `group relative flex h-11 w-11 items-center justify-center rounded-2xl transition-all duration-200 ${
-                                    active
-                                      ? 'bg-gradient-to-br from-sky-500/25 to-sky-600/10 text-sky-300 ring-1 ring-sky-500/40 shadow-lg shadow-sky-500/15'
-                                      : 'text-slate-400 hover:bg-white/[0.08] hover:text-white hover:scale-105 active:scale-95'
-                                  }`
-                                : `group flex items-center justify-between rounded-xl px-3 py-2 text-xs font-medium transition-all duration-150 ${
-                                    active
-                                      ? 'bg-gradient-to-r from-sky-500/20 via-sky-500/10 to-transparent text-sky-300 font-bold border-r-2 border-sky-400 shadow-sm shadow-sky-500/10'
-                                      : 'text-slate-400 hover:bg-white/[0.06] hover:text-white hover:translate-x-[-2px]'
-                                  }`
-                            }
-                          >
-                            {/* Rail View */}
-                            {isRail ? (
-                              <>
-                                <span className="text-lg leading-none transition-transform duration-200 group-hover:scale-110">
-                                  {item.icon}
-                                </span>
-                                {/* Active indicator bar on edge */}
-                                {active && (
-                                  <span className="absolute right-0 top-2.5 bottom-2.5 w-1 rounded-l-full bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.8)]" />
-                                )}
-                              </>
-                            ) : (
-                              /* Expanded View */
-                              <>
+                          return (
+                            <li key={item.href}>
+                              <Link
+                                href={item.href}
+                                onClick={onNavClick}
+                                className={`group flex items-center justify-between rounded-xl px-3 py-2 text-xs font-medium transition-all duration-150 ${
+                                  active
+                                    ? 'bg-gradient-to-r from-sky-500/20 via-sky-500/10 to-transparent text-sky-300 font-bold border-r-2 border-sky-400 shadow-sm shadow-sky-500/10'
+                                    : 'text-slate-400 hover:bg-white/[0.06] hover:text-white hover:translate-x-[-2px]'
+                                }`}
+                              >
                                 <div className="flex items-center gap-2.5 min-w-0">
                                   <span className="text-base leading-none transition-transform duration-200 group-hover:scale-110">
                                     {item.icon}
@@ -476,17 +566,17 @@ export default function Sidebar({
                                 {active && (
                                   <span className="h-1.5 w-1.5 rounded-full bg-sky-400 shadow-[0_0_6px_rgba(56,189,248,0.8)]" />
                                 )}
-                              </>
-                            )}
-                          </Link>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                )}
-              </div>
-            )
-          })}
+                              </Link>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </nav>
 
         {/* ─── Footer / Account Section ─── */}

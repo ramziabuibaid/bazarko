@@ -31,80 +31,89 @@ export default async function PrintInvoicePage({ params }: { params: { id: strin
 
   const currency = store.currency_code || 'ILS'
   const tafqeetText = tafqeetCheque(invoice.total, currency)
+  const fmt = (n: number) => Number(n || 0).toLocaleString('ar-u-nu-latn', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
   return (
     <div className="min-h-screen bg-slate-100 p-4 sm:p-8 text-slate-900 font-sans print:p-0 print:bg-white" dir="rtl">
-      {/* ── Top Toolbar ── */}
-      <div className="mx-auto mb-6 flex max-w-4xl items-center justify-between rounded-xl bg-slate-900 p-4 text-white shadow-lg print:hidden">
+      {/* ── شريط الأدوات العلوي ── */}
+      <div className="mx-auto mb-6 flex max-w-4xl items-center justify-between rounded-2xl bg-slate-900 p-4 text-white shadow-xl print:hidden">
         <Link
           href="/dashboard/accounting/invoices"
-          className="text-xs font-bold text-slate-300 hover:text-white transition"
+          className="text-xs font-bold text-slate-300 hover:text-white transition flex items-center gap-1.5"
         >
-          ← العودة لفواتير المبيعات
+          <span>←</span>
+          <span>العودة لفواتير المبيعات</span>
         </Link>
-        <PrintButton
-          elementId="invoice-official-canvas"
-          filename={`invoice-${invoice.invoice_number}.pdf`}
-          label="🖨️ طباعة الفاتورة (Print / PDF)"
-          className="rounded-lg bg-sky-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-sky-400 transition"
-        />
+
+        <div className="flex items-center gap-2">
+          <PrintButton
+            elementId="invoice-official-canvas"
+            filename={`invoice-${invoice.invoice_number}.pdf`}
+            label="🖨️ طباعة الفاتورة A4 / PDF"
+            className="rounded-xl bg-sky-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-sky-400 transition shadow-sm"
+          />
+        </div>
       </div>
 
-      {/* ── Official Paper Canvas ── */}
+      {/* ── لوحة الفاتورة الرسمية (Official Paper Canvas) ── */}
       <div id="invoice-official-canvas" className="mx-auto max-w-4xl rounded-2xl border border-slate-300 bg-white p-8 shadow-sm print:border-none print:shadow-none print:p-4">
-        {/* Header */}
+        {/* الترويسة الرئيسية */}
         <div className="flex items-start justify-between border-b-2 border-slate-900 pb-5">
           <div className="flex items-center gap-4">
-            {store.logo_url && (
+            {store.logo_url ? (
               <img
                 src={store.logo_url}
                 alt={store.name}
-                className="h-16 w-16 object-contain rounded-lg border border-slate-200 p-1"
+                className="h-20 w-20 object-contain rounded-xl border border-slate-200 p-1"
               />
+            ) : (
+              <div className="h-16 w-16 rounded-xl bg-slate-900 text-white flex items-center justify-center text-2xl font-black">
+                {store.name?.slice(0, 1) || 'B'}
+              </div>
             )}
             <div>
               <h1 className="text-2xl font-black text-slate-950">{store.name}</h1>
               <p className="text-xs text-slate-600 mt-0.5">{store.address || 'فلسطين'}</p>
-              {store.phone && <p className="text-xs text-slate-600">هاتف: {store.phone}</p>}
-              {store.tax_number && <p className="text-xs text-slate-600">الرقم الضريبي / المشتغل: {store.tax_number}</p>}
+              {store.phone && <p className="text-xs text-slate-600 font-mono" dir="ltr">هاتف: {store.phone}</p>}
+              {store.tax_number && <p className="text-xs text-slate-600 font-mono" dir="ltr">الرقم الضريبي / المشتغل: {store.tax_number}</p>}
             </div>
           </div>
 
           <div className="text-center">
-            <h2 className="text-xl font-black text-slate-900 border-2 border-slate-900 px-6 py-1.5 rounded-xl inline-block bg-slate-50 shadow-sm">
+            <h2 className="text-lg font-black text-slate-900 border-2 border-slate-900 px-5 py-1.5 rounded-xl inline-block bg-slate-50 shadow-sm">
               {invoice.status === 'paid' || invoice.payment_method === 'cash'
-                ? 'فاتورة مبيعات نقدية (Cash Invoice)'
-                : 'فاتورة مبيعات آجلة (Credit Invoice)'}
+                ? 'فاتورة مبيعات نقدية'
+                : 'فاتورة مبيعات آجلة'}
             </h2>
-            <p className="mt-1 font-mono text-sm font-bold text-sky-900" dir="ltr">
+            <p className="mt-1 font-mono text-sm font-black text-sky-900" dir="ltr">
               No: {invoice.invoice_number}
             </p>
           </div>
 
-          <div className="text-left text-xs space-y-1 font-mono">
-            <div>تاريخ الإصدار: <strong className="text-slate-900">{new Date(invoice.issue_date).toLocaleDateString('en-GB')}</strong></div>
+          <div className="text-left text-xs space-y-1.5 font-sans">
+            <div>تاريخ الفاتورة: <strong className="font-mono text-slate-950">{invoice.issue_date}</strong></div>
             {invoice.due_date && (
-              <div>تاريخ الاستحقاق: <strong className="text-slate-900">{new Date(invoice.due_date).toLocaleDateString('en-GB')}</strong></div>
+              <div>تاريخ الاستحقاق: <strong className="font-mono text-slate-950">{invoice.due_date}</strong></div>
             )}
-            <div>طريقة الدفع: <strong className="text-slate-900">{
+            <div>طريقة الدفع: <strong className="text-slate-950">{
               invoice.payment_method === 'cash' ? 'نقداً (Cash)' :
               invoice.payment_method === 'credit' ? 'على الحساب (Credit)' :
               invoice.payment_method === 'check' ? 'شيك بنكي' :
               invoice.payment_method === 'card' ? 'بطاقة ائتمان' : (invoice.payment_method || 'نقداً')
             }</strong></div>
             <div>حالة السداد: <strong className={invoice.status === 'paid' ? 'text-emerald-700' : invoice.status === 'partial' ? 'text-amber-700' : 'text-rose-700'}>{
-              invoice.status === 'paid' ? 'مدفوعة بالكامل (Paid)' :
-              invoice.status === 'partial' ? 'مدفوعة جزئياً (Partial)' :
-              'آجلة / غير مدفوعة (Unpaid)'
+              invoice.status === 'paid' ? 'مدفوعة بالكامل' :
+              invoice.status === 'partial' ? 'مدفوعة جزئياً' :
+              'آجلة / غير مسددة'
             }</strong></div>
           </div>
         </div>
 
-        {/* Customer Information Box */}
+        {/* بيانات العميل والطلب */}
         <div className="my-5 grid grid-cols-2 sm:grid-cols-3 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs">
           <div>
             <span className="text-slate-500 block mb-0.5">اسم العميل / الزبون:</span>
-            <strong className="text-slate-900 text-sm">{invoice.customer_name || 'عميل نقدي عام'}</strong>
+            <strong className="text-slate-900 text-sm">{invoice.customer_name || 'عميل عام'}</strong>
           </div>
           {invoice.customer_phone && (
             <div>
@@ -114,13 +123,13 @@ export default async function PrintInvoicePage({ params }: { params: { id: strin
           )}
           {invoice.customer_address && (
             <div>
-              <span className="text-slate-500 block mb-0.5">العنوان والتوصيل:</span>
+              <span className="text-slate-500 block mb-0.5">العنوان / مكان التسليم:</span>
               <span className="text-slate-800">{invoice.customer_address}</span>
             </div>
           )}
         </div>
 
-        {/* Items Table */}
+        {/* جدول الأصناف والبنود (المحور 16: السعر الأصلي أولاً ثم الخصم ثم الصافي) */}
         <table className="w-full text-right text-xs border border-slate-200">
           <thead>
             <tr className="bg-slate-900 text-white border-b">
@@ -134,23 +143,23 @@ export default async function PrintInvoicePage({ params }: { params: { id: strin
           </thead>
           <tbody className="divide-y divide-slate-200 text-slate-800">
             {(items || []).map((item: any, idx: number) => (
-              <tr key={item.id} className="hover:bg-slate-50">
+              <tr key={item.id || idx} className="hover:bg-slate-50">
                 <td className="p-2.5 text-center font-mono text-slate-500">{idx + 1}</td>
                 <td className="p-2.5 font-bold text-slate-950">{item.name}</td>
                 <td className="p-2.5 text-center font-mono text-slate-600" dir="ltr">{item.sku || '—'}</td>
                 <td className="p-2.5 text-center font-mono font-bold text-slate-900" dir="ltr">{item.quantity}</td>
                 <td className="p-2.5 text-left font-mono text-slate-900" dir="ltr">
-                  {Number(item.unit_price).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪
+                  {fmt(item.unit_price)} {currency}
                 </td>
                 <td className="p-2.5 text-left font-mono font-bold text-slate-950" dir="ltr">
-                  {Number(item.total).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪
+                  {fmt(item.total)} {currency}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
 
-        {/* Totals and Tafqeet */}
+        {/* ملخص الإجماليات والتفقيط */}
         <div className="mt-4 flex flex-col sm:flex-row justify-between items-start gap-4">
           <div className="flex-1 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs space-y-2 w-full sm:w-auto">
             <span className="font-bold text-slate-900 block">المبلغ الإجمالي كتابة بالحروف:</span>
@@ -162,66 +171,70 @@ export default async function PrintInvoicePage({ params }: { params: { id: strin
             )}
           </div>
 
-          <div className="w-full sm:w-72 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs space-y-2">
+          <div className="w-full sm:w-80 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs space-y-2.5">
             <div className="flex justify-between text-slate-600">
               <span>المجموع الفرعي:</span>
               <span className="font-mono font-bold text-slate-900" dir="ltr">
-                {Number(invoice.subtotal).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪
+                {fmt(invoice.subtotal)} {currency}
               </span>
             </div>
+
             {Number(invoice.discount_amount) > 0 && (
               <div className="flex justify-between text-rose-600">
-                <span>الخصم الممنوح {invoice.discount_type === 'percentage' && invoice.discount_value ? `(${invoice.discount_value}%)` : ''}:</span>
+                <span>
+                  الخصم الممنوح {invoice.discount_type === 'percent' || invoice.discount_type === 'percentage' ? `(%${invoice.discount_value})` : ''}:
+                </span>
                 <span className="font-mono font-bold" dir="ltr">
-                  - {Number(invoice.discount_amount).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪
+                  - {fmt(invoice.discount_amount)} {currency}
                 </span>
               </div>
             )}
+
             <div className="flex justify-between border-t-2 border-slate-300 pt-2 text-sm font-black text-slate-950">
-              <span>صافي الفاتورة:</span>
+              <span>صافي الفاتورة الإجمالي:</span>
               <span className="font-mono text-base text-sky-900" dir="ltr">
-                {Number(invoice.total).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪
+                {fmt(invoice.total)} {currency}
               </span>
             </div>
+
             {Number(invoice.amount_paid) > 0 && (
-              <>
-                <div className="flex justify-between text-emerald-700">
-                  <span>المدفوع:</span>
-                  <span className="font-mono font-bold" dir="ltr">
-                    {Number(invoice.amount_paid).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪
-                  </span>
-                </div>
-                {Number(invoice.total) - Number(invoice.amount_paid) > 0 && (
-                  <div className="flex justify-between text-amber-700 font-bold">
-                    <span>المتبقي:</span>
-                    <span className="font-mono" dir="ltr">
-                      {(Number(invoice.total) - Number(invoice.amount_paid)).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪
-                    </span>
-                  </div>
-                )}
-              </>
+              <div className="flex justify-between text-emerald-700 font-bold border-t border-slate-200 pt-1.5">
+                <span>المبلغ المدفوع:</span>
+                <span className="font-mono" dir="ltr">
+                  {fmt(invoice.amount_paid)} {currency}
+                </span>
+              </div>
+            )}
+
+            {Number(invoice.total) - Number(invoice.amount_paid) > 0 && (
+              <div className="flex justify-between text-amber-700 font-black border-t border-slate-200 pt-1.5">
+                <span>الرصيد المتبقي على الفاتورة:</span>
+                <span className="font-mono text-sm" dir="ltr">
+                  {fmt(Number(invoice.total) - Number(invoice.amount_paid))} {currency}
+                </span>
+              </div>
             )}
           </div>
         </div>
 
-        {/* Signatures */}
-        <div className="mt-14 pt-6 border-t-2 border-slate-900 grid grid-cols-3 gap-6 text-center text-xs font-bold text-slate-800">
+        {/* التواقيع الرسمية */}
+        <div className="mt-12 pt-6 border-t-2 border-slate-900 grid grid-cols-3 gap-6 text-center text-xs font-bold text-slate-800">
           <div>
-            <p className="text-slate-500 mb-10">منظم الفاتورة</p>
+            <p className="text-slate-500 mb-8">منظم الفاتورة</p>
             <p className="border-t border-dashed border-slate-400 pt-1">التوقيع</p>
           </div>
           <div>
-            <p className="text-slate-500 mb-10">أمين المستودع / التسليم</p>
+            <p className="text-slate-500 mb-8">أمين المستودع / التسليم</p>
             <p className="border-t border-dashed border-slate-400 pt-1">التوقيع</p>
           </div>
           <div>
-            <p className="text-slate-500 mb-10">استلام الزبون (البضاعة بحالة ممتازة)</p>
+            <p className="text-slate-500 mb-8">استلام الزبون (البضاعة بحالة سليمة)</p>
             <p className="border-t border-dashed border-slate-400 pt-1">الاسم والتوقيع</p>
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="mt-8 text-center text-[10px] text-slate-400 border-t border-slate-100 pt-3">
+        {/* تذييل الفاتورة */}
+        <div className="mt-8 text-center text-[10px] text-slate-400 border-t border-slate-100 pt-3 font-mono">
           شكراً لتعاملكم معنا • نظام بازاركو الفلسطيني لإدارة الأعمال والتجارة الإلكترونية
         </div>
       </div>

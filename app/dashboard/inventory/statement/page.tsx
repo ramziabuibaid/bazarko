@@ -45,9 +45,13 @@ export default async function ItemStatementPage({ searchParams }: { searchParams
   const selectedProductId = searchParams.product_id || products?.[0]?.id
   const currentProduct = products?.find(p => p.id === selectedProductId)
 
-  let movements: any[] = []
+  let displayMovements: any[] = []
+  let openingBalance = 0
+  let totalIn = 0
+  let totalOut = 0
+
   if (selectedProductId) {
-    let query = supabase
+    const { data: allData } = await supabase
       .from('inventory_movements')
       .select('*')
       .eq('product_id', selectedProductId)
@@ -55,16 +59,51 @@ export default async function ItemStatementPage({ searchParams }: { searchParams
       .order('movement_date', { ascending: true })
       .order('created_at', { ascending: true })
 
-    if (searchParams.from) query = query.gte('movement_date', searchParams.from)
-    if (searchParams.to) query = query.lte('movement_date', searchParams.to)
-    if (searchParams.type) query = query.eq('movement_type', searchParams.type)
+    const allMovements = allData || []
+    const curStock = Number(currentProduct?.stock_quantity || 0)
 
-    const { data } = await query
-    movements = data || []
+    // احتساب الرصيد الأساسي عند إنشاء الصنف في حال لم تبدأ الحركات برصيد افتتاحي
+    const totalAllIn = allMovements.reduce((sum, m) => sum + Number(m.quantity_in || 0), 0)
+    const totalAllOut = allMovements.reduce((sum, m) => sum + Number(m.quantity_out || 0), 0)
+    const baseInitial = (curStock >= (totalAllIn - totalAllOut))
+      ? (curStock - (totalAllIn - totalAllOut))
+      : 0
+
+    let running = baseInitial
+    const enriched = allMovements.map(m => {
+      const qIn = Number(m.quantity_in || 0)
+      const qOut = Number(m.quantity_out || 0)
+      running = running + qIn - qOut
+      return {
+        ...m,
+        computed_balance: running,
+      }
+    })
+
+    const fromDate = searchParams.from
+    const toDate = searchParams.to
+    const typeFilter = searchParams.type
+
+    let priorBalance = baseInitial
+    for (const m of enriched) {
+      if (fromDate && m.movement_date < fromDate) {
+        priorBalance = m.computed_balance
+      }
+    }
+    openingBalance = fromDate ? priorBalance : baseInitial
+
+    displayMovements = enriched.filter(m => {
+      if (fromDate && m.movement_date < fromDate) return false
+      if (toDate && m.movement_date > toDate) return false
+      if (typeFilter && m.movement_type !== typeFilter) return false
+      return true
+    })
+
+    totalIn = displayMovements.reduce((sum, m) => sum + Number(m.quantity_in || 0), 0)
+    totalOut = displayMovements.reduce((sum, m) => sum + Number(m.quantity_out || 0), 0)
   }
 
-  const totalIn = movements.reduce((sum, m) => sum + Number(m.quantity_in || 0), 0)
-  const totalOut = movements.reduce((sum, m) => sum + Number(m.quantity_out || 0), 0)
+  const finalComputedBalance = openingBalance + totalIn - totalOut
 
   return (
     <div className="space-y-6">
@@ -75,7 +114,7 @@ export default async function ItemStatementPage({ searchParams }: { searchParams
             <span>📋</span> كشف حركات صنف (Item Movement Statement)
           </h1>
           <p className="mt-1 text-sm text-slate-400">
-            تتبع كافة عمليات الدخول والخروج والمبيعات والمشتريات والمردودات للصنف
+            تتبع كافة عمليات الدخول والخروج والمبيعات والمشتريات والمردودات للصنف باحتساب تراكمي دقيق
           </p>
         </div>
 
@@ -138,7 +177,7 @@ export default async function ItemStatementPage({ searchParams }: { searchParams
           <div className="flex items-end">
             <button
               type="submit"
-              className="w-full rounded-xl bg-sky-500 py-2.5 text-xs font-bold text-slate-950 hover:bg-sky-400 transition"
+              className="w-full rounded-xl bg-sky-500 py-2.5 text-xs font-bold text-slate-950 hover:bg-sky-400 transition cursor-pointer"
             >
               عرض كشف الحركات
             </button>
@@ -159,14 +198,24 @@ export default async function ItemStatementPage({ searchParams }: { searchParams
             </p>
           </div>
 
-          <div className="flex gap-6 text-right sm:text-left font-mono">
+          <div className="flex flex-wrap gap-5 text-right sm:text-left font-mono">
+            {openingBalance > 0 && (
+              <div>
+                <p className="text-xs text-slate-400 font-sans">الرصيد الافتتاحي</p>
+                <p className="text-lg font-bold text-sky-400">{openingBalance.toLocaleString('en-GB')}</p>
+              </div>
+            )}
             <div>
               <p className="text-xs text-slate-400 font-sans">إجمالي الوارد (+)</p>
-              <p className="text-xl font-bold text-emerald-400">{totalIn.toLocaleString('en-GB')}</p>
+              <p className="text-lg font-bold text-emerald-400">{totalIn.toLocaleString('en-GB')}</p>
             </div>
             <div>
               <p className="text-xs text-slate-400 font-sans">إجمالي الصادر (-)</p>
-              <p className="text-xl font-bold text-rose-400">{totalOut.toLocaleString('en-GB')}</p>
+              <p className="text-lg font-bold text-rose-400">{totalOut.toLocaleString('en-GB')}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-sans">رصيد الكشف المحسوب</p>
+              <p className="text-xl font-bold text-amber-400">{finalComputedBalance.toLocaleString('en-GB')}</p>
             </div>
             <div>
               <p className="text-xs text-slate-400 font-sans">الرصيد الفعلي الحالي</p>
@@ -193,14 +242,33 @@ export default async function ItemStatementPage({ searchParams }: { searchParams
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5 text-slate-200">
-              {movements.length === 0 ? (
+              {openingBalance > 0 && (
+                <tr className="bg-sky-500/5 font-semibold text-sky-300">
+                  <td className="p-3 font-mono">{searchParams.from || '—'}</td>
+                  <td className="p-3">
+                    <span className="font-bold text-sky-400">🏁 رصيد افتتاحي (ما قبل الفترة)</span>
+                  </td>
+                  <td className="p-3 font-mono text-slate-400">—</td>
+                  <td className="p-3 text-slate-400">الرصيد السابق</td>
+                  <td className="p-3 text-center font-mono font-bold text-sky-400">
+                    {openingBalance.toLocaleString('en-GB')}
+                  </td>
+                  <td className="p-3 text-center font-mono text-slate-500">—</td>
+                  <td className="p-3 text-center font-mono font-black text-white text-sm bg-sky-500/10">
+                    {openingBalance.toLocaleString('en-GB')}
+                  </td>
+                  <td className="p-3 text-left font-mono text-slate-400">—</td>
+                </tr>
+              )}
+
+              {displayMovements.length === 0 && openingBalance === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-slate-500">
                     لا توجد حركات مسجلة لهذا الصنف خلال الفترة المحددة
                   </td>
                 </tr>
               ) : (
-                movements.map((m, idx) => {
+                displayMovements.map((m, idx) => {
                   const typeConf = TYPE_LABELS[m.movement_type] || { label: m.movement_type, color: 'text-slate-400' }
 
                   return (
@@ -219,8 +287,8 @@ export default async function ItemStatementPage({ searchParams }: { searchParams
                       <td className="p-3 text-center font-mono font-bold text-rose-400">
                         {Number(m.quantity_out) > 0 ? Number(m.quantity_out).toLocaleString('en-GB') : '—'}
                       </td>
-                      <td className="p-3 text-center font-mono font-black text-white text-sm">
-                        {Number(m.balance_after).toLocaleString('en-GB')}
+                      <td className="p-3 text-center font-mono font-black text-white text-sm bg-white/5">
+                        {Number(m.computed_balance).toLocaleString('en-GB')}
                       </td>
                       <td className="p-3 text-left font-mono font-semibold text-slate-300">
                         {Number(m.unit_price) > 0 ? `${Number(m.unit_price).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪` : '—'}

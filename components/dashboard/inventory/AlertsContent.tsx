@@ -14,6 +14,7 @@ interface AlertProduct {
   stock_available: number
   low_stock_alert: number | null
   price: number
+  cost_price?: number | null
   is_active: boolean
   monthlySold: number
   lastSaleAt: string | null
@@ -86,6 +87,22 @@ export default function AlertsContent({ outOfStock, lowStock, currencyCode, stor
       notes:           restockNotes.trim() || 'إعادة تعبئة من تنبيهات المخزون',
       created_by:      userId,
     })
+
+    await supabase.from('inventory_movements').insert({
+      store_id: storeId,
+      product_id: restockProduct.id,
+      movement_type: 'purchase',
+      document_type: 'إعادة تعبئة مخزون',
+      entity_name: 'تنبيهات المخزون',
+      quantity_in: qty,
+      quantity_out: 0,
+      balance_after: qAfter,
+      unit_price: Number(restockProduct.cost_price || 0),
+      notes: restockNotes.trim() || 'إعادة تعبئة من تنبيهات المخزون',
+      movement_date: new Date().toISOString().slice(0, 10),
+      created_by: userId,
+    })
+
     const { error: pErr } = await supabase
       .from('products')
       .update({ stock_quantity: qAfter, updated_at: new Date().toISOString() })

@@ -10,12 +10,72 @@ import { revalidatePath } from 'next/cache'
 export interface ChequeItem {
   check_number: string
   bank_name: string
+  bank_code?: string
+  branch_name?: string
+  branch_code?: string
+  account_number?: string
   drawer_name?: string
   payee_name?: string
   amount: number
   due_date: string
+  date?: string // تاريخ تحرير الشيك
   notes?: string
   images?: string[]
+}
+
+/**
+ * جلب الصناديق والخزائن المسموح للمستخدم باستخدامها في سندات القبض أو الصرف
+ */
+export async function getUserAllowedCashBoxes(
+  storeId: string,
+  userId: string,
+  voucherType: 'receipt' | 'payment',
+) {
+  const supabase = createClient()
+
+  // 1. فحص رتبة العضو في المتجر
+  const { data: member } = await supabase
+    .from('store_members')
+    .select('role')
+    .eq('store_id', storeId)
+    .eq('profile_id', userId)
+    .maybeSingle()
+
+  // 2. جلب جميع الصناديق النشطة في المتجر
+  const { data: allBoxes } = await supabase
+    .from('cash_boxes')
+    .select('id, name, type, is_default, is_active')
+    .eq('store_id', storeId)
+    .eq('is_active', true)
+    .order('is_default', { ascending: false })
+    .order('name', { ascending: true })
+
+  if (!allBoxes || allBoxes.length === 0) return []
+
+  // إذا كان المستخدم مالكاً أو مديراً للمتجر، تتاح له كافة الصناديق
+  if (member?.role === 'owner' || member?.role === 'admin') {
+    return allBoxes
+  }
+
+  // 3. فحص جدول الصلاحيات المقيدة للمستخدم
+  const { data: perms } = await supabase
+    .from('user_cash_box_permissions')
+    .select('cash_box_id, can_receipt, can_payment')
+    .eq('store_id', storeId)
+    .eq('user_id', userId)
+
+  // إذا لم يتم وضع قيود خاصة لهذا المستخدم، فإن السياسة الافتراضية هي إتاحة الكل
+  if (!perms || perms.length === 0) {
+    return allBoxes
+  }
+
+  const allowedIds = new Set(
+    perms
+      .filter(p => (voucherType === 'receipt' ? p.can_receipt : p.can_payment))
+      .map(p => p.cash_box_id),
+  )
+
+  return allBoxes.filter(b => allowedIds.has(b.id))
 }
 
 export interface CreateVoucherInput {
@@ -137,6 +197,17 @@ export async function createVoucher(input: CreateVoucherInput) {
 
     if (!input.description?.trim()) {
       return { success: false, error: 'البيان / الوصف مطلوب' }
+    }
+
+    // التحقق من صلاحية المستخدم على الصندوق المحدد إن وُجد
+    if (input.cash_box_id) {
+      const allowed = await getUserAllowedCashBoxes(storeId, user.id, input.type)
+      if (!allowed.some(b => b.id === input.cash_box_id)) {
+        return {
+          success: false,
+          error: `ليس لديك صلاحية لتسجيل سند ${input.type === 'receipt' ? 'قبض' : 'صرف'} على الصندوق المحدد`,
+        }
+      }
     }
 
     // احتساب وتدقيق مبالغ وسائل الدفع
@@ -274,6 +345,10 @@ export async function createVoucher(input: CreateVoucherInput) {
         type: isReceipt ? 'received' : 'issued',
         check_number: c.check_number.trim(),
         bank_name: c.bank_name.trim(),
+        bank_code: c.bank_code?.trim() || null,
+        branch_name: c.branch_name?.trim() || null,
+        branch_code: c.branch_code?.trim() || null,
+        account_number: c.account_number?.trim() || null,
         drawer_name: isReceipt ? (c.drawer_name?.trim() || input.party_name.trim()) : null,
         payee_name: !isReceipt ? (c.payee_name?.trim() || input.party_name.trim()) : null,
         amount: Number(c.amount),
@@ -281,7 +356,9 @@ export async function createVoucher(input: CreateVoucherInput) {
         exchange_rate: 1.0,
         amount_ils: Number(c.amount),
         due_date: c.due_date,
-        issue_date: input.date,
+        issue_date: c.date || input.date,
+        voucher_id: voucher.id,
+        cashbox_id: input.cash_box_id || null,
         status: 'in_portfolio',
         customer_id: input.customer_id || null,
         supplier_id: input.supplier_id || null,

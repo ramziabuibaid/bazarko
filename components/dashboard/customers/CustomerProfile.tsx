@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { createVoucher } from '@/app/dashboard/accounting/vouchers/voucher-actions'
 
 interface LedgerEntry {
   id: string
@@ -97,32 +98,33 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
     setSaving(true)
     setPayError('')
 
-    const supabase = createClient()
-    const newBalance = customer.balance - amount
-
-    await Promise.all([
-      supabase.from('customer_ledger').insert({
-        store_id: storeId,
-        customer_id: customer.id,
-        type: 'payment',
+    try {
+      const res = await createVoucher({
+        type: 'receipt',
         date: new Date().toISOString().split('T')[0],
-        description: `دفعة نقدية — ${payForm.notes || 'تسديد ذمة'}`,
-        debit: 0,
-        credit: amount,
-        balance: newBalance,
-        reference_type: 'payment',
-      }),
-      supabase.from('customers').update({
-        balance: newBalance,
-        total_paid: (customer.total_paid ?? 0) + amount,
-        updated_at: new Date().toISOString(),
-      }).eq('id', customer.id),
-    ])
+        payment_method: 'cash',
+        amount,
+        cash_amount: amount,
+        customer_id: customer.id,
+        party_name: customer.name,
+        category: 'تحصيل ذمة عميل',
+        description: payForm.notes?.trim() || `سند قبض / تحصيل دفعة من العميل ${customer.name}`,
+      })
 
-    setSaving(false)
-    setShowPayment(false)
-    setPayForm({ amount: '', method: 'cash', notes: '' })
-    router.refresh()
+      if (!res.success) {
+        setPayError(res.error || 'فشل تسجيل سند القبض')
+        setSaving(false)
+        return
+      }
+
+      setSaving(false)
+      setShowPayment(false)
+      setPayForm({ amount: '', method: 'cash', notes: '' })
+      router.refresh()
+    } catch (err: any) {
+      setPayError(err?.message || 'حدث خطأ غير متوقع أثناء تسجيل السند')
+      setSaving(false)
+    }
   }
 
   async function saveEdit(e: React.FormEvent) {

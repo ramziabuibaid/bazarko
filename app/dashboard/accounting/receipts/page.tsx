@@ -5,6 +5,8 @@ import Link from 'next/link'
 import VouchersTable from '@/components/dashboard/accounting/VouchersTable'
 import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
 
+import { getUserAllowedCashBoxes } from '@/app/dashboard/accounting/vouchers/voucher-actions'
+
 export const metadata = {
   title: 'سندات القبض المالي — Bazarko ERP',
 }
@@ -21,7 +23,7 @@ export default async function ReceiptsPage() {
     { data: store },
     { data: vouchers },
     { data: customers },
-    { data: cashBoxes },
+    cashBoxes,
     { data: bankAccounts }
   ] = await Promise.all([
     supabase
@@ -41,12 +43,7 @@ export default async function ReceiptsPage() {
       .select('id, name, phone, balance')
       .eq('store_id', storeId)
       .order('name'),
-    supabase
-      .from('cash_boxes')
-      .select('id, name, is_default, is_active')
-      .eq('store_id', storeId)
-      .eq('is_active', true)
-      .order('is_default', { ascending: false }),
+    getUserAllowedCashBoxes(storeId, user.id, 'receipt'),
     supabase
       .from('bank_accounts')
       .select('id, bank_name, account_number, currency')

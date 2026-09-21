@@ -85,6 +85,12 @@ export default function SalesReturnsClient({
   const [error, setError] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
 
+  // Customer search state for modals
+  const [createCustomerQuery, setCreateCustomerQuery] = useState('')
+  const [showCreateCustomerDropdown, setShowCreateCustomerDropdown] = useState(false)
+  const [editCustomerQuery, setEditCustomerQuery] = useState('')
+  const [showEditCustomerDropdown, setShowEditCustomerDropdown] = useState(false)
+
   // Form State
   const [formData, setFormData] = useState({
     return_number: `RET-${Date.now().toString().slice(-6)}`,
@@ -515,20 +521,76 @@ export default function SalesReturnsClient({
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
+                <div className="relative">
                   <label className="mb-1 block text-xs font-semibold text-slate-300">العميل المرتبط</label>
-                  <select
-                    value={formData.customer_id}
-                    onChange={e => setFormData({ ...formData, customer_id: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500"
-                  >
-                    <option value="">عميل نقدي عام</option>
-                    {customers.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} {c.phone ? `(${c.phone})` : ''}
-                      </option>
-                    ))}
-                  </select>
+                  {formData.customer_id ? (
+                    <div className="flex items-center justify-between rounded-xl border border-sky-500/40 bg-sky-500/10 p-2 text-xs text-white">
+                      <div>
+                        <span className="font-bold">{customers.find(c => c.id === formData.customer_id)?.name}</span>
+                        {customers.find(c => c.id === formData.customer_id)?.phone && (
+                          <span className="text-slate-400 font-mono text-[10px] mr-1.5" dir="ltr">
+                            ({customers.find(c => c.id === formData.customer_id)?.phone})
+                          </span>
+                        )}
+                        <span className="text-amber-400 font-mono text-[10px] mr-2">
+                          [الرصيد: {customers.find(c => c.id === formData.customer_id)?.balance ?? 0} ₪]
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { setFormData({ ...formData, customer_id: '' }); setCreateCustomerQuery('') }}
+                        className="text-[11px] text-rose-400 hover:text-rose-300 underline font-bold"
+                      >
+                        تغيير
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <input
+                        type="text"
+                        value={createCustomerQuery}
+                        onChange={e => { setCreateCustomerQuery(e.target.value); setShowCreateCustomerDropdown(true) }}
+                        onFocus={() => setShowCreateCustomerDropdown(true)}
+                        placeholder="🔍 ابحث بالاسم أو الهاتف..."
+                        className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500 placeholder-slate-500"
+                      />
+                      {showCreateCustomerDropdown && (
+                        <div className="absolute z-30 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-white/10 bg-slate-800 shadow-2xl">
+                          <button
+                            type="button"
+                            onClick={() => { setFormData({ ...formData, customer_id: '' }); setShowCreateCustomerDropdown(false) }}
+                            className="w-full text-right p-2 text-xs text-slate-300 hover:bg-white/5 border-b border-white/5 font-bold"
+                          >
+                            عميل نقدي عام (بدون حساب)
+                          </button>
+                          {customers
+                            .filter(c => {
+                              if (!createCustomerQuery.trim()) return true
+                              const q = createCustomerQuery.toLowerCase()
+                              return c.name.toLowerCase().includes(q) || (c.phone && c.phone.includes(q))
+                            })
+                            .map(c => (
+                              <button
+                                key={c.id}
+                                type="button"
+                                onClick={() => {
+                                  setFormData({ ...formData, customer_id: c.id })
+                                  setShowCreateCustomerDropdown(false)
+                                  setCreateCustomerQuery('')
+                                }}
+                                className="w-full flex items-center justify-between p-2 text-right text-xs text-white hover:bg-sky-500/10 border-b border-white/5 last:border-0"
+                              >
+                                <div>
+                                  <p className="font-bold">{c.name}</p>
+                                  {c.phone && <p className="text-[10px] text-slate-400 font-mono" dir="ltr">{c.phone}</p>}
+                                </div>
+                                <span className="font-mono text-amber-400 text-[11px]">{c.balance ?? 0} ₪</span>
+                              </button>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -679,20 +741,76 @@ export default function SalesReturnsClient({
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
+                <div className="relative">
                   <label className="mb-1 block text-xs font-semibold text-slate-300">العميل المرتبط</label>
-                  <select
-                    value={editFormData.customer_id}
-                    onChange={e => setEditFormData({ ...editFormData, customer_id: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500"
-                  >
-                    <option value="">عميل نقدي عام</option>
-                    {customers.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} {c.phone ? `(${c.phone})` : ''}
-                      </option>
-                    ))}
-                  </select>
+                  {editFormData.customer_id ? (
+                    <div className="flex items-center justify-between rounded-xl border border-sky-500/40 bg-sky-500/10 p-2 text-xs text-white">
+                      <div>
+                        <span className="font-bold">{customers.find(c => c.id === editFormData.customer_id)?.name}</span>
+                        {customers.find(c => c.id === editFormData.customer_id)?.phone && (
+                          <span className="text-slate-400 font-mono text-[10px] mr-1.5" dir="ltr">
+                            ({customers.find(c => c.id === editFormData.customer_id)?.phone})
+                          </span>
+                        )}
+                        <span className="text-amber-400 font-mono text-[10px] mr-2">
+                          [الرصيد: {customers.find(c => c.id === editFormData.customer_id)?.balance ?? 0} ₪]
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { setEditFormData({ ...editFormData, customer_id: '' }); setEditCustomerQuery('') }}
+                        className="text-[11px] text-rose-400 hover:text-rose-300 underline font-bold"
+                      >
+                        تغيير
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <input
+                        type="text"
+                        value={editCustomerQuery}
+                        onChange={e => { setEditCustomerQuery(e.target.value); setShowEditCustomerDropdown(true) }}
+                        onFocus={() => setShowEditCustomerDropdown(true)}
+                        placeholder="🔍 ابحث بالاسم أو الهاتف..."
+                        className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500 placeholder-slate-500"
+                      />
+                      {showEditCustomerDropdown && (
+                        <div className="absolute z-30 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-white/10 bg-slate-800 shadow-2xl">
+                          <button
+                            type="button"
+                            onClick={() => { setEditFormData({ ...editFormData, customer_id: '' }); setShowEditCustomerDropdown(false) }}
+                            className="w-full text-right p-2 text-xs text-slate-300 hover:bg-white/5 border-b border-white/5 font-bold"
+                          >
+                            عميل نقدي عام (بدون حساب)
+                          </button>
+                          {customers
+                            .filter(c => {
+                              if (!editCustomerQuery.trim()) return true
+                              const q = editCustomerQuery.toLowerCase()
+                              return c.name.toLowerCase().includes(q) || (c.phone && c.phone.includes(q))
+                            })
+                            .map(c => (
+                              <button
+                                key={c.id}
+                                type="button"
+                                onClick={() => {
+                                  setEditFormData({ ...editFormData, customer_id: c.id })
+                                  setShowEditCustomerDropdown(false)
+                                  setEditCustomerQuery('')
+                                }}
+                                className="w-full flex items-center justify-between p-2 text-right text-xs text-white hover:bg-sky-500/10 border-b border-white/5 last:border-0"
+                              >
+                                <div>
+                                  <p className="font-bold">{c.name}</p>
+                                  {c.phone && <p className="text-[10px] text-slate-400 font-mono" dir="ltr">{c.phone}</p>}
+                                </div>
+                                <span className="font-mono text-amber-400 text-[11px]">{c.balance ?? 0} ₪</span>
+                              </button>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div>

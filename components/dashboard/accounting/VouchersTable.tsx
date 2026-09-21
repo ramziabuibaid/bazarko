@@ -23,7 +23,9 @@ interface Supplier {
 interface CashBox {
   id: string
   name: string
+  type?: string
   is_default?: boolean
+  is_active?: boolean
 }
 
 interface BankAccount {
@@ -130,14 +132,63 @@ export default function VouchersTable({
   const [cheques, setCheques] = useState<ChequeItem[]>([
     {
       check_number: '',
+      account_number: '',
+      bank_code: '',
       bank_name: COMMON_BANKS[0],
-      amount: 0,
+      branch_code: '',
+      branch_name: '',
       due_date: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+      date: new Date().toISOString().slice(0, 10),
+      amount: 0,
       drawer_name: '',
       payee_name: '',
       notes: '',
     },
   ])
+
+  // التبديل التلقائي لطريقة الدفع عند تغيير الصندوق
+  const handleCashBoxChange = (boxId: string) => {
+    setSelectedCashBoxId(boxId)
+    const box = cashBoxes.find(b => b.id === boxId)
+    if (box) {
+      if (
+        box.type === 'checks_received' ||
+        box.type === 'checks_collection' ||
+        box.type === 'checks_issued' ||
+        box.name.includes('شيك')
+      ) {
+        setPaymentMethod('cheque')
+      } else if (box.type === 'bank' || box.name.includes('بنك')) {
+        setPaymentMethod('bank')
+      } else if (paymentMethod === 'cheque') {
+        setPaymentMethod('cash')
+      }
+    }
+  }
+
+  // اختيار الصندوق الملائم عند الضغط على طريقة الدفع
+  const handlePaymentMethodChange = (method: 'cash' | 'cheque' | 'split' | 'bank') => {
+    setPaymentMethod(method)
+    if (method === 'cheque') {
+      const chequeBox = cashBoxes.find(
+        b =>
+          b.type === 'checks_received' ||
+          b.type === 'checks_collection' ||
+          b.type === 'checks_issued' ||
+          b.name.includes('شيك'),
+      )
+      if (chequeBox) setSelectedCashBoxId(chequeBox.id)
+    } else if (method === 'cash') {
+      const cashBox = cashBoxes.find(
+        b =>
+          b.type !== 'checks_received' &&
+          b.type !== 'checks_collection' &&
+          b.type !== 'checks_issued' &&
+          !b.name.includes('شيك'),
+      )
+      if (cashBox) setSelectedCashBoxId(cashBox.id)
+    }
+  }
 
   // Party Selection
   const [partyMode, setPartyMode] = useState<'registered' | 'manual'>('registered')
@@ -235,9 +286,14 @@ export default function VouchersTable({
       ...prev,
       {
         check_number: '',
+        account_number: '',
+        bank_code: '',
         bank_name: COMMON_BANKS[0],
-        amount: 0,
+        branch_code: '',
+        branch_name: '',
         due_date: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+        date: new Date().toISOString().slice(0, 10),
+        amount: 0,
         drawer_name: isReceipt ? activeName : '',
         payee_name: !isReceipt ? activeName : '',
         notes: '',
@@ -340,7 +396,7 @@ export default function VouchersTable({
         amount: totalAmt,
         cash_amount: (paymentMethod === 'cash' || paymentMethod === 'split') ? (Number(cashAmountInput) || 0) : 0,
         checks_amount: (paymentMethod === 'cheque' || paymentMethod === 'split') ? totalChequesAmount : 0,
-        cash_box_id: (paymentMethod === 'cash' || paymentMethod === 'split') ? selectedCashBoxId : null,
+        cash_box_id: selectedCashBoxId || null,
         bank_account_id: paymentMethod === 'bank' ? selectedBankId : null,
         customer_id: isReceipt && partyMode === 'registered' ? selectedCustomerId : null,
         supplier_id: !isReceipt && partyMode === 'registered' ? selectedSupplierId : null,
@@ -350,7 +406,9 @@ export default function VouchersTable({
         reference: reference.trim() || null,
         invoice_id: isReceipt && selectedInvoiceId ? selectedInvoiceId : null,
         purchase_invoice_id: !isReceipt && selectedPurchaseId ? selectedPurchaseId : null,
-        checks: (paymentMethod === 'cheque' || paymentMethod === 'split') ? cheques : [],
+        checks: (paymentMethod === 'cheque' || paymentMethod === 'split')
+          ? cheques.map(c => ({ ...c, date: c.date || date }))
+          : [],
       })
 
       if (!res.success) {
@@ -704,7 +762,7 @@ export default function VouchersTable({
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <button
                     type="button"
-                    onClick={() => setPaymentMethod('cash')}
+                    onClick={() => handlePaymentMethodChange('cash')}
                     className={`flex items-center justify-center gap-1.5 rounded-xl border p-2.5 text-xs font-bold transition ${
                       paymentMethod === 'cash'
                         ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
@@ -717,7 +775,7 @@ export default function VouchersTable({
 
                   <button
                     type="button"
-                    onClick={() => setPaymentMethod('cheque')}
+                    onClick={() => handlePaymentMethodChange('cheque')}
                     className={`flex items-center justify-center gap-1.5 rounded-xl border p-2.5 text-xs font-bold transition ${
                       paymentMethod === 'cheque'
                         ? 'bg-purple-500/20 border-purple-500 text-purple-400'
@@ -730,7 +788,7 @@ export default function VouchersTable({
 
                   <button
                     type="button"
-                    onClick={() => setPaymentMethod('split')}
+                    onClick={() => handlePaymentMethodChange('split')}
                     className={`flex items-center justify-center gap-1.5 rounded-xl border p-2.5 text-xs font-bold transition ${
                       paymentMethod === 'split'
                         ? 'bg-amber-500/20 border-amber-500 text-amber-400'
@@ -743,7 +801,7 @@ export default function VouchersTable({
 
                   <button
                     type="button"
-                    onClick={() => setPaymentMethod('bank')}
+                    onClick={() => handlePaymentMethodChange('bank')}
                     className={`flex items-center justify-center gap-1.5 rounded-xl border p-2.5 text-xs font-bold transition ${
                       paymentMethod === 'bank'
                         ? 'bg-blue-500/20 border-blue-500 text-blue-400'
@@ -754,6 +812,41 @@ export default function VouchersTable({
                     <span>تحويل بنكي</span>
                   </button>
                 </div>
+              </div>
+
+              {/* 1.1 الصندوق / الخزينة المحددة للعملية حسب الصلاحيات */}
+              <div className="rounded-xl border border-white/10 bg-slate-800/60 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span>🏦</span> تحديد الصندوق لتسجيل السند ({isReceipt ? 'صندوق القبض' : 'صندوق الصرف'}) *
+                  </label>
+                  <span className="text-[10px] text-slate-400">
+                    {cashBoxes.length > 0 ? `${cashBoxes.length} صندوق مصرح لك باستخدامه` : 'لا توجد صناديق متاحة'}
+                  </span>
+                </div>
+
+                {cashBoxes.length === 0 ? (
+                  <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-2.5 text-xs text-red-400">
+                    ⚠️ ليس لديك صلاحية على أي صندوق {isReceipt ? 'قبض' : 'صرف'} مسجل في هذا المتجر. يرجى التواصل مع إدارة النظام لفتح الصلاحية.
+                  </div>
+                ) : (
+                  <select
+                    value={selectedCashBoxId}
+                    onChange={e => handleCashBoxChange(e.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-slate-900 p-2.5 text-xs text-white font-bold outline-none focus:border-sky-500"
+                  >
+                    {cashBoxes.map(b => (
+                      <option key={b.id} value={b.id}>
+                        {b.type === 'checks_received' || b.type === 'checks_collection' || b.type === 'checks_issued' || b.name.includes('شيك')
+                          ? `📑 ${b.name} (صندوق شيكات)`
+                          : b.type === 'bank' || b.name.includes('بنك')
+                          ? `🏦 ${b.name} (حساب بنكي)`
+                          : `💵 ${b.name} (صندوق نقدي)`}
+                        {b.is_default ? ' [الافتراضي]' : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               {/* 2. التاريخ والتصنيف */}
@@ -1049,9 +1142,13 @@ export default function VouchersTable({
                           )}
                         </div>
 
+                        {/* ── حقول بيانات الشيك بالترتيب الدقيق المطلوب (1 إلى 9) ── */}
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          {/* 1. رقم الشيك */}
                           <div>
-                            <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">رقم الشيك *</label>
+                            <label className="block text-[11px] font-bold text-sky-300 mb-0.5">
+                              1. رقم الشيك *
+                            </label>
                             <input
                               type="text"
                               required
@@ -1063,8 +1160,41 @@ export default function VouchersTable({
                             />
                           </div>
 
+                          {/* 2. رقم الحساب */}
                           <div>
-                            <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">البنك المسحوب عليه *</label>
+                            <label className="block text-[11px] font-bold text-sky-300 mb-0.5">
+                              2. رقم الحساب *
+                            </label>
+                            <input
+                              type="text"
+                              value={chk.account_number || ''}
+                              onChange={e => updateChequeRow(idx, 'account_number', e.target.value)}
+                              placeholder="رقم حساب الساحب..."
+                              dir="ltr"
+                              className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500 font-mono"
+                            />
+                          </div>
+
+                          {/* 3. رقم البنك */}
+                          <div>
+                            <label className="block text-[11px] font-bold text-sky-300 mb-0.5">
+                              3. رقم البنك (Bank Code)
+                            </label>
+                            <input
+                              type="text"
+                              value={chk.bank_code || ''}
+                              onChange={e => updateChequeRow(idx, 'bank_code', e.target.value)}
+                              placeholder="مثال: 12 أو 04"
+                              dir="ltr"
+                              className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500 font-mono"
+                            />
+                          </div>
+
+                          {/* 4. اسم البنك */}
+                          <div>
+                            <label className="block text-[11px] font-bold text-sky-300 mb-0.5">
+                              4. اسم البنك *
+                            </label>
                             <input
                               type="text"
                               list="common_banks_list"
@@ -1076,51 +1206,99 @@ export default function VouchersTable({
                             />
                           </div>
 
+                          {/* 5. رقم الفرع */}
                           <div>
-                            <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">قيمة الشيك *</label>
+                            <label className="block text-[11px] font-bold text-sky-300 mb-0.5">
+                              5. رقم الفرع (Branch Code)
+                            </label>
+                            <input
+                              type="text"
+                              value={chk.branch_code || ''}
+                              onChange={e => updateChequeRow(idx, 'branch_code', e.target.value)}
+                              placeholder="مثال: 450"
+                              dir="ltr"
+                              className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500 font-mono"
+                            />
+                          </div>
+
+                          {/* 6. اسم الفرع */}
+                          <div>
+                            <label className="block text-[11px] font-bold text-sky-300 mb-0.5">
+                              6. اسم الفرع
+                            </label>
+                            <input
+                              type="text"
+                              value={chk.branch_name || ''}
+                              onChange={e => updateChequeRow(idx, 'branch_name', e.target.value)}
+                              placeholder="مثال: فرع رام الله / الخليل"
+                              className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500"
+                            />
+                          </div>
+
+                          {/* 7. تاريخ الاستحقاق */}
+                          <div>
+                            <label className="block text-[11px] font-bold text-amber-300 mb-0.5">
+                              7. تاريخ الاستحقاق *
+                            </label>
+                            <input
+                              type="date"
+                              required
+                              value={chk.due_date}
+                              onChange={e => updateChequeRow(idx, 'due_date', e.target.value)}
+                              className="w-full rounded-lg border border-amber-500/30 bg-slate-900 p-2 text-xs text-white outline-none focus:border-amber-400 font-bold"
+                            />
+                          </div>
+
+                          {/* 8. التاريخ */}
+                          <div>
+                            <label className="block text-[11px] font-bold text-sky-300 mb-0.5">
+                              8. التاريخ (تاريخ تحرير الشيك) *
+                            </label>
+                            <input
+                              type="date"
+                              required
+                              value={chk.date || date}
+                              onChange={e => updateChequeRow(idx, 'date', e.target.value)}
+                              className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500 font-bold"
+                            />
+                          </div>
+
+                          {/* 9. قيمة الشيك */}
+                          <div>
+                            <label className="block text-[11px] font-bold text-emerald-400 mb-0.5">
+                              9. قيمة الشيك *
+                            </label>
                             <div className="relative">
                               <input
                                 type="number"
                                 step="0.01"
-                                min="0"
+                                min="0.01"
                                 required
                                 value={chk.amount || ''}
                                 onChange={e => updateChequeRow(idx, 'amount', parseFloat(e.target.value) || 0)}
                                 placeholder="0.00"
                                 dir="ltr"
-                                className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500 font-mono font-bold"
+                                className="w-full rounded-lg border border-emerald-500/30 bg-slate-900 p-2 text-xs text-white outline-none focus:border-emerald-400 font-mono font-bold text-sm"
                               />
-                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-bold">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-emerald-400 font-bold">
                                 {currencyCode}
                               </span>
                             </div>
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          <div>
-                            <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">تاريخ استحقاق الصرف *</label>
-                            <input
-                              type="date"
-                              required
-                              value={chk.due_date}
-                              onChange={e => updateChequeRow(idx, 'due_date', e.target.value)}
-                              className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">
-                              {isReceipt ? 'اسم الساحب (صاحب الشيك)' : 'اسم المستفيد'}
-                            </label>
-                            <input
-                              type="text"
-                              value={isReceipt ? chk.drawer_name : chk.payee_name}
-                              onChange={e => updateChequeRow(idx, isReceipt ? 'drawer_name' : 'payee_name', e.target.value)}
-                              placeholder="اختياري..."
-                              className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500"
-                            />
-                          </div>
+                        {/* اسم الساحب أو المستفيد */}
+                        <div className="pt-1">
+                          <label className="block text-[11px] font-semibold text-slate-400 mb-0.5">
+                            {isReceipt ? 'اسم الساحب (صاحب الشيك المدون عليه)' : 'اسم المستفيد من الشيك'}
+                          </label>
+                          <input
+                            type="text"
+                            value={isReceipt ? chk.drawer_name : chk.payee_name}
+                            onChange={e => updateChequeRow(idx, isReceipt ? 'drawer_name' : 'payee_name', e.target.value)}
+                            placeholder="اختياري..."
+                            className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500"
+                          />
                         </div>
                       </div>
                     ))}

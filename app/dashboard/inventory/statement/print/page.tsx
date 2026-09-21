@@ -43,7 +43,7 @@ export default async function PrintItemStatementPage({ searchParams }: { searchP
 
   if (!store || !product) notFound()
 
-  let query = supabase
+  const { data: allData } = await supabase
     .from('inventory_movements')
     .select('*')
     .eq('product_id', product.id)
@@ -51,15 +51,49 @@ export default async function PrintItemStatementPage({ searchParams }: { searchP
     .order('movement_date', { ascending: true })
     .order('created_at', { ascending: true })
 
-  if (searchParams.from) query = query.gte('movement_date', searchParams.from)
-  if (searchParams.to) query = query.lte('movement_date', searchParams.to)
-  if (searchParams.type) query = query.eq('movement_type', searchParams.type)
+  const allMovements = allData || []
+  const curStock = Number(product.stock_quantity || 0)
 
-  const { data: movements } = await query
-  const mList = movements || []
+  // احتساب الرصيد الأساسي عند إنشاء الصنف
+  const totalAllIn = allMovements.reduce((sum, m) => sum + Number(m.quantity_in || 0), 0)
+  const totalAllOut = allMovements.reduce((sum, m) => sum + Number(m.quantity_out || 0), 0)
+  const baseInitial = (curStock >= (totalAllIn - totalAllOut))
+    ? (curStock - (totalAllIn - totalAllOut))
+    : 0
+
+  let running = baseInitial
+  const enriched = allMovements.map(m => {
+    const qIn = Number(m.quantity_in || 0)
+    const qOut = Number(m.quantity_out || 0)
+    running = running + qIn - qOut
+    return {
+      ...m,
+      computed_balance: running,
+    }
+  })
+
+  const fromDate = searchParams.from
+  const toDate = searchParams.to
+  const typeFilter = searchParams.type
+
+  let priorBalance = baseInitial
+  for (const m of enriched) {
+    if (fromDate && m.movement_date < fromDate) {
+      priorBalance = m.computed_balance
+    }
+  }
+  const openingBalance = fromDate ? priorBalance : baseInitial
+
+  const mList = enriched.filter(m => {
+    if (fromDate && m.movement_date < fromDate) return false
+    if (toDate && m.movement_date > toDate) return false
+    if (typeFilter && m.movement_type !== typeFilter) return false
+    return true
+  })
 
   const totalIn = mList.reduce((sum, m) => sum + Number(m.quantity_in || 0), 0)
   const totalOut = mList.reduce((sum, m) => sum + Number(m.quantity_out || 0), 0)
+  const finalComputedBalance = openingBalance + totalIn - totalOut
 
   return (
     <div className="min-h-screen bg-slate-100 p-4 sm:p-8 text-slate-900 font-sans print:p-0 print:bg-white">
@@ -101,11 +135,17 @@ export default async function PrintItemStatementPage({ searchParams }: { searchP
         </div>
 
         {/* Product Details Box */}
-        <div className="my-4 grid grid-cols-3 gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
+        <div className="my-4 grid grid-cols-4 gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
           <div>
             <span className="text-slate-500">اسم الصنف:</span>{' '}
-            <span className="font-bold text-slate-900 text-sm">{product.name}</span>
+            <span className="font-bold text-slate-900 text-sm block truncate">{product.name}</span>
           </div>
+          {openingBalance > 0 && (
+            <div>
+              <span className="text-slate-500">الرصيد الافتتاحي:</span>{' '}
+              <span className="font-mono font-bold text-sky-800">{openingBalance.toLocaleString('en-GB')}</span>
+            </div>
+          )}
           <div>
             <span className="text-slate-500">إجمالي الوارد (+):</span>{' '}
             <span className="font-mono font-bold text-emerald-800">{totalIn.toLocaleString('en-GB')}</span>
@@ -131,7 +171,20 @@ export default async function PrintItemStatementPage({ searchParams }: { searchP
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 text-slate-800">
-            {mList.length === 0 ? (
+            {openingBalance > 0 && (
+              <tr className="bg-sky-50 font-semibold text-sky-900">
+                <td className="p-2 font-mono">{searchParams.from || '—'}</td>
+                <td className="p-2">رصيد افتتاحي (ما قبل الفترة)</td>
+                <td className="p-2 font-mono text-slate-400">—</td>
+                <td className="p-2 text-slate-500">الرصيد السابق</td>
+                <td className="p-2 text-center font-mono font-bold text-sky-900">{openingBalance.toLocaleString('en-GB')}</td>
+                <td className="p-2 text-center font-mono text-slate-400">—</td>
+                <td className="p-2 text-center font-mono font-black text-slate-900">{openingBalance.toLocaleString('en-GB')}</td>
+                <td className="p-2 text-left font-mono text-slate-400">—</td>
+              </tr>
+            )}
+
+            {mList.length === 0 && openingBalance === 0 ? (
               <tr>
                 <td colSpan={8} className="p-4 text-center text-slate-500">
                   لا توجد حركات مسجلة لهذا الصنف خلال الفترة
@@ -151,7 +204,7 @@ export default async function PrintItemStatementPage({ searchParams }: { searchP
                     {Number(m.quantity_out) > 0 ? Number(m.quantity_out).toLocaleString('en-GB') : '—'}
                   </td>
                   <td className="p-2 text-center font-mono font-black text-slate-900">
-                    {Number(m.balance_after).toLocaleString('en-GB')}
+                    {Number(m.computed_balance).toLocaleString('en-GB')}
                   </td>
                   <td className="p-2 text-left font-mono">
                     {Number(m.unit_price) > 0 ? `${Number(m.unit_price).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪` : '—'}

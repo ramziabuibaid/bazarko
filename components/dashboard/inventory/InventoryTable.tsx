@@ -84,6 +84,22 @@ export default function InventoryTable({ products, currencyCode, storeId, userId
       notes: 'تعديل مباشر من جدول المخزون',
       created_by: userId,
     })
+
+    await supabase.from('inventory_movements').insert({
+      store_id: storeId,
+      product_id: p.id,
+      movement_type: diff >= 0 ? 'adjustment_in' : 'adjustment_out',
+      document_type: 'تسوية مخزنية سريعة',
+      entity_name: 'تعديل مباشر',
+      quantity_in: diff >= 0 ? diff : 0,
+      quantity_out: diff < 0 ? Math.abs(diff) : 0,
+      balance_after: newQty,
+      unit_price: Number(p.cost_price || p.price || 0),
+      notes: 'تعديل مباشر من جدول المخزون',
+      movement_date: new Date().toISOString().slice(0, 10),
+      created_by: userId,
+    })
+
     await supabase.from('products').update({
       stock_quantity: newQty,
       updated_at: new Date().toISOString(),
@@ -154,6 +170,46 @@ export default function InventoryTable({ products, currencyCode, storeId, userId
         created_by: userId,
       })
       if (mvErr) hasError = true
+
+      // تصنيف الحركة في كشف حركات الأصناف الشامل
+      let invMovType: 'purchase' | 'sales_return' | 'damage' | 'adjustment_in' | 'adjustment_out' = 'adjustment_in'
+      let qtyIn = 0
+      let qtyOut = 0
+
+      if (adjType === 'purchase') {
+        invMovType = 'purchase'
+        qtyIn = Math.abs(signedQty)
+      } else if (adjType === 'return') {
+        invMovType = 'sales_return'
+        qtyIn = Math.abs(signedQty)
+      } else if (adjType === 'damage') {
+        invMovType = 'damage'
+        qtyOut = Math.abs(signedQty)
+      } else {
+        if (signedQty >= 0) {
+          invMovType = 'adjustment_in'
+          qtyIn = signedQty
+        } else {
+          invMovType = 'adjustment_out'
+          qtyOut = Math.abs(signedQty)
+        }
+      }
+
+      await supabase.from('inventory_movements').insert({
+        store_id: storeId,
+        product_id: adjustProduct.id,
+        movement_type: invMovType,
+        document_type: mt.label,
+        entity_name: 'تعديل مخزني',
+        quantity_in: qtyIn,
+        quantity_out: qtyOut,
+        balance_after: qAfter,
+        unit_price: Number(adjustProduct.cost_price || adjustProduct.price || 0),
+        notes: adjNotes.trim() || null,
+        movement_date: new Date().toISOString().slice(0, 10),
+        created_by: userId,
+      })
+
       productUpdate.stock_quantity = qAfter
     } else {
       setSaving(true)
