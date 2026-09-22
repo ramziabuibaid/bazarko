@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useToast } from '@/components/ui/Toast'
 import { useConfirm } from '@/components/ui/Confirm'
 import { createVoucher, deleteVoucher, getCustomerOpenInvoices, getSupplierOpenPurchases, ChequeItem } from '@/app/dashboard/accounting/vouchers/voucher-actions'
+import { PALESTINIAN_BANKS } from '@/lib/palestineBanks'
 
 interface Customer {
   id: string
@@ -73,20 +74,6 @@ interface Props {
   storePhone?: string
 }
 
-const COMMON_BANKS = [
-  'بنك فلسطين',
-  'البنك العربي',
-  'بنك القدس',
-  'البنك الوطني (TNB)',
-  'البنك الإسلامي الفلسطيني',
-  'البنك الإسلامي العربي',
-  'بنك الإسكان للتجارة والتمويل',
-  'بنك الأردن',
-  'مصرف الصفا',
-  'البنك الأهلي الأردني',
-  'بنك القاهرة عمان',
-]
-
 const RECEIPT_CATEGORIES = ['مبيعات', 'دفعة زبون', 'استرداد', 'إيرادات أخرى', 'دفعة مقدمة']
 const PAYMENT_CATEGORIES = ['مشتريات', 'إيجار', 'رواتب', 'مصاريف تشغيل', 'فواتير ومرافق', 'توصيل وشحن', 'تسويق وإعلان', 'أخرى']
 
@@ -133,10 +120,10 @@ export default function VouchersTable({
     {
       check_number: '',
       account_number: '',
-      bank_code: '',
-      bank_name: COMMON_BANKS[0],
-      branch_code: '',
-      branch_name: '',
+      bank_code: PALESTINIAN_BANKS[0].code,
+      bank_name: PALESTINIAN_BANKS[0].name,
+      branch_code: PALESTINIAN_BANKS[0].branches[0]?.code || '450',
+      branch_name: PALESTINIAN_BANKS[0].branches[0]?.name || 'فرع رام الله الرئيسي',
       due_date: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
       date: new Date().toISOString().slice(0, 10),
       amount: 0,
@@ -287,10 +274,10 @@ export default function VouchersTable({
       {
         check_number: '',
         account_number: '',
-        bank_code: '',
-        bank_name: COMMON_BANKS[0],
-        branch_code: '',
-        branch_name: '',
+        bank_code: PALESTINIAN_BANKS[0].code,
+        bank_name: PALESTINIAN_BANKS[0].name,
+        branch_code: PALESTINIAN_BANKS[0].branches[0]?.code || '450',
+        branch_name: PALESTINIAN_BANKS[0].branches[0]?.name || 'فرع رام الله الرئيسي',
         due_date: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
         date: new Date().toISOString().slice(0, 10),
         amount: 0,
@@ -308,6 +295,32 @@ export default function VouchersTable({
 
   const updateChequeRow = (index: number, field: keyof ChequeItem, val: any) => {
     setCheques(prev => prev.map((c, idx) => idx === index ? { ...c, [field]: val } : c))
+  }
+
+  const handleBankSelect = (index: number, bankCode: string) => {
+    const pmaBank = PALESTINIAN_BANKS.find(b => b.code === bankCode)
+    if (pmaBank) {
+      setCheques(prev => prev.map((c, idx) => idx === index ? {
+        ...c,
+        bank_code: pmaBank.code,
+        bank_name: pmaBank.name,
+        branch_code: pmaBank.branches[0]?.code || '',
+        branch_name: pmaBank.branches[0]?.name || '',
+      } : c))
+    }
+  }
+
+  const handleBranchSelect = (index: number, branchCode: string) => {
+    const chk = cheques[index]
+    const pmaBank = PALESTINIAN_BANKS.find(b => b.code === chk.bank_code || b.name === chk.bank_name)
+    const branch = pmaBank?.branches.find(br => br.code === branchCode)
+    if (branch) {
+      setCheques(prev => prev.map((c, idx) => idx === index ? {
+        ...c,
+        branch_code: branch.code,
+        branch_name: branch.name,
+      } : c))
+    }
   }
 
   // Reset Form
@@ -328,7 +341,10 @@ export default function VouchersTable({
     setCheques([
       {
         check_number: '',
-        bank_name: COMMON_BANKS[0],
+        bank_code: PALESTINIAN_BANKS[0].code,
+        bank_name: PALESTINIAN_BANKS[0].name,
+        branch_code: PALESTINIAN_BANKS[0].branches[0]?.code || '450',
+        branch_name: PALESTINIAN_BANKS[0].branches[0]?.name || 'فرع رام الله الرئيسي',
         amount: 0,
         due_date: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
         drawer_name: '',
@@ -1175,64 +1191,59 @@ export default function VouchersTable({
                             />
                           </div>
 
-                          {/* 3. رقم البنك */}
-                          <div>
+                          {/* 3 & 4. البنك المسحوب عليه حسب دليل سلطة النقد PMA */}
+                          <div className="sm:col-span-2">
                             <label className="block text-[11px] font-bold text-sky-300 mb-0.5">
-                              3. رقم البنك (Bank Code)
+                              3. البنك المسحوب عليه (دليل سلطة النقد PMA) *
                             </label>
-                            <input
-                              type="text"
-                              value={chk.bank_code || ''}
-                              onChange={e => updateChequeRow(idx, 'bank_code', e.target.value)}
-                              placeholder="مثال: 12 أو 04"
-                              dir="ltr"
-                              className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500 font-mono"
-                            />
-                          </div>
-
-                          {/* 4. اسم البنك */}
-                          <div>
-                            <label className="block text-[11px] font-bold text-sky-300 mb-0.5">
-                              4. اسم البنك *
-                            </label>
-                            <input
-                              type="text"
-                              list="common_banks_list"
+                            <select
                               required
-                              value={chk.bank_name}
-                              onChange={e => updateChequeRow(idx, 'bank_name', e.target.value)}
-                              placeholder="اختر أو اكتب اسم البنك..."
-                              className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500"
-                            />
+                              value={chk.bank_code || ''}
+                              onChange={e => handleBankSelect(idx, e.target.value)}
+                              className="w-full rounded-lg border border-sky-500/30 bg-slate-900 p-2 text-xs text-white outline-none focus:border-sky-400 font-bold"
+                            >
+                              <option value="">-- اختر البنك من دليل سلطة النقد الفلسطيني --</option>
+                              {PALESTINIAN_BANKS.map(b => (
+                                <option key={b.code} value={b.code}>
+                                  [{b.code}] {b.name} {b.nameEn ? `(${b.nameEn})` : ''}
+                                </option>
+                              ))}
+                            </select>
                           </div>
 
-                          {/* 5. رقم الفرع */}
-                          <div>
+                          {/* 5 & 6. فرع البنك */}
+                          <div className="sm:col-span-2">
                             <label className="block text-[11px] font-bold text-sky-300 mb-0.5">
-                              5. رقم الفرع (Branch Code)
+                              4. فرع البنك المسحوب عليه (PMA Branch)
                             </label>
-                            <input
-                              type="text"
-                              value={chk.branch_code || ''}
-                              onChange={e => updateChequeRow(idx, 'branch_code', e.target.value)}
-                              placeholder="مثال: 450"
-                              dir="ltr"
-                              className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500 font-mono"
-                            />
-                          </div>
-
-                          {/* 6. اسم الفرع */}
-                          <div>
-                            <label className="block text-[11px] font-bold text-sky-300 mb-0.5">
-                              6. اسم الفرع
-                            </label>
-                            <input
-                              type="text"
-                              value={chk.branch_name || ''}
-                              onChange={e => updateChequeRow(idx, 'branch_name', e.target.value)}
-                              placeholder="مثال: فرع رام الله / الخليل"
-                              className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500"
-                            />
+                            {(() => {
+                              const activeBank = PALESTINIAN_BANKS.find(b => b.code === chk.bank_code || b.name === chk.bank_name)
+                              const branches = activeBank?.branches || []
+                              return (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  <select
+                                    value={chk.branch_code || ''}
+                                    onChange={e => handleBranchSelect(idx, e.target.value)}
+                                    className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500"
+                                  >
+                                    <option value="">-- اختر الفرع --</option>
+                                    {branches.map(br => (
+                                      <option key={br.code} value={br.code}>
+                                        [{br.code}] {br.name} {br.city ? `— ${br.city}` : ''}
+                                      </option>
+                                    ))}
+                                    <option value="other">فرع آخر غير مدرج</option>
+                                  </select>
+                                  <input
+                                    type="text"
+                                    value={chk.branch_name || ''}
+                                    onChange={e => updateChequeRow(idx, 'branch_name', e.target.value)}
+                                    placeholder="اسم الفرع يدوياً إن لم يوجد..."
+                                    className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500"
+                                  />
+                                </div>
+                              )
+                            })()}
                           </div>
 
                           {/* 7. تاريخ الاستحقاق */}
@@ -1302,12 +1313,6 @@ export default function VouchersTable({
                         </div>
                       </div>
                     ))}
-
-                    <datalist id="common_banks_list">
-                      {COMMON_BANKS.map(b => (
-                        <option key={b} value={b} />
-                      ))}
-                    </datalist>
                   </div>
 
                   <div className="flex items-center justify-between border-t border-purple-500/20 pt-2 text-xs font-mono font-bold text-purple-300">

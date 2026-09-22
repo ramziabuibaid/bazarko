@@ -419,7 +419,26 @@ export async function getAccountStatement(accountId: string, fromDate?: string, 
     // حساب الرصيد التراكمي بحسب طبيعة الحساب (مدين أو دائن)
     const isDebitNature = acc.normal_balance === 'debit' || acc.type === 'asset' || acc.type === 'expense'
 
-    let runningBalance = 0
+    // 1. حساب الرصيد الافتتاحي (Opening Balance) ما قبل fromDate
+    let openingBalance = 0
+    if (fromDate) {
+      const { data: priorLines, error: priorErr } = await supabase
+        .from('journal_lines')
+        .select('debit, credit, entry:journal_entries!inner(date, status, store_id)')
+        .eq('account_id', accountId)
+        .eq('entry.store_id', storeId)
+        .lt('entry.date', fromDate)
+
+      if (!priorErr && priorLines) {
+        for (const pl of priorLines as any[]) {
+          const d = Number(pl.debit || 0)
+          const c = Number(pl.credit || 0)
+          openingBalance += isDebitNature ? (d - c) : (c - d)
+        }
+      }
+    }
+
+    let runningBalance = openingBalance
     let totalDebit = 0
     let totalCredit = 0
 
@@ -456,8 +475,10 @@ export async function getAccountStatement(accountId: string, fromDate?: string, 
       account: acc,
       rows: statementRows,
       summary: {
+        openingBalance,
         totalDebit,
         totalCredit,
+        closingBalance: runningBalance,
         currentBalance: runningBalance,
         movementsCount: statementRows.length,
         lastMovementDate,

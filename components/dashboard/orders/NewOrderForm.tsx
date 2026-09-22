@@ -9,6 +9,7 @@ interface Product {
   id: string
   name: string
   price: number
+  cost_price?: number | null
   compare_price?: number | null
   sku: string | null
   stock_available: number | null
@@ -34,6 +35,7 @@ interface LineItem {
   productId: string
   name: string
   unitPrice: number
+  costPrice?: number
   quantity: number
   max: number | null
 }
@@ -116,6 +118,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
 
   // الحسابات المالية
   const subtotal = items.reduce((s, i) => s + i.unitPrice * i.quantity, 0)
+  const totalCost = items.reduce((s, i) => s + (i.costPrice || 0) * i.quantity, 0)
   const totalAmount = subtotal
   const effectiveAmountPaid = mode === 'pos' ? totalAmount : (parseFloat(amountPaid) || 0)
   const amountRemaining = Math.max(0, totalAmount - effectiveAmountPaid)
@@ -128,7 +131,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
       const [prodRes, catRes] = await Promise.all([
         supabase
           .from('products')
-          .select('id, name, price, compare_price, sku, stock_available, track_stock, thumbnail_url, category_id')
+          .select('id, name, price, cost_price, compare_price, sku, stock_available, track_stock, thumbnail_url, category_id')
           .eq('store_id', storeId)
           .eq('is_active', true)
           .order('name', { ascending: true }),
@@ -200,6 +203,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
         productId: product.id,
         name: product.name,
         unitPrice: product.price,
+        costPrice: Number(product.cost_price || 0),
         quantity: 1,
         max: product.track_stock ? (product.stock_available ?? null) : null,
       }]
@@ -654,17 +658,24 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
                   <div key={item.productId} className="flex items-center justify-between gap-2 rounded-xl bg-slate-950 p-2.5 border border-white/5">
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-bold text-white">{item.name}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <input
-                          type="number"
-                          value={item.unitPrice}
-                          onChange={e => updatePrice(item.productId, e.target.value)}
-                          min="0"
-                          step="0.01"
-                          dir="ltr"
-                          className="w-20 rounded border border-white/10 bg-slate-900 px-1.5 py-0.5 text-xs text-emerald-400 font-mono font-bold outline-none focus:border-sky-500"
-                        />
-                        <span className="text-[10px] text-slate-500">{currencyCode}</span>
+                      <div className="flex flex-wrap items-center gap-2 mt-1">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] text-slate-400">البيع:</span>
+                          <input
+                            type="number"
+                            value={item.unitPrice}
+                            onChange={e => updatePrice(item.productId, e.target.value)}
+                            min="0"
+                            step="0.01"
+                            dir="ltr"
+                            className="w-16 rounded border border-white/10 bg-slate-900 px-1.5 py-0.5 text-xs text-emerald-400 font-mono font-bold outline-none focus:border-sky-500"
+                          />
+                        </div>
+                        {Number(item.costPrice || 0) > 0 && (
+                          <span className="text-[10px] font-mono text-slate-400 bg-slate-900 px-1.5 py-0.5 rounded border border-white/5" title="تكلفة الصنف المعتمدة">
+                            التكلفة: {fmt(item.costPrice || 0)}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -691,14 +702,19 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
                     </div>
 
                     {/* إجمالي البند وزر الحذف */}
-                    <div className="text-left shrink-0 min-w-[65px]">
+                    <div className="text-left shrink-0 min-w-[70px]">
                       <p className="text-xs font-bold font-mono text-white" dir="ltr">
                         {fmt(item.unitPrice * item.quantity)}
                       </p>
+                      {Number(item.costPrice || 0) > 0 && (
+                        <p className="text-[10px] font-mono text-slate-400" dir="ltr" title="إجمالي تكلفة البند">
+                          تكلفة: {fmt((item.costPrice || 0) * item.quantity)}
+                        </p>
+                      )}
                       <button
                         type="button"
                         onClick={() => updateQty(item.productId, 0)}
-                        className="text-[11px] text-rose-400 hover:underline mt-0.5"
+                        className="text-[11px] text-rose-400 hover:underline mt-0.5 block mr-auto"
                       >
                         حذف
                       </button>
@@ -893,9 +909,22 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
             {/* ملخص الإجمالي وزر الحفظ */}
             <div className="pt-3 border-t border-white/10 space-y-3">
               <div className="flex items-center justify-between text-slate-400 text-xs">
-                <span>المجموع الفرعي:</span>
+                <span>المجموع الفرعي (البيع):</span>
                 <span className="font-mono font-bold text-white">{fmt(subtotal)} {currencyCode}</span>
               </div>
+
+              {totalCost > 0 && (
+                <div className="rounded-xl border border-white/5 bg-slate-950 p-2.5 space-y-1 text-[11px] font-mono">
+                  <div className="flex items-center justify-between text-slate-400">
+                    <span>إجمالي تكلفة الأصناف:</span>
+                    <span dir="ltr">{fmt(totalCost)} {currencyCode}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-emerald-400 font-bold border-t border-white/5 pt-1">
+                    <span>صافي الربح التقديري:</span>
+                    <span dir="ltr">+{fmt(subtotal - totalCost)} {currencyCode} ({subtotal > 0 ? (((subtotal - totalCost) / subtotal) * 100).toFixed(1) : 0}%)</span>
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-baseline justify-between pt-1 border-t border-white/5">
                 <span className="font-black text-white text-sm">الإجمالي النهائي:</span>

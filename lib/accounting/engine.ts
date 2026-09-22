@@ -34,6 +34,20 @@ export async function getOrEnsureAccount(
   type: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense',
   normalBalance: 'debit' | 'credit' = type === 'asset' || type === 'expense' ? 'debit' : 'credit'
 ): Promise<string> {
+  // 0. فحص ربط الصندوق الافتراضي إن كان الحساب المطلوب هو حساب الصندوق
+  if (code === '1001' || defaultName.includes('صندوق') || defaultName.includes('الصندوق')) {
+    const { data: defBox } = await supabase
+      .from('cash_boxes')
+      .select('account_id')
+      .eq('store_id', storeId)
+      .eq('is_default', true)
+      .maybeSingle()
+
+    if (defBox?.account_id) {
+      return defBox.account_id
+    }
+  }
+
   // 1. البحث بالكود أولاً
   const { data: byCode } = await supabase
     .from('accounts')

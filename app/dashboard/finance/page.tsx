@@ -3,6 +3,8 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
 
+import { getDefaultCashBox, getCashBalance } from '@/lib/accounting/treasury'
+
 export const metadata = {
   title: 'الإدارة المالية — Bazarko ERP',
 }
@@ -15,24 +17,26 @@ export default async function FinanceHubPage() {
   const storeId = await getStoreForUser(supabase, user.id)
   if (!storeId) redirect('/onboarding')
 
+  const defaultBox = await getDefaultCashBox(supabase, storeId)
+  const cashBalance = defaultBox
+    ? await getCashBalance(supabase, storeId, defaultBox.id, defaultBox.opening_balance)
+    : 0
+
   const [
     { data: store },
     { count: chequesCount },
     { count: banksCount },
     { count: receiptsCount },
     { count: paymentsCount },
-    { data: treasuryBox },
   ] = await Promise.all([
     supabase.from('stores').select('id, name, currency_code, plan').eq('id', storeId).single(),
     supabase.from('cheques').select('id', { count: 'exact', head: true }).eq('store_id', storeId),
     supabase.from('bank_accounts').select('id', { count: 'exact', head: true }).eq('store_id', storeId),
     supabase.from('vouchers').select('id', { count: 'exact', head: true }).eq('store_id', storeId).eq('type', 'receipt'),
     supabase.from('vouchers').select('id', { count: 'exact', head: true }).eq('store_id', storeId).eq('type', 'payment'),
-    supabase.from('cash_boxes').select('balance').eq('store_id', storeId).maybeSingle(),
   ])
 
   const currency = store?.currency_code || 'ILS'
-  const cashBalance = Number(treasuryBox?.balance || 0)
   const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })
 
   const modules = [

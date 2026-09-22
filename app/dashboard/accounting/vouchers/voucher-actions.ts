@@ -289,33 +289,41 @@ export async function createVoucher(input: CreateVoucherInput) {
 
     if (voucherErr) throw voucherErr
 
-    // 2. تسجيل حركة الصندوق الفعلي إذا كان هناك جزء نقدي
+    // 2. تسجيل حركة الصندوق الفعلي إذا كان هناك جزء نقدي ولم ينشئها المشغل تلقائياً
     if (effectiveCash > 0) {
-      // جلب الصندوق الافتراضي إن لم يحدد
-      let cashBoxId = input.cash_box_id
-      if (!cashBoxId) {
-        const { data: defBox } = await supabase
-          .from('cash_boxes')
-          .select('id')
-          .eq('store_id', storeId)
-          .eq('is_default', true)
-          .maybeSingle()
-        cashBoxId = defBox?.id || null
-      }
+      const { data: existingMovement } = await supabase
+        .from('cash_movements')
+        .select('id')
+        .eq('ref_id', voucher.id)
+        .maybeSingle()
 
-      await supabase.from('cash_movements').insert({
-        store_id: storeId,
-        cash_box_id: cashBoxId,
-        direction: input.type === 'receipt' ? 'in' : 'out',
-        amount: effectiveCash,
-        source: input.type === 'receipt' ? 'receipt_voucher' : 'payment_voucher',
-        ref_id: voucher.id,
-        party_name: input.party_name.trim(),
-        payment_method: 'cash',
-        description: `سند ${input.type === 'receipt' ? 'قبض' : 'صرف'} ${voucherNumber} — ${input.description.trim()}`,
-        date: input.date,
-        created_by: user.id,
-      })
+      if (!existingMovement) {
+        // جلب الصندوق الافتراضي إن لم يحدد
+        let cashBoxId = input.cash_box_id
+        if (!cashBoxId) {
+          const { data: defBox } = await supabase
+            .from('cash_boxes')
+            .select('id')
+            .eq('store_id', storeId)
+            .eq('is_default', true)
+            .maybeSingle()
+          cashBoxId = defBox?.id || null
+        }
+
+        await supabase.from('cash_movements').insert({
+          store_id: storeId,
+          cash_box_id: cashBoxId,
+          direction: input.type === 'receipt' ? 'in' : 'out',
+          amount: effectiveCash,
+          source: 'voucher',
+          ref_id: voucher.id,
+          party_name: input.party_name.trim(),
+          payment_method: 'cash',
+          description: `سند ${input.type === 'receipt' ? 'قبض' : 'صرف'} ${voucherNumber} — ${input.description.trim()}`,
+          date: input.date,
+          created_by: user.id,
+        })
+      }
     }
 
     // 3. تحديث الحساب البنكي إذا كان الدفع بنكي
@@ -527,6 +535,9 @@ export async function createVoucher(input: CreateVoucherInput) {
       console.error('Error posting GL for voucher:', glErr)
     }
 
+    revalidatePath('/dashboard')
+    revalidatePath('/dashboard/accounting')
+    revalidatePath('/dashboard/finance')
     revalidatePath('/dashboard/accounting/receipts')
     revalidatePath('/dashboard/accounting/payments')
     revalidatePath('/dashboard/accounting/treasury')
@@ -723,6 +734,9 @@ export async function deleteVoucher(voucherId: string) {
       details: { deletedVoucher: v },
     })
 
+    revalidatePath('/dashboard')
+    revalidatePath('/dashboard/accounting')
+    revalidatePath('/dashboard/finance')
     revalidatePath('/dashboard/accounting/receipts')
     revalidatePath('/dashboard/accounting/payments')
     revalidatePath('/dashboard/accounting/treasury')
@@ -734,5 +748,219 @@ export async function deleteVoucher(voucherId: string) {
   } catch (err: any) {
     console.error('Error deleting voucher:', err)
     return { success: false, error: err.message || 'فشل حذف السند' }
+  }
+}
+
+export interface UpdateVoucherInput {
+  id: string
+  date: string
+  payment_method: 'cash' | 'cheque' | 'split' | 'bank' | 'transfer'
+  amount: number
+  cash_amount?: number
+  checks_amount?: number
+  cash_box_id?: string | null
+  bank_account_id?: string | null
+  customer_id?: string | null
+  supplier_id?: string | null
+  party_name: string
+  category?: string | null
+  description: string
+  reference?: string | null
+  checks?: ChequeItem[]
+}
+
+/**
+ * تعديل السند المحاسبي وعكس الأثر القديم وتحديث حركة الخزينة والشيكات
+ */
+export async function updateVoucher(input: UpdateVoucherInput) {
+  try {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { success: false, error: 'يجب تسجيل الدخول أولاً' }
+
+    const storeId = await getStoreForUser(supabase, user.id)
+    if (!storeId) return { success: false, error: 'المتجر غير موجود' }
+
+    // التحقق من قفل الفترة المحاسبية لتاريخ السند الجديد
+    const periodCheck = await checkIsPeriodClosed(storeId, input.date)
+    if (periodCheck.isClosed) {
+      return { success: false, error: `لا يمكن تعديل سند في فترة محاسبية مقفلة (${periodCheck.periodName})` }
+    }
+
+    const { data: oldV, error: oldErr } = await supabase
+      .from('vouchers')
+      .select('*')
+      .eq('id', input.id)
+      .eq('store_id', storeId)
+      .single()
+
+    if (oldErr || !oldV) return { success: false, error: 'السند غير موجود' }
+
+    const totalAmount = Number(input.amount)
+    if (isNaN(totalAmount) || totalAmount <= 0) {
+      return { success: false, error: 'يرجى إدخال مبلغ صحيح وموجب للسند' }
+    }
+
+    let effectiveCash = 0
+    let effectiveChecks = 0
+    if (input.payment_method === 'cash') {
+      effectiveCash = totalAmount
+    } else if (input.payment_method === 'cheque') {
+      effectiveChecks = totalAmount
+    } else if (input.payment_method === 'split') {
+      effectiveCash = Number(input.cash_amount || 0)
+      effectiveChecks = Number(input.checks_amount || 0)
+    }
+
+    // تحديث جدول vouchers
+    const { data: updatedVoucher, error: updErr } = await supabase
+      .from('vouchers')
+      .update({
+        date: input.date,
+        amount: totalAmount,
+        cash_amount: effectiveCash,
+        checks_amount: effectiveChecks,
+        checks_data: input.checks || [],
+        cash_box_id: (effectiveCash > 0 && input.cash_box_id) ? input.cash_box_id : null,
+        bank_account_id: input.bank_account_id || null,
+        customer_id: input.customer_id || null,
+        supplier_id: input.supplier_id || null,
+        party_name: input.party_name.trim(),
+        payment_method: input.payment_method,
+        category: input.category || null,
+        description: input.description.trim(),
+        reference: input.reference?.trim() || null,
+      })
+      .eq('id', input.id)
+      .select('*')
+      .single()
+
+    if (updErr) throw updErr
+
+    // تحديث حركة الخزينة المرتبطة
+    if (effectiveCash > 0) {
+      const { data: existMovement } = await supabase
+        .from('cash_movements')
+        .select('id')
+        .eq('ref_id', input.id)
+        .maybeSingle()
+
+      let boxId = input.cash_box_id
+      if (!boxId) {
+        const { data: defBox } = await supabase
+          .from('cash_boxes')
+          .select('id')
+          .eq('store_id', storeId)
+          .eq('is_default', true)
+          .maybeSingle()
+        boxId = defBox?.id || null
+      }
+
+      if (existMovement) {
+        await supabase
+          .from('cash_movements')
+          .update({
+            cash_box_id: boxId,
+            amount: effectiveCash,
+            party_name: input.party_name.trim(),
+            description: `سند ${oldV.type === 'receipt' ? 'قبض' : 'صرف'} ${oldV.voucher_number} — ${input.description.trim()}`,
+            date: input.date,
+          })
+          .eq('id', existMovement.id)
+      } else {
+        await supabase
+          .from('cash_movements')
+          .insert({
+            store_id: storeId,
+            cash_box_id: boxId,
+            direction: oldV.type === 'receipt' ? 'in' : 'out',
+            amount: effectiveCash,
+            source: 'voucher',
+            ref_id: input.id,
+            party_name: input.party_name.trim(),
+            payment_method: 'cash',
+            description: `سند ${oldV.type === 'receipt' ? 'قبض' : 'صرف'} ${oldV.voucher_number} — ${input.description.trim()}`,
+            date: input.date,
+            created_by: user.id,
+          })
+      }
+    } else {
+      // إذا كان السند لم يعد نقدياً، نحذف الحركة النقدية
+      await supabase
+        .from('cash_movements')
+        .delete()
+        .eq('ref_id', input.id)
+        .eq('store_id', storeId)
+    }
+
+    // تحديث الشيكات المرتبطة
+    await supabase.from('checks').delete().eq('voucher_id', input.id).eq('store_id', storeId)
+    if (input.checks && input.checks.length > 0) {
+      const isReceipt = oldV.type === 'receipt'
+      const checkRows = input.checks.map(c => ({
+        store_id: storeId,
+        type: isReceipt ? 'received' : 'issued',
+        check_number: c.check_number.trim(),
+        bank_name: c.bank_name.trim(),
+        bank_code: c.bank_code?.trim() || null,
+        branch_name: c.branch_name?.trim() || null,
+        branch_code: c.branch_code?.trim() || null,
+        account_number: c.account_number?.trim() || null,
+        drawer_name: isReceipt ? (c.drawer_name?.trim() || input.party_name.trim()) : null,
+        payee_name: !isReceipt ? (c.payee_name?.trim() || input.party_name.trim()) : null,
+        amount: Number(c.amount),
+        currency: 'ILS',
+        exchange_rate: 1.0,
+        amount_ils: Number(c.amount),
+        due_date: c.due_date,
+        issue_date: c.date || input.date,
+        voucher_id: input.id,
+        status: 'in_portfolio',
+        customer_id: input.customer_id || null,
+        supplier_id: input.supplier_id || null,
+        notes: c.notes?.trim() || `محرر بموجب سند ${isReceipt ? 'قبض' : 'صرف'} ${oldV.voucher_number}`,
+        images: c.images || [],
+        created_by: user.id,
+      }))
+      await supabase.from('checks').insert(checkRows)
+    }
+
+    // إعادة ترحيل القيد في دفتر الأستاذ العام
+    try {
+      await reverseJournalEntry(input.id, `تعديل سند #${oldV.voucher_number}`, user.id)
+      if (oldV.type === 'receipt') {
+        await postReceiptVoucherEntry(input.id, user.id)
+      } else {
+        await postPaymentVoucherEntry(input.id, user.id)
+      }
+    } catch (glErr) {
+      console.error('Error updating voucher GL entry:', glErr)
+    }
+
+    // توثيق في سجل التدقيق المالي
+    await logFinancialEvent({
+      storeId,
+      entityType: 'voucher',
+      entityId: input.id,
+      entityLabel: oldV.voucher_number,
+      action: 'update',
+      actorId: user.id,
+      details: { old: oldV, updated: updatedVoucher },
+    })
+
+    revalidatePath('/dashboard')
+    revalidatePath('/dashboard/accounting')
+    revalidatePath('/dashboard/finance')
+    revalidatePath('/dashboard/accounting/receipts')
+    revalidatePath('/dashboard/accounting/payments')
+    revalidatePath('/dashboard/accounting/treasury')
+    revalidatePath('/dashboard/cheques')
+    revalidatePath('/dashboard/customers')
+    revalidatePath('/dashboard/suppliers')
+
+    return { success: true, voucher: updatedVoucher }
+  } catch (err: any) {
+    console.error('Error updating voucher:', err)
+    return { success: false, error: err.message || 'فشل تعديل السند' }
   }
 }

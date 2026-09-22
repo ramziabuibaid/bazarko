@@ -38,11 +38,19 @@ export async function generateAndPrintPdf({
       logging: false,
       backgroundColor: '#ffffff',
       onclone: (clonedDoc) => {
-        // التأكد من إزالة أي كلاسات مخفية أو ألوان داكنة
+        // التأكد من إزالة أي كلاسات مخفية أو ألوان داكنة وتثبيت الاتجاه RTL
         const clonedEl = elementId ? clonedDoc.getElementById(elementId) : null
         if (clonedEl) {
           clonedEl.style.backgroundColor = '#ffffff'
           clonedEl.style.color = '#0f172a'
+          clonedEl.style.direction = 'rtl'
+          clonedEl.style.boxShadow = 'none'
+          clonedEl.style.border = 'none'
+          if (format === 'thermal') {
+            clonedEl.style.width = '300px'
+            clonedEl.style.maxWidth = '300px'
+            clonedEl.style.padding = '8px'
+          }
         }
       },
     })

@@ -11,6 +11,7 @@ interface Product {
   name: string
   sku: string | null
   price: number
+  cost_price?: number | null
   thumbnail_url: string | null
 }
 
@@ -28,6 +29,7 @@ interface LineItem {
   sku: string
   quantity: number
   unit_price: number
+  cost_price?: number
 }
 
 let keySeq = 0
@@ -46,6 +48,7 @@ interface PrefillItem {
   sku: string
   quantity: number
   unit_price: number
+  cost_price?: number
 }
 
 interface Prefill {
@@ -97,8 +100,8 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
   // ── البنود ───────────────────────────────────────────────────
   const [items, setItems] = useState<LineItem[]>(
     prefill?.items.length
-      ? prefill.items.map(i => ({ key: keySeq++, product_id: i.product_id, name: i.name, sku: i.sku, quantity: i.quantity, unit_price: i.unit_price }))
-      : [{ key: keySeq++, product_id: null, name: '', sku: '', quantity: 1, unit_price: 0 }]
+      ? prefill.items.map(i => ({ key: keySeq++, product_id: i.product_id, name: i.name, sku: i.sku, quantity: i.quantity, unit_price: i.unit_price, cost_price: Number(i.cost_price || 0) }))
+      : [{ key: keySeq++, product_id: null, name: '', sku: '', quantity: 1, unit_price: 0, cost_price: 0 }]
   )
 
   // ── طريقة الدفع ──────────────────────────────────────────────
@@ -117,6 +120,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
   const [error, setError]                   = useState('')
 
   const subtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0)
+  const totalCost = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.cost_price) || 0), 0)
   const computedDiscount = discountType === 'percent'
     ? (subtotal * (Number(discountValue) || 0)) / 100
     : (Number(discountValue) || 0)
@@ -141,7 +145,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
     if (!q.trim()) { setProductResults([]); return }
     const { data } = await supabase
       .from('products')
-      .select('id, name, sku, price, thumbnail_url')
+      .select('id, name, sku, price, cost_price, thumbnail_url')
       .eq('store_id', storeId)
       .eq('is_active', true)
       .ilike('name', `%${q}%`)
@@ -152,7 +156,18 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
   // ── البنود ───────────────────────────────────────────────────
 
   function addProductToItems(p: Product) {
-    setItems(prev => [...prev, { key: keySeq++, product_id: p.id, name: p.name, sku: p.sku ?? '', quantity: 1, unit_price: p.price }])
+    setItems(prev => [
+      ...prev,
+      {
+        key: keySeq++,
+        product_id: p.id,
+        name: p.name,
+        sku: p.sku ?? '',
+        quantity: 1,
+        unit_price: p.price,
+        cost_price: Number(p.cost_price || 0),
+      },
+    ])
     setProductSearch('')
     setProductResults([])
   }
@@ -285,6 +300,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
         quantity:   i.quantity,
         unit_price: i.unit_price,
         total:      i.quantity * i.unit_price,
+        cost_price: Number(i.cost_price || 0),
       }))
     )
 
@@ -639,6 +655,14 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
                   </p>
                 </div>
               </div>
+              {Number(item.cost_price || 0) > 0 && (
+                <div className="mt-2 flex items-center justify-between text-[11px] rounded bg-white/5 px-2 py-1 text-slate-400">
+                  <span>التكلفة للوحدة: <span className="text-slate-200 font-mono" dir="ltr">{fmt(item.cost_price || 0)} {currencyCode}</span></span>
+                  <span>الربح: <span className={`font-mono font-semibold ${((item.quantity * item.unit_price) - (item.quantity * (item.cost_price || 0))) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`} dir="ltr">
+                    {fmt((item.quantity * item.unit_price) - (item.quantity * (item.cost_price || 0)))} {currencyCode}
+                  </span></span>
+                </div>
+              )}
             </div>
           ))}
           {items.length === 0 && (
@@ -648,60 +672,80 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
 
         {/* ── جدول البنود (ديسكتوب) ── */}
         <div className="hidden md:block overflow-x-auto rounded-xl border border-white/5">
-          <table className="w-full min-w-[500px] text-sm">
+          <table className="w-full min-w-[650px] text-sm">
             <thead>
               <tr className="border-b border-white/5 bg-white/3">
                 <th className="px-3 py-2.5 text-right text-xs text-slate-400">الوصف</th>
-                <th className="w-20 px-3 py-2.5 text-center text-xs text-slate-400">الكمية</th>
-                <th className="w-28 px-3 py-2.5 text-left text-xs text-slate-400">السعر</th>
-                <th className="w-28 px-3 py-2.5 text-left text-xs text-slate-400">الإجمالي</th>
+                <th className="w-16 px-2 py-2.5 text-center text-xs text-slate-400">الكمية</th>
+                <th className="w-24 px-2 py-2.5 text-left text-xs text-slate-400">التكلفة</th>
+                <th className="w-24 px-2 py-2.5 text-left text-xs text-slate-400">سعر البيع</th>
+                <th className="w-24 px-2 py-2.5 text-left text-xs text-slate-400">الإجمالي</th>
+                <th className="w-24 px-2 py-2.5 text-left text-xs text-slate-400">الربح</th>
                 <th className="w-8" />
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {items.map(item => (
-                <tr key={item.key}>
-                  <td className="px-3 py-2">
-                    <input
-                      value={item.name}
-                      onChange={e => updateItem(item.key, 'name', e.target.value)}
-                      placeholder="وصف البند *"
-                      required
-                      className="w-full bg-transparent text-sm text-white outline-none placeholder-slate-600"
-                    />
-                    {item.sku && <p className="text-xs text-slate-600" dir="ltr">{item.sku}</p>}
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    <input
-                      type="number" min="1" step="1"
-                      value={item.quantity}
-                      onChange={e => updateItem(item.key, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
-                      dir="ltr"
-                      className="w-16 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-center text-sm text-white outline-none focus:border-sky-500/50"
-                    />
-                  </td>
-                  <td className="px-3 py-2 text-left">
-                    <input
-                      type="number" min="0" step="0.01"
-                      value={item.unit_price || ''}
-                      onChange={e => updateItem(item.key, 'unit_price', Math.max(0, parseFloat(e.target.value) || 0))}
-                      placeholder="0"
-                      dir="ltr"
-                      className="w-24 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-left text-sm text-white outline-none focus:border-sky-500/50"
-                    />
-                  </td>
-                  <td className="px-3 py-2 text-left text-sm font-semibold text-white" dir="ltr">
-                    {fmt(item.quantity * item.unit_price)}
-                  </td>
-                  <td className="px-3 py-2">
-                    <button type="button" onClick={() => removeItem(item.key)}
-                      className="text-slate-600 hover:text-red-400 transition-colors text-xs">✕</button>
-                  </td>
-                </tr>
-              ))}
+              {items.map(item => {
+                const lineTotal = item.quantity * item.unit_price
+                const lineCost = item.quantity * Number(item.cost_price || 0)
+                const lineProfit = lineTotal - lineCost
+                return (
+                  <tr key={item.key}>
+                    <td className="px-3 py-2">
+                      <input
+                        value={item.name}
+                        onChange={e => updateItem(item.key, 'name', e.target.value)}
+                        placeholder="وصف البند *"
+                        required
+                        className="w-full bg-transparent text-sm text-white outline-none placeholder-slate-600"
+                      />
+                      {item.sku && <p className="text-xs text-slate-600" dir="ltr">{item.sku}</p>}
+                    </td>
+                    <td className="px-2 py-2 text-center">
+                      <input
+                        type="number" min="1" step="1"
+                        value={item.quantity}
+                        onChange={e => updateItem(item.key, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
+                        dir="ltr"
+                        className="w-14 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-center text-sm text-white outline-none focus:border-sky-500/50"
+                      />
+                    </td>
+                    <td className="px-2 py-2 text-left">
+                      <input
+                        type="number" min="0" step="0.01"
+                        value={item.cost_price || ''}
+                        onChange={e => updateItem(item.key, 'cost_price', Math.max(0, parseFloat(e.target.value) || 0))}
+                        placeholder="0"
+                        dir="ltr"
+                        className="w-20 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-left text-xs text-slate-300 font-mono outline-none focus:border-sky-500/50"
+                      />
+                    </td>
+                    <td className="px-2 py-2 text-left">
+                      <input
+                        type="number" min="0" step="0.01"
+                        value={item.unit_price || ''}
+                        onChange={e => updateItem(item.key, 'unit_price', Math.max(0, parseFloat(e.target.value) || 0))}
+                        placeholder="0"
+                        dir="ltr"
+                        className="w-20 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-left text-sm text-white font-mono outline-none focus:border-sky-500/50"
+                      />
+                    </td>
+                    <td className="px-2 py-2 text-left text-sm font-semibold text-white font-mono" dir="ltr">
+                      {fmt(lineTotal)}
+                    </td>
+                    <td className={`px-2 py-2 text-left text-xs font-mono font-semibold ${lineProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`} dir="ltr">
+                      {fmt(lineProfit)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <button type="button" onClick={() => removeItem(item.key)}
+                        className="text-slate-600 hover:text-red-400 transition-colors text-xs">✕</button>
+                    </td>
+                  </tr>
+                )
+              })}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-3 py-6 text-center text-sm text-slate-500">
+                  <td colSpan={7} className="px-3 py-6 text-center text-sm text-slate-500">
                     لا توجد بنود
                   </td>
                 </tr>
@@ -712,7 +756,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
 
         <button
           type="button"
-          onClick={() => setItems(prev => [...prev, { key: keySeq++, product_id: null, name: '', sku: '', quantity: 1, unit_price: 0 }])}
+          onClick={() => setItems(prev => [...prev, { key: keySeq++, product_id: null, name: '', sku: '', quantity: 1, unit_price: 0, cost_price: 0 }])}
           className="w-full rounded-xl border border-dashed border-white/10 py-2.5 text-sm text-slate-400 transition-colors hover:border-sky-500/30 hover:text-sky-400"
         >
           + إضافة بند يدوي
@@ -740,6 +784,26 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
           <span className="text-slate-400">المجموع الفرعي</span>
           <span className="text-white font-mono font-bold" dir="ltr">{fmt(subtotal)} {currencyCode}</span>
         </div>
+
+        {totalCost > 0 && (
+          <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 space-y-1.5 text-xs">
+            <div className="flex items-center justify-between text-slate-300">
+              <span>إجمالي التكلفة التقديرية للبضاعة:</span>
+              <span className="font-mono font-bold text-slate-200" dir="ltr">{fmt(totalCost)} {currencyCode}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-300">مجمل الربح المتوقع:</span>
+              <span className={`font-mono font-bold text-sm ${(total - totalCost) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`} dir="ltr">
+                {fmt(total - totalCost)} {currencyCode}
+                {total > 0 && (
+                  <span className="text-[11px] font-normal mr-1 text-slate-400">
+                    ({(((total - totalCost) / total) * 100).toFixed(1)}%)
+                  </span>
+                )}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* نوع وقيمة الخصم */}
         <div className="rounded-xl border border-white/10 bg-slate-800/60 p-3 space-y-2">

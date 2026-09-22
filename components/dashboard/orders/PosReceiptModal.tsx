@@ -219,83 +219,138 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
             </div>
 
             {/* Receipt Metadata */}
-            <div className="border-b border-dashed border-black py-2.5 text-xs leading-relaxed">
-              <div className="flex justify-between">
-                <span>رقم الفاتورة:</span>
-                <span className="font-bold" dir="ltr">{receipt.orderNumber}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>التاريخ:</span>
-                <span>{dateStr}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>الوقت:</span>
-                <span dir="ltr">{timeStr}</span>
-              </div>
-              {receipt.cashierName && (
-                <div className="flex justify-between">
-                  <span>الكاشير:</span>
-                  <span>{receipt.cashierName}</span>
-                </div>
-              )}
-              <div className="flex justify-between border-t border-dotted border-gray-400 mt-1 pt-1">
-                <span>العميل:</span>
-                <span className="font-semibold">
-                  {receipt.customerName || (isCredit ? 'عميل على الحساب' : 'زبون نقدي')}
-                </span>
-              </div>
-              {receipt.customerPhone && (
-                <div className="flex justify-between">
-                  <span>الهاتف:</span>
-                  <span dir="ltr">{receipt.customerPhone}</span>
-                </div>
-              )}
+            <div className="border-b border-dashed border-black py-2 text-xs leading-relaxed">
+              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', direction: 'rtl' }}>
+                <tbody>
+                  <tr>
+                    <td style={{ textAlign: 'right', padding: '1.5px 0' }} className="text-neutral-700">رقم الفاتورة:</td>
+                    <td style={{ textAlign: 'left', padding: '1.5px 0' }} className="font-bold font-mono" dir="ltr">{receipt.orderNumber}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ textAlign: 'right', padding: '1.5px 0' }} className="text-neutral-700">التاريخ:</td>
+                    <td style={{ textAlign: 'left', padding: '1.5px 0' }}>{dateStr}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ textAlign: 'right', padding: '1.5px 0' }} className="text-neutral-700">الوقت:</td>
+                    <td style={{ textAlign: 'left', padding: '1.5px 0' }} dir="ltr">{timeStr}</td>
+                  </tr>
+                  {receipt.cashierName && (
+                    <tr>
+                      <td style={{ textAlign: 'right', padding: '1.5px 0' }} className="text-neutral-700">الكاشير:</td>
+                      <td style={{ textAlign: 'left', padding: '1.5px 0' }}>{receipt.cashierName}</td>
+                    </tr>
+                  )}
+                  <tr style={{ borderTop: '1px dotted #9ca3af' }}>
+                    <td style={{ textAlign: 'right', padding: '3px 0 1.5px' }} className="text-neutral-700">العميل:</td>
+                    <td style={{ textAlign: 'left', padding: '3px 0 1.5px' }} className="font-semibold">
+                      {receipt.customerName || (isCredit ? 'عميل على الحساب' : 'زبون نقدي')}
+                    </td>
+                  </tr>
+                  {receipt.customerPhone && (
+                    <tr>
+                      <td style={{ textAlign: 'right', padding: '1.5px 0' }} className="text-neutral-700">الهاتف:</td>
+                      <td style={{ textAlign: 'left', padding: '1.5px 0' }} dir="ltr">{receipt.customerPhone}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
 
             {/* Items Table */}
-            <div className="py-2.5 border-b border-dashed border-black text-xs">
-              <div className="flex justify-between font-bold border-b border-black pb-1 mb-1">
-                <span className="w-1/2 text-right">الصنف</span>
-                <span className="w-1/6 text-center">الكمية</span>
-                <span className="w-1/6 text-left">السعر</span>
-                <span className="w-1/6 text-left">الإجمالي</span>
-              </div>
-              <div className="space-y-1.5 pt-1">
-                {receipt.items.map((item, idx) => (
-                  <div key={idx} className="flex justify-between items-start leading-tight">
-                    <span className="w-1/2 text-right font-sans font-medium text-[11px]">
-                      {item.name}
-                    </span>
-                    <span className="w-1/6 text-center font-bold" dir="ltr">
-                      {item.quantity}
-                    </span>
-                    <span className="w-1/6 text-left text-[11px]" dir="ltr">
-                      {fmt(item.unitPrice)}
-                    </span>
-                    <span className="w-1/6 text-left font-bold" dir="ltr">
-                      {fmt(item.totalPrice)}
-                    </span>
-                  </div>
-                ))}
-              </div>
+            <div className="py-2 border-b border-dashed border-black">
+              <table
+                className="w-full text-xs"
+                style={{
+                  width: '100%',
+                  tableLayout: 'fixed',
+                  borderCollapse: 'collapse',
+                  direction: 'rtl',
+                }}
+              >
+                <thead>
+                  <tr className="border-b border-black font-bold text-neutral-900">
+                    <th style={{ width: '48%', textAlign: 'right', paddingBottom: '4px' }}>الصنف</th>
+                    <th style={{ width: '16%', textAlign: 'center', paddingBottom: '4px' }}>الكمية</th>
+                    <th style={{ width: '18%', textAlign: 'left', paddingBottom: '4px' }}>السعر</th>
+                    <th style={{ width: '18%', textAlign: 'left', paddingBottom: '4px' }}>الإجمالي</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-dotted divide-neutral-300">
+                  {receipt.items.map((item, idx) => (
+                    <tr key={idx} className="leading-tight">
+                      <td
+                        style={{
+                          width: '48%',
+                          textAlign: 'right',
+                          padding: '4px 0',
+                          wordBreak: 'break-word',
+                          fontSize: '11px',
+                        }}
+                        className="font-sans font-medium"
+                      >
+                        {item.name}
+                      </td>
+                      <td
+                        style={{
+                          width: '16%',
+                          textAlign: 'center',
+                          padding: '4px 0',
+                          fontSize: '11px',
+                        }}
+                        className="font-bold"
+                        dir="ltr"
+                      >
+                        {item.quantity}
+                      </td>
+                      <td
+                        style={{
+                          width: '18%',
+                          textAlign: 'left',
+                          padding: '4px 0',
+                          fontSize: '11px',
+                        }}
+                        dir="ltr"
+                      >
+                        {fmt(item.unitPrice)}
+                      </td>
+                      <td
+                        style={{
+                          width: '18%',
+                          textAlign: 'left',
+                          padding: '4px 0',
+                          fontSize: '11px',
+                        }}
+                        className="font-bold"
+                        dir="ltr"
+                      >
+                        {fmt(item.totalPrice)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
 
             {/* Financial Summary */}
-            <div className="py-2.5 border-b-2 border-dashed border-black text-xs space-y-1">
-              <div className="flex justify-between">
-                <span>المجموع الفرعي:</span>
-                <span dir="ltr">{fmt(receipt.subtotal)} {receipt.currencyCode}</span>
-              </div>
-              {Number(receipt.discountAmount || 0) > 0 && (
-                <div className="flex justify-between text-neutral-800">
-                  <span>الخصم الممنوح:</span>
-                  <span dir="ltr">- {fmt(receipt.discountAmount!)} {receipt.currencyCode}</span>
-                </div>
-              )}
-              <div className="flex justify-between font-black text-sm border-t border-black pt-1 mt-1">
-                <span>المجموع الإجمالي:</span>
-                <span dir="ltr">{fmt(receipt.totalAmount)} {receipt.currencyCode}</span>
-              </div>
+            <div className="py-2 border-b-2 border-dashed border-black text-xs">
+              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', direction: 'rtl' }}>
+                <tbody>
+                  <tr>
+                    <td style={{ textAlign: 'right', padding: '2px 0' }} className="text-neutral-700">المجموع الفرعي:</td>
+                    <td style={{ textAlign: 'left', padding: '2px 0' }} dir="ltr">{fmt(receipt.subtotal)} {receipt.currencyCode}</td>
+                  </tr>
+                  {Number(receipt.discountAmount || 0) > 0 && (
+                    <tr>
+                      <td style={{ textAlign: 'right', padding: '2px 0' }} className="text-neutral-800">الخصم الممنوح:</td>
+                      <td style={{ textAlign: 'left', padding: '2px 0' }} dir="ltr">- {fmt(receipt.discountAmount!)} {receipt.currencyCode}</td>
+                    </tr>
+                  )}
+                  <tr style={{ borderTop: '1px solid black' }}>
+                    <td style={{ textAlign: 'right', padding: '4px 0 2px' }} className="font-black text-sm">المجموع الإجمالي:</td>
+                    <td style={{ textAlign: 'left', padding: '4px 0 2px' }} className="font-black text-sm" dir="ltr">{fmt(receipt.totalAmount)} {receipt.currencyCode}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
 
             {/* ══════════════════════════════════════════════════════════ */}
@@ -331,32 +386,33 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
               )}
 
               {/* Amounts Details */}
-              <div className="mt-2 space-y-1 text-xs">
-                <div className="flex justify-between font-bold">
-                  <span>المبلغ المستلم / المدفوع:</span>
-                  <span dir="ltr">{fmt(receipt.amountPaid)} {receipt.currencyCode}</span>
-                </div>
-
-                {changeGiven > 0 && (
-                  <div className="flex justify-between font-black text-sm text-neutral-900 border-t border-dotted border-black pt-1">
-                    <span>الباقي المُعاد للزبون:</span>
-                    <span dir="ltr">{fmt(changeGiven)} {receipt.currencyCode}</span>
-                  </div>
-                )}
-
-                {remaining > 0 && (
-                  <div className="flex justify-between font-black text-sm text-black border-t border-dotted border-black pt-1">
-                    <span>المتبقي في الذمة:</span>
-                    <span dir="ltr">{fmt(remaining)} {receipt.currencyCode}</span>
-                  </div>
-                )}
-
-                {receipt.customerBalance !== undefined && receipt.customerBalance !== null && (
-                  <div className="flex justify-between text-[11px] text-neutral-700 border-t border-neutral-300 pt-0.5">
-                    <span>إجمالي رصيد العميل الحالي:</span>
-                    <span dir="ltr" className="font-bold">{fmt(receipt.customerBalance)} {receipt.currencyCode}</span>
-                  </div>
-                )}
+              <div className="mt-2 text-xs">
+                <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', direction: 'rtl' }}>
+                  <tbody>
+                    <tr>
+                      <td style={{ textAlign: 'right', padding: '2px 0' }} className="font-bold">المبلغ المستلم / المدفوع:</td>
+                      <td style={{ textAlign: 'left', padding: '2px 0' }} className="font-bold" dir="ltr">{fmt(receipt.amountPaid)} {receipt.currencyCode}</td>
+                    </tr>
+                    {changeGiven > 0 && (
+                      <tr style={{ borderTop: '1px dotted black' }}>
+                        <td style={{ textAlign: 'right', padding: '3px 0 2px' }} className="font-black text-sm">الباقي المُعاد للزبون:</td>
+                        <td style={{ textAlign: 'left', padding: '3px 0 2px' }} className="font-black text-sm" dir="ltr">{fmt(changeGiven)} {receipt.currencyCode}</td>
+                      </tr>
+                    )}
+                    {remaining > 0 && (
+                      <tr style={{ borderTop: '1px dotted black' }}>
+                        <td style={{ textAlign: 'right', padding: '3px 0 2px' }} className="font-black text-sm">المتبقي في الذمة:</td>
+                        <td style={{ textAlign: 'left', padding: '3px 0 2px' }} className="font-black text-sm" dir="ltr">{fmt(remaining)} {receipt.currencyCode}</td>
+                      </tr>
+                    )}
+                    {receipt.customerBalance !== undefined && receipt.customerBalance !== null && (
+                      <tr style={{ borderTop: '1px solid #d1d5db' }}>
+                        <td style={{ textAlign: 'right', padding: '3px 0 2px', fontSize: '11px' }} className="text-neutral-700">إجمالي رصيد العميل الحالي:</td>
+                        <td style={{ textAlign: 'left', padding: '3px 0 2px', fontSize: '11px' }} className="font-bold" dir="ltr">{fmt(receipt.customerBalance)} {receipt.currencyCode}</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
 

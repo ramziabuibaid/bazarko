@@ -83,6 +83,7 @@ const navGroups: NavGroup[] = [
       { href: '/dashboard/finance', label: 'لوحة الإدارة المالية', icon: '💵' },
       { href: '/dashboard/accounting-hub', label: 'لوحة المحاسبة والتقارير', icon: '⚖️' },
       { href: '/dashboard/accounting/accounts', label: 'شجرة الحسابات (دليل)', icon: '🌳' },
+      { href: '/dashboard/accounting/statement', label: 'كشف حساب محاسبي', icon: '📜' },
       { href: '/dashboard/accounting/journal', label: 'قيود اليومية العامة', icon: '⚖️' },
       { href: '/dashboard/accounting/reports', label: 'التقارير المالية والختامية', icon: '📊' },
       { href: '/dashboard/accounting/receipts', label: 'سندات القبض', icon: '📥' },
