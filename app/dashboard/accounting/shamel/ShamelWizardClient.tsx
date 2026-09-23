@@ -212,7 +212,7 @@ export default function ShamelWizardClient({
   // Google Drive Sync State
   const [syncConfig, setSyncConfig] = useState(initialSyncConfig || {})
   const [folderIdInput, setFolderIdInput] = useState(initialSyncConfig?.gdrive_folder_id || '')
-  const [folderNameInput, setFolderNameInput] = useState(initialSyncConfig?.gdrive_folder_name || 'Shamel_Backups')
+  const [folderNameInput, setFolderNameInput] = useState(initialSyncConfig?.gdrive_folder_name || '')
   const [autoSyncInput, setAutoSyncInput] = useState(initialSyncConfig?.auto_sync_enabled || false)
   const [syncIntervalInput, setSyncIntervalInput] = useState(initialSyncConfig?.sync_interval_hours || 24)
   const [savingConfig, setSavingConfig] = useState(false)
@@ -613,6 +613,9 @@ export default function ShamelWizardClient({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'فشل حفظ الإعدادات')
       setSyncConfig(data.config)
+      if (data.config?.gdrive_folder_name) {
+        setFolderNameInput(data.config.gdrive_folder_name)
+      }
       setSuccessMsg('تم حفظ إعدادات Google Drive بنجاح.')
     } catch (err: any) {
       setErrorMsg(`خطأ: ${err.message}`)
@@ -634,6 +637,12 @@ export default function ShamelWizardClient({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'فشلت المزامنة')
       setSuccessMsg(data.message)
+      if (data.config) {
+        setSyncConfig(data.config)
+        if (data.config.gdrive_folder_name) {
+          setFolderNameInput(data.config.gdrive_folder_name)
+        }
+      }
       router.refresh()
     } catch (err: any) {
       setErrorMsg(`فشلت المزامنة: ${err.message}`)
@@ -1809,27 +1818,101 @@ export default function ShamelWizardClient({
             </button>
           </div>
 
+          {/* Sync Status Banner */}
+          {syncConfig?.last_sync_status && syncConfig.last_sync_status !== 'idle' && (
+            <div
+              className={`p-4 rounded-xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs ${
+                syncConfig.last_sync_status === 'success'
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+                  : syncConfig.last_sync_status === 'error'
+                  ? 'bg-rose-500/10 border-rose-500/20 text-rose-300'
+                  : 'bg-amber-500/10 border-amber-500/20 text-amber-300'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <span className="text-base">
+                  {syncConfig.last_sync_status === 'success' ? '✅' : syncConfig.last_sync_status === 'error' ? '❌' : '⏳'}
+                </span>
+                <div>
+                  <div className="font-bold">
+                    {syncConfig.last_sync_status === 'success'
+                      ? 'آخر مزامنة سحابية تمت بنجاح'
+                      : syncConfig.last_sync_status === 'error'
+                      ? 'تعذرت آخر محاولة مزامنة سحابية'
+                      : 'المزامنة جارية الآن...'}
+                  </div>
+                  <div className="text-[11px] opacity-90 mt-0.5">
+                    {syncConfig.last_sync_message || 'لا توجد رسالة تفصيلية.'}
+                  </div>
+                </div>
+              </div>
+              {syncConfig.last_sync_at && (
+                <div className="text-[11px] text-slate-400 font-mono self-end md:self-center">
+                  {new Date(syncConfig.last_sync_at).toLocaleString('ar-u-nu-latn')}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Detailed counts from last report if available */}
+          {syncConfig?.last_sync_report?.counts && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-slate-950/60 border border-white/5 rounded-xl p-3 text-center">
+                <div className="text-[11px] text-slate-400 font-semibold mb-1">دليل الحسابات</div>
+                <div className="text-lg font-bold font-mono text-sky-400">
+                  {(syncConfig.last_sync_report.counts.accountsCount || 0).toLocaleString('ar-u-nu-latn')}
+                </div>
+              </div>
+              <div className="bg-slate-950/60 border border-white/5 rounded-xl p-3 text-center">
+                <div className="text-[11px] text-slate-400 font-semibold mb-1">الزبائن والموردين</div>
+                <div className="text-lg font-bold font-mono text-emerald-400">
+                  {(syncConfig.last_sync_report.counts.customersCount || 0).toLocaleString('ar-u-nu-latn')}
+                </div>
+              </div>
+              <div className="bg-slate-950/60 border border-white/5 rounded-xl p-3 text-center">
+                <div className="text-[11px] text-slate-400 font-semibold mb-1">الأصناف والمخزون</div>
+                <div className="text-lg font-bold font-mono text-indigo-400">
+                  {(syncConfig.last_sync_report.counts.productsCount || 0).toLocaleString('ar-u-nu-latn')}
+                </div>
+              </div>
+              <div className="bg-slate-950/60 border border-white/5 rounded-xl p-3 text-center">
+                <div className="text-[11px] text-slate-400 font-semibold mb-1">محفظة الشيكات</div>
+                <div className="text-lg font-bold font-mono text-amber-400">
+                  {(syncConfig.last_sync_report.counts.chequesCount || 0).toLocaleString('ar-u-nu-latn')}
+                </div>
+              </div>
+            </div>
+          )}
+
           <form onSubmit={handleSaveGdriveConfig} className="space-y-4 max-w-2xl">
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                معرف مجلد Google Drive (Folder ID):
+                معرف أو رابط مجلد Google Drive (Folder ID / Link):
               </label>
               <input
                 type="text"
                 value={folderIdInput}
-                onChange={e => setFolderIdInput(e.target.value)}
-                placeholder="معرف مجلد فرعك في Google Drive..."
+                onChange={e => {
+                  const val = e.target.value.trim()
+                  const match = val.match(/\/folders\/([a-zA-Z0-9_-]+)/)
+                  setFolderIdInput(match ? match[1] : val)
+                }}
+                placeholder="الصق رابط المجلد أو معرفه (Folder ID)..."
                 className="w-full px-3.5 py-2.5 text-sm border border-white/10 bg-slate-950 text-white rounded-xl font-mono outline-none focus:border-sky-500"
                 required
               />
+              <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                يمكنك لصق رابط المجلد مباشرة من المتصفح، وسيتم استخراج المعرف تلقائياً. تأكد من ضبط إذن المجلد إلى «أي شخص لديه الرابط يمكنه العرض» (Anyone with the link can view).
+              </p>
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-300 mb-1.5">اسم المجلد:</label>
+              <label className="block text-xs font-bold text-slate-300 mb-1.5">اسم المجلد أو الفرع:</label>
               <input
                 type="text"
                 value={folderNameInput}
                 onChange={e => setFolderNameInput(e.target.value)}
+                placeholder="مثال: ma3rwdaljdede أو Shamel_Backups"
                 className="w-full px-3.5 py-2.5 text-sm border border-white/10 bg-slate-950 text-white rounded-xl outline-none focus:border-sky-500"
               />
             </div>
@@ -1852,7 +1935,7 @@ export default function ShamelWizardClient({
                 disabled={savingConfig}
                 className="px-6 py-2.5 bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-bold rounded-xl disabled:opacity-50 transition"
               >
-                {savingConfig ? 'جاري الحفظ...' : 'حفظ الإعدادات'}
+                {savingConfig ? 'جاري الحفظ...' : 'حفظ التعديلات'}
               </button>
             </div>
           </form>

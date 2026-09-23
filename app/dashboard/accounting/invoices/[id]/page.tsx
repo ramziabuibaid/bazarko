@@ -34,7 +34,7 @@ export default async function InvoiceDetailPage({ params }: Props) {
   const [{ data: items }, { data: linkedOrder }] = await Promise.all([
     supabase
       .from('invoice_items')
-      .select('id, name, sku, quantity, unit_price, total')
+      .select('id, name, sku, quantity, unit_price, total, cost_price')
       .eq('invoice_id', invoice.id)
       .order('id'),
     invoice.order_id

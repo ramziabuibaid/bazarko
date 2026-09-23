@@ -19,6 +19,7 @@ interface InvoiceItem {
   quantity: number
   unit_price: number
   total: number
+  cost_price?: number
 }
 
 interface Invoice {
@@ -462,26 +463,78 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, sto
               <th className="pb-2 text-right text-xs font-semibold uppercase tracking-widest text-slate-400 print:text-gray-500">#</th>
               <th className="pb-2 text-right text-xs font-semibold uppercase tracking-widest text-slate-400 print:text-gray-500">الوصف</th>
               <th className="pb-2 text-center text-xs font-semibold uppercase tracking-widest text-slate-400 print:text-gray-500">الكمية</th>
-              <th className="pb-2 text-left text-xs font-semibold uppercase tracking-widest text-slate-400 print:text-gray-500">السعر</th>
+              {items.some(i => Number(i.cost_price || 0) > 0) && (
+                <th className="pb-2 text-left text-xs font-semibold uppercase tracking-widest text-slate-400 print:hidden">التكلفة</th>
+              )}
+              <th className="pb-2 text-left text-xs font-semibold uppercase tracking-widest text-slate-400 print:text-gray-500">سعر البيع</th>
               <th className="pb-2 text-left text-xs font-semibold uppercase tracking-widest text-slate-400 print:text-gray-500">الإجمالي</th>
+              {items.some(i => Number(i.cost_price || 0) > 0) && (
+                <th className="pb-2 text-left text-xs font-semibold uppercase tracking-widest text-slate-400 print:hidden">الربح</th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5 print:divide-gray-200">
-            {items.map((item, i) => (
-              <tr key={item.id}>
-                <td className="py-3 text-slate-500 print:text-gray-400 text-xs">{i + 1}</td>
-                <td className="py-3">
-                  <p className="font-medium text-white print:text-black">{item.name}</p>
-                  {item.sku && <p className="text-xs text-slate-500 print:text-gray-400" dir="ltr">{item.sku}</p>}
-                </td>
-                <td className="py-3 text-center text-slate-300 print:text-gray-600" dir="ltr">{item.quantity}</td>
-                <td className="py-3 text-left text-slate-300 print:text-gray-600" dir="ltr">{fmt(item.unit_price)} {currencyCode}</td>
-                <td className="py-3 text-left font-medium text-white print:text-black" dir="ltr">{fmt(item.total)} {currencyCode}</td>
-              </tr>
-            ))}
+            {items.map((item, i) => {
+              const hasCost = items.some(it => Number(it.cost_price || 0) > 0)
+              const lineCost = Number(item.cost_price || 0) * item.quantity
+              const lineProfit = item.total - lineCost
+              return (
+                <tr key={item.id}>
+                  <td className="py-3 text-slate-500 print:text-gray-400 text-xs">{i + 1}</td>
+                  <td className="py-3">
+                    <p className="font-medium text-white print:text-black">{item.name}</p>
+                    {item.sku && <p className="text-xs text-slate-500 print:text-gray-400" dir="ltr">{item.sku}</p>}
+                  </td>
+                  <td className="py-3 text-center text-slate-300 print:text-gray-600" dir="ltr">{item.quantity}</td>
+                  {hasCost && (
+                    <td className="py-3 text-left text-slate-400 font-mono text-xs print:hidden" dir="ltr">
+                      {Number(item.cost_price || 0) > 0 ? `${fmt(item.cost_price!)} ${currencyCode}` : '—'}
+                    </td>
+                  )}
+                  <td className="py-3 text-left text-slate-300 print:text-gray-600" dir="ltr">{fmt(item.unit_price)} {currencyCode}</td>
+                  <td className="py-3 text-left font-medium text-white print:text-black" dir="ltr">{fmt(item.total)} {currencyCode}</td>
+                  {hasCost && (
+                    <td className={`py-3 text-left font-mono text-xs font-semibold print:hidden ${lineProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`} dir="ltr">
+                      {fmt(lineProfit)} {currencyCode}
+                    </td>
+                  )}
+                </tr>
+              )
+            })}
           </tbody>
         </table>
         </div>
+
+        {/* ملخص التكلفة والربح الإداري (داخلي فقط وغير مطبوع) */}
+        {items.some(i => Number(i.cost_price || 0) > 0) && (() => {
+          const totCost = items.reduce((s, i) => s + (Number(i.quantity || 0) * Number(i.cost_price || 0)), 0)
+          const gProfit = invoice.total - totCost
+          return (
+            <div className="mb-6 rounded-xl border border-sky-500/20 bg-sky-500/5 p-4 print:hidden">
+              <div className="flex items-center justify-between text-xs font-bold text-sky-400 mb-2">
+                <span>📊 تحليل التكلفة وهوامش الربح للفاتورة (عرض إداري داخلي):</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="rounded-lg bg-slate-800/80 p-2.5">
+                  <span className="text-slate-400 block text-[11px]">إجمالي تكلفة البضاعة:</span>
+                  <span className="font-mono font-bold text-slate-200 text-sm" dir="ltr">{fmt(totCost)} {currencyCode}</span>
+                </div>
+                <div className="rounded-lg bg-slate-800/80 p-2.5">
+                  <span className="text-slate-400 block text-[11px]">مجمل الربح التقديري:</span>
+                  <span className={`font-mono font-bold text-sm ${gProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`} dir="ltr">
+                    {fmt(gProfit)} {currencyCode}
+                  </span>
+                </div>
+                <div className="rounded-lg bg-slate-800/80 p-2.5">
+                  <span className="text-slate-400 block text-[11px]">نسبة هامش الربح:</span>
+                  <span className="font-mono font-bold text-emerald-400 text-sm" dir="ltr">
+                    {invoice.total > 0 ? `${((gProfit / invoice.total) * 100).toFixed(1)}%` : '0%'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
 
         {/* الإجماليات */}
         <div className="flex justify-end">

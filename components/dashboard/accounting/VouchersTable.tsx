@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useToast } from '@/components/ui/Toast'
 import { useConfirm } from '@/components/ui/Confirm'
 import { createVoucher, deleteVoucher, getCustomerOpenInvoices, getSupplierOpenPurchases, ChequeItem } from '@/app/dashboard/accounting/vouchers/voucher-actions'
@@ -89,6 +89,7 @@ export default function VouchersTable({
   storeName,
 }: Props) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const toast = useToast()
   const confirm = useConfirm()
 
@@ -99,6 +100,12 @@ export default function VouchersTable({
   const [showModal, setShowModal] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (searchParams?.get('new') === '1') {
+      setShowModal(true)
+    }
+  }, [searchParams])
 
   // Form Fields
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))

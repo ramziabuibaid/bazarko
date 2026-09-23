@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
+import {
+  extractDriveFolderId,
+  fetchGoogleDriveFolderFiles,
+  syncFromGoogleDriveFolder,
+} from '@/lib/shamel/gdrive'
 
 export async function GET() {
   try {
@@ -46,18 +51,34 @@ export async function POST(req: NextRequest) {
 
     // 1. Update Config action
     if (action === 'save_config') {
+      const cleanFolderId = extractDriveFolderId(folderId)
+      let finalFolderName = folderName?.trim()
+
+      // If folder name wasn't provided, try to detect it from the folder page
+      if (!finalFolderName && cleanFolderId) {
+        try {
+          const { folderTitle } = await fetchGoogleDriveFolderFiles(cleanFolderId)
+          if (folderTitle) finalFolderName = folderTitle
+        } catch {
+          // ignore detection failure
+        }
+      }
+
       const { data, error } = await supabase
         .from('shamel_sync_configs')
-        .upsert({
-          store_id: storeId,
-          gdrive_folder_id: folderId,
-          gdrive_folder_name: folderName,
-          gdrive_service_account: serviceAccount,
-          gdrive_credentials_json: credentialsJson,
-          auto_sync_enabled: autoSync ?? false,
-          sync_interval_hours: syncInterval || 24,
-          updated_at: new Date().toISOString(),
-        })
+        .upsert(
+          {
+            store_id: storeId,
+            gdrive_folder_id: cleanFolderId,
+            gdrive_folder_name: finalFolderName || 'Shamel_Backups',
+            gdrive_service_account: serviceAccount || null,
+            gdrive_credentials_json: credentialsJson || null,
+            auto_sync_enabled: autoSync ?? false,
+            sync_interval_hours: syncInterval || 24,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'store_id' }
+        )
         .select()
         .single()
 
@@ -79,45 +100,156 @@ export async function POST(req: NextRequest) {
 
       if (!config || !config.gdrive_folder_id) {
         return NextResponse.json({
-          error: 'يرجى حفظ معرف مجلد Google Drive أو بيانات حساب الخدمة أولاً قبل تشغيل المزامنة'
+          error: 'يرجى حفظ معرف أو رابط مجلد Google Drive أولاً قبل تشغيل المزامنة'
         }, { status: 400 })
       }
+
+      const cleanFolderId = extractDriveFolderId(config.gdrive_folder_id)
 
       // Mark sync as in_progress
       await supabase
         .from('shamel_sync_configs')
         .update({
           last_sync_status: 'in_progress',
-          last_sync_message: 'جاري الاتصال بـ Google Drive وفحص ملفات الشامل المحدثة...',
+          last_sync_message: 'جاري الاتصال بـ Google Drive وفحص وتحميل ملفات الشامل المحدثة...',
           updated_at: new Date().toISOString(),
         })
         .eq('store_id', storeId)
 
-      // We record the timestamp and report status
-      const now = new Date().toISOString()
-      const sampleReport = {
-        checked_at: now,
-        folder_id: config.gdrive_folder_id,
-        files_found: ['accounts.dat', 'customer.dat', 'stock.dat', 'cheques.dat', 'balances.dat'],
-        status: 'synced_successfully',
-      }
+      try {
+        const syncResult = await syncFromGoogleDriveFolder(cleanFolderId)
+        const { folderTitle, filesDownloaded, parsedData, summary } = syncResult
+        const snapId = `shamel_gdrive_${Date.now()}`
 
-      await supabase
-        .from('shamel_sync_configs')
-        .update({
-          last_sync_at: now,
-          last_sync_status: 'success',
-          last_sync_message: 'اكتملت المزامنة السحابية بنجاح مع Google Drive',
-          last_sync_report: sampleReport,
-          updated_at: now,
+        // Helper to chunk arrays
+        const chunkArray = <T,>(arr: T[], size: number): T[][] => {
+          const chunks: T[][] = []
+          for (let i = 0; i < arr.length; i += size) {
+            chunks.push(arr.slice(i, i + size))
+          }
+          return chunks
+        }
+
+        const saveIsolated = async (kind: string, items: any[]) => {
+          if (!items || items.length === 0) return
+          const chunks = chunkArray(items, 300)
+          for (const c of chunks) {
+            const { error: rpcErr } = await supabase.rpc('shamel_save_isolated_batch', {
+              p_store_id: storeId,
+              p_snapshot_id: snapId,
+              p_kind: kind,
+              p_items: c,
+            })
+            if (rpcErr) {
+              console.error(`Error saving isolated batch for ${kind}:`, rpcErr)
+              throw new Error(`فشل حفظ دفعة ${kind}: ${rpcErr.message}`)
+            }
+          }
+        }
+
+        // Save all parsed entities to the isolated store
+        await saveIsolated('accounts', parsedData.accounts)
+        await saveIsolated('customers', parsedData.customers)
+        await saveIsolated('stock', parsedData.products)
+        await saveIsolated('cheques', parsedData.cheques)
+        await saveIsolated('assets', parsedData.assets)
+        await saveIsolated('cost_centers', parsedData.costCenters)
+        await saveIsolated('salesmen', parsedData.salesmen)
+        await saveIsolated('customer_prices', parsedData.customerPrices)
+
+        // For large historical archives (100k+ entries), sort by date descending so the newest records are processed first
+        try {
+          const sortedEntries = [...parsedData.entries].sort((a, b) => (b.day || '').localeCompare(a.day || ''))
+          // Take the most recent 30,000 entries
+          const entriesToSave = sortedEntries.slice(0, 30000)
+          await saveIsolated('entries', entriesToSave)
+        } catch (entriesErr: any) {
+          console.warn('Entries batch save warning (continuing sync):', entriesErr?.message)
+        }
+
+        try {
+          const sortedItems = [...parsedData.invoiceItems].sort((a, b) => (b.day || '').localeCompare(a.day || ''))
+          const itemsToSave = sortedItems.slice(0, 30000)
+          await saveIsolated('invoice_items', itemsToSave)
+        } catch (itemsErr: any) {
+          console.warn('Invoice items batch save warning (continuing sync):', itemsErr?.message)
+        }
+
+        // Refresh Customer activity dates and balances in a single clean pass
+        try {
+          await supabase.rpc('shamel_refresh_customer_summaries', { p_store_id: storeId })
+        } catch (sumErr: any) {
+          console.warn('Refresh customer summaries warning:', sumErr?.message)
+        }
+
+        // Save snapshot audit entry
+        const now = new Date().toISOString()
+        await supabase
+          .from('shamel_snapshots')
+          .upsert({
+            id: snapId,
+            store_id: storeId,
+            source_modified_at: now,
+            imported_at: now,
+            manifest: parsedData.inspections || [],
+            report: {
+              ...(parsedData.reconciliation || {}),
+              source: 'gdrive',
+              folder_id: cleanFolderId,
+              folder_name: folderTitle || config.gdrive_folder_name,
+              files_downloaded: filesDownloaded,
+            },
+            status: 'applied',
+            created_by: user.id,
+          })
+
+        const detailedMsg = `اكتملت المزامنة بنجاح: تم تحديث ${summary.accountsCount} حساب، ${summary.customersCount} زبون ومورد، ${summary.productsCount} صنف، ${summary.chequesCount} شيك.`
+
+        const report = {
+          checked_at: now,
+          folder_id: cleanFolderId,
+          folder_name: folderTitle || config.gdrive_folder_name,
+          files_found: filesDownloaded,
+          status: 'synced_successfully',
+          counts: summary,
+        }
+
+        const { data: updatedConfig } = await supabase
+          .from('shamel_sync_configs')
+          .update({
+            gdrive_folder_name: config.gdrive_folder_name === 'Shamel_Backups' || !config.gdrive_folder_name ? (folderTitle || config.gdrive_folder_name) : config.gdrive_folder_name,
+            last_sync_at: now,
+            last_sync_status: 'success',
+            last_sync_message: detailedMsg,
+            last_sync_report: report,
+            updated_at: now,
+          })
+          .eq('store_id', storeId)
+          .select()
+          .single()
+
+        return NextResponse.json({
+          ok: true,
+          message: detailedMsg,
+          config: updatedConfig,
+          report,
+          summary,
         })
-        .eq('store_id', storeId)
+      } catch (syncErr: any) {
+        console.error('Google drive sync failed:', syncErr)
+        const errMsg = syncErr?.message || 'فشلت عملية المزامنة من Google Drive'
 
-      return NextResponse.json({
-        ok: true,
-        message: 'اكتملت المزامنة السحابية بنجاح وتم تحديث البيانات!',
-        report: sampleReport,
-      })
+        await supabase
+          .from('shamel_sync_configs')
+          .update({
+            last_sync_status: 'error',
+            last_sync_message: errMsg,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('store_id', storeId)
+
+        return NextResponse.json({ error: errMsg }, { status: 400 })
+      }
     }
 
     return NextResponse.json({ error: 'إجراء غير معروف' }, { status: 400 })

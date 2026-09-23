@@ -217,7 +217,7 @@ export default async function DashboardPage() {
 
           {/* 3. سند قبض */}
           <Link
-            href="/dashboard/accounting/vouchers?type=receipt&new=1"
+            href="/dashboard/accounting/receipts?new=1"
             className="group relative flex flex-col items-center justify-center p-4 rounded-2xl border border-emerald-500/20 bg-gradient-to-b from-emerald-500/10 to-slate-900/80 hover:from-emerald-500/20 hover:border-emerald-500/40 transition duration-200 shadow-sm text-center"
           >
             <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/20 text-2xl text-emerald-400 mb-2 group-hover:scale-110 transition">
@@ -229,7 +229,7 @@ export default async function DashboardPage() {
 
           {/* 4. سند صرف */}
           <Link
-            href="/dashboard/accounting/vouchers?type=payment&new=1"
+            href="/dashboard/accounting/payments?new=1"
             className="group relative flex flex-col items-center justify-center p-4 rounded-2xl border border-rose-500/20 bg-gradient-to-b from-rose-500/10 to-slate-900/80 hover:from-rose-500/20 hover:border-rose-500/40 transition duration-200 shadow-sm text-center"
           >
             <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-rose-500/20 text-2xl text-rose-400 mb-2 group-hover:scale-110 transition">
@@ -299,7 +299,7 @@ export default async function DashboardPage() {
             </div>
             <p className="mt-2 text-xs text-slate-400 flex items-center justify-between">
               <span>سندات القبض المسجلة</span>
-              <Link href="/dashboard/accounting/vouchers?type=receipt" className="text-emerald-400 hover:underline">عرض ←</Link>
+              <Link href="/dashboard/accounting/receipts" className="text-emerald-400 hover:underline">عرض ←</Link>
             </p>
           </div>
 
@@ -319,7 +319,7 @@ export default async function DashboardPage() {
             </div>
             <p className="mt-2 text-xs text-slate-400 flex items-center justify-between">
               <span>سندات الصرف والمصاريف</span>
-              <Link href="/dashboard/accounting/vouchers?type=payment" className="text-rose-400 hover:underline">عرض ←</Link>
+              <Link href="/dashboard/accounting/payments" className="text-rose-400 hover:underline">عرض ←</Link>
             </p>
           </div>
 

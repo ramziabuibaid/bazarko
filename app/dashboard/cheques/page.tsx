@@ -22,7 +22,8 @@ export default async function ChequesPage() {
     { data: bankAccounts },
     { data: suppliers },
     { data: customers },
-    { data: operations }
+    { data: operations },
+    { data: cashBoxes }
   ] = await Promise.all([
     supabase.from('stores').select('id, name, currency_code, plan').eq('id', storeId).single(),
     supabase
@@ -51,7 +52,13 @@ export default async function ChequesPage() {
       .select('*')
       .eq('store_id', storeId)
       .order('created_at', { ascending: false })
-      .limit(200)
+      .limit(200),
+    supabase
+      .from('cash_boxes')
+      .select('id, name, type, is_default, is_active')
+      .eq('store_id', storeId)
+      .eq('is_active', true)
+      .order('is_default', { ascending: false })
   ])
 
   return (
@@ -68,6 +75,7 @@ export default async function ChequesPage() {
         suppliers={suppliers || []}
         customers={customers || []}
         operations={operations || []}
+        cashBoxes={cashBoxes || []}
       />
     </FeatureGate>
   )

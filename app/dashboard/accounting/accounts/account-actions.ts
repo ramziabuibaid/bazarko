@@ -61,6 +61,41 @@ export async function createAccount(input: CreateAccountInput) {
       return { success: false, error: `رقم الحساب (${code}) موجود مسبقاً، يرجى اختيار رقم فريد` }
     }
 
+    // التحقق من توافق الرقم مع النوع الرئيسي
+    const typeLeadingDigit: Record<string, string> = {
+      asset: '1',
+      liability: '2',
+      equity: '3',
+      revenue: '4',
+      expense: '5',
+    }
+    const expectedDigit = typeLeadingDigit[input.type]
+    if (expectedDigit && !code.startsWith(expectedDigit)) {
+      return {
+        success: false,
+        error: `رقم الحساب (${code}) يجب أن يبدأ بالرقم (${expectedDigit}) ليتوافق مع التصنيف الرئيسي للمجموعة.`,
+      }
+    }
+
+    // التحقق من صحة التسلسل والترقيم بالنسبة للحساب الأب
+    if (input.parent_id) {
+      const { data: parentAcc } = await supabase
+        .from('accounts')
+        .select('code, name')
+        .eq('id', input.parent_id)
+        .single()
+
+      if (parentAcc) {
+        const parentPrefix = parentAcc.code.replace(/0+$/, '') || parentAcc.code[0]
+        if (!code.startsWith(parentPrefix)) {
+          return {
+            success: false,
+            error: `رقم الحساب (${code}) لا يتطابق مع تسلسل الحساب الأب (${parentAcc.code} - ${parentAcc.name}). يجب أن يبدأ بالبادئة (${parentPrefix}).`,
+          }
+        }
+      }
+    }
+
     // تحديد طبيعة الرصيد التلقائية إن لم تحدد
     let normalBalance = input.normal_balance
     if (!normalBalance) {
@@ -156,6 +191,43 @@ export async function updateAccount(input: UpdateAccountInput) {
       }
     }
 
+    // التحقق من توافق الرقم مع النوع الرئيسي
+    const typeLeadingDigit: Record<string, string> = {
+      asset: '1',
+      liability: '2',
+      equity: '3',
+      revenue: '4',
+      expense: '5',
+    }
+    const targetType = input.type || currentAcc.type
+    const expectedDigit = typeLeadingDigit[targetType]
+    if (expectedDigit && !code.startsWith(expectedDigit)) {
+      return {
+        success: false,
+        error: `رقم الحساب (${code}) يجب أن يبدأ بالرقم (${expectedDigit}) ليتوافق مع التصنيف الرئيسي للمجموعة.`,
+      }
+    }
+
+    // التحقق من صحة التسلسل والترقيم بالنسبة للحساب الأب
+    const targetParentId = input.parent_id !== undefined ? input.parent_id : currentAcc.parent_id
+    if (targetParentId) {
+      const { data: parentAcc } = await supabase
+        .from('accounts')
+        .select('code, name')
+        .eq('id', targetParentId)
+        .single()
+
+      if (parentAcc) {
+        const parentPrefix = parentAcc.code.replace(/0+$/, '') || parentAcc.code[0]
+        if (!code.startsWith(parentPrefix)) {
+          return {
+            success: false,
+            error: `رقم الحساب (${code}) لا يتطابق مع تسلسل الحساب الأب (${parentAcc.code} - ${parentAcc.name}). يجب أن يبدأ بالبادئة (${parentPrefix}).`,
+          }
+        }
+      }
+    }
+
     // التحقق من وجود حركات محاسبية سابقة
     const { count: txCount } = await supabase
       .from('journal_lines')
@@ -224,6 +296,10 @@ export async function updateAccount(input: UpdateAccountInput) {
     })
 
     revalidatePath('/dashboard/accounting/accounts')
+    revalidatePath('/dashboard/accounting/statement')
+    revalidatePath('/dashboard/accounting/chart-of-accounts')
+    revalidatePath('/dashboard/accounting/journal')
+    revalidatePath('/dashboard/accounting/vouchers')
     return { success: true, account: updated }
   } catch (err: any) {
     console.error('Error updating account:', err)

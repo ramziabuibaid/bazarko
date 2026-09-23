@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { PALESTINIAN_BANKS, getPmaBankByCode, normalizeBankCode } from '@/lib/palestineBanks'
 import { tafqeet } from '@/lib/tafqeet'
 import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
+import { executeCheckOperation, getCheckAuditHistory } from './check-lifecycle-actions'
 
 interface CheckItem {
   id: string
@@ -70,17 +71,18 @@ interface Props {
   suppliers: Supplier[]
   customers: Customer[]
   operations: any[]
+  cashBoxes?: any[]
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; border: string }> = {
-  in_portfolio: { label: 'في الحافظة', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20' },
-  deposited: { label: 'برسم التحصيل', color: 'text-sky-400', bg: 'bg-sky-500/10', border: 'border-sky-500/20' },
-  collected: { label: 'محصل', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' },
-  bounced: { label: 'راجع / مرتد', color: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/20' },
-  endorsed: { label: 'مجيّر لمورد', color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20' },
-  returned_to_drawer: { label: 'معاد للساحب', color: 'text-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/20' },
-  returned_to_customer: { label: 'معاد للزبون', color: 'text-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/20' },
-  supplier_returned: { label: 'معاد من مورد', color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
+  in_portfolio: { label: '1. في الحافظة', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20' },
+  deposited: { label: '2. برسم التحصيل', color: 'text-sky-400', bg: 'bg-sky-500/10', border: 'border-sky-500/20' },
+  collected: { label: '3. محصل ومودع', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' },
+  bounced: { label: '4. شيك راجع', color: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/20' },
+  returned_to_customer: { label: '5. معاد للمصدر (للزبون)', color: 'text-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/20' },
+  returned_to_drawer: { label: '5. معاد للساحب', color: 'text-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/20' },
+  endorsed: { label: '6. مجيّر لمورد', color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20' },
+  supplier_returned: { label: '7. مجيّر - معاد من مورد', color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
 }
 
 export default function ChequesClient({
@@ -90,6 +92,7 @@ export default function ChequesClient({
   suppliers,
   customers,
   operations,
+  cashBoxes = [],
 }: Props) {
   const router = useRouter()
   const supabase = createClient()
@@ -102,6 +105,9 @@ export default function ChequesClient({
   // Modals state
   const [showAddModal, setShowAddModal] = useState(false)
   const [showOpModal, setShowOpModal] = useState<{ check: CheckItem; opType: string } | null>(null)
+  const [showAuditModal, setShowAuditModal] = useState<CheckItem | null>(null)
+  const [auditHistory, setAuditHistory] = useState<any[]>([])
+  const [loadingAudit, setLoadingAudit] = useState(false)
   const [lightboxImage, setLightboxImage] = useState<string | null>(null)
   const [lightboxCheck, setLightboxCheck] = useState<CheckItem | null>(null)
   const [loading, setLoading] = useState(false)
@@ -312,7 +318,90 @@ export default function ChequesClient({
     }
   }
 
-  // Handle Operations (Deposit, Collect, Bounce, Endorse, Return)
+  // Accounting Formula Preview
+  const accountingPreview = useMemo(() => {
+    if (!showOpModal) return null
+    const { check, opType } = showOpModal
+    const amt = Number(check.amount_ils || check.amount || 0)
+    const cur = check.currency || 'ILS'
+    const selectedBank = bankAccounts.find(b => b.id === opData.target_bank_account_id) || bankAccounts[0]
+    const selectedSupplier = suppliers.find(s => s.id === opData.target_supplier_id) || suppliers[0]
+
+    if (opType === 'deposit') {
+      return {
+        debit: `1121 - شيكات برسم التحصيل (${selectedBank ? selectedBank.bank_name : 'البنك'})`,
+        credit: `1120 - أوراق قبض / محفظة الشيكات الواردة`,
+        amount: amt,
+        currency: cur,
+        desc: `إيداع شيك #${check.check_number} برسم التحصيل لدى ${selectedBank?.bank_name || 'البنك'}`,
+      }
+    }
+    if (opType === 'collect') {
+      return {
+        debit: `1112 - حساب البنك الجاري (${selectedBank ? `${selectedBank.bank_name} (${selectedBank.account_number})` : 'البنك'})`,
+        credit: check.status === 'deposited' ? `1121 - شيكات برسم التحصيل` : `1120 - أوراق قبض / محفظة الشيكات`,
+        amount: amt,
+        currency: cur,
+        desc: `تحصيل وإيداع شيك #${check.check_number} في حساب ${selectedBank?.bank_name || 'البنك'}`,
+      }
+    }
+    if (opType === 'bounce') {
+      return {
+        debit: `1122 - شيكات راجعة ومرفوضة (تحت المتابعة)`,
+        credit: check.status === 'collected' ? `1112 - حساب البنك الجاري (عكس التحصيل)` : `1121 - شيكات برسم التحصيل`,
+        amount: amt,
+        currency: cur,
+        desc: `إثبات ارتداد شيك راجع #${check.check_number} من ${check.bank_name}`,
+      }
+    }
+    if (opType === 'return_to_customer') {
+      return {
+        debit: `1131 - ذمم العملاء (${check.customer?.name || check.drawer_name || 'العميل'})`,
+        credit: `1122 - شيكات راجعة ومرفوضة`,
+        amount: amt,
+        currency: cur,
+        desc: `إعادة الشيك الراجع #${check.check_number} للعميل وإثبات الدين عليه`,
+      }
+    }
+    if (opType === 'recollect') {
+      return {
+        debit: `1120 - أوراق قبض / محفظة الشيكات الواردة`,
+        credit: `1122 - شيكات راجعة ومرفوضة`,
+        amount: amt,
+        currency: cur,
+        desc: `إعادة قبض الشيك #${check.check_number} وإدراجه بالمحفظة مجدداً`,
+      }
+    }
+    if (opType === 'endorse') {
+      return {
+        debit: `2111 - ذمم الموردين (تخفيض حساب ${selectedSupplier?.name || 'المورد'})`,
+        credit: `1120 - أوراق قبض / محفظة الشيكات الواردة`,
+        amount: amt,
+        currency: cur,
+        desc: `تجيير شيك #${check.check_number} لصالح المورد ${selectedSupplier?.name || ''}`,
+      }
+    }
+    if (opType === 'supplier_return') {
+      return {
+        debit: `1122 - شيكات راجعة ومرفوضة`,
+        credit: `2111 - ذمم الموردين (إعادة قيد الذمة لصالح ${selectedSupplier?.name || 'المورد'})`,
+        amount: amt,
+        currency: cur,
+        desc: `استلام شيك مجير راجع #${check.check_number} من المورد وإعادة دينه`,
+      }
+    }
+    return null
+  }, [showOpModal, opData, bankAccounts, suppliers])
+
+  const openAuditModal = async (check: CheckItem) => {
+    setShowAuditModal(check)
+    setLoadingAudit(true)
+    const res = await getCheckAuditHistory(check.id)
+    setAuditHistory(res.operations || [])
+    setLoadingAudit(false)
+  }
+
+  // Handle Operations with full double-entry accounting engine
   const handleExecuteOperation = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!showOpModal) return
@@ -321,74 +410,20 @@ export default function ChequesClient({
     setError('')
 
     const { check, opType } = showOpModal
-    let newStatus = check.status
-    let targetBankId: string | null = null
-    let targetSupplierId: string | null = null
-
-    if (opType === 'deposit') {
-      newStatus = 'deposited'
-      targetBankId = opData.target_bank_account_id
-    } else if (opType === 'collect') {
-      newStatus = 'collected'
-      targetBankId = opData.target_bank_account_id
-    } else if (opType === 'bounce') {
-      newStatus = 'bounced'
-    } else if (opType === 'endorse') {
-      newStatus = 'endorsed'
-      targetSupplierId = opData.target_supplier_id
-    } else if (opType === 'return') {
-      newStatus = check.type === 'received' ? 'returned_to_drawer' : 'supplier_returned'
-    }
 
     try {
-      // 1. Update Check Status
-      const { error: updateErr } = await supabase
-        .from('checks')
-        .update({
-          status: newStatus,
-          deposit_bank_account_id: targetBankId || check.deposit_bank_account_id,
-          endorsed_supplier_id: targetSupplierId || check.endorsed_supplier_id,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', check.id)
-
-      if (updateErr) throw updateErr
-
-      // 2. Log Operation
-      await supabase.from('check_operations').insert({
-        store_id: store.id,
-        check_id: check.id,
-        operation_type: opType,
-        from_status: check.status,
-        to_status: newStatus,
-        operation_date: opData.date,
-        target_bank_account_id: targetBankId,
-        target_supplier_id: targetSupplierId,
-        notes: opData.notes.trim() || null,
+      const res = await executeCheckOperation({
+        checkId: check.id,
+        operationType: opType as any,
+        targetBankAccountId: ['deposit', 'collect'].includes(opType) ? opData.target_bank_account_id : undefined,
+        targetSupplierId: opType === 'endorse' ? opData.target_supplier_id : undefined,
+        operationDate: opData.date,
+        notes: opData.notes,
       })
 
-      // 3. If collected, update bank account balance
-      if (opType === 'collect' && targetBankId) {
-        const bank = bankAccounts.find(b => b.id === targetBankId)
-        if (bank) {
-          const newBal = Number(bank.balance || 0) + Number(check.amount_ils)
-          await supabase.from('bank_accounts').update({ balance: newBal }).eq('id', targetBankId)
-        }
+      if (!res.success) {
+        throw new Error(res.error || 'فشلت العملية')
       }
-
-      // Update local state
-      setChecks(prev =>
-        prev.map(c =>
-          c.id === check.id
-            ? {
-                ...c,
-                status: newStatus,
-                deposit_bank_account_id: targetBankId || c.deposit_bank_account_id,
-                endorsed_supplier_id: targetSupplierId || c.endorsed_supplier_id,
-              }
-            : c
-        )
-      )
 
       setShowOpModal(null)
       router.refresh()
@@ -500,11 +535,13 @@ export default function ChequesClient({
         <div className="flex flex-wrap gap-1.5">
           {[
             { id: 'all', label: 'الكل' },
-            { id: 'in_portfolio', label: 'في الحافظة' },
-            { id: 'deposited', label: 'برسم التحصيل' },
-            { id: 'collected', label: 'محصل' },
-            { id: 'bounced', label: 'راجع' },
-            { id: 'endorsed', label: 'مجيّر' },
+            { id: 'in_portfolio', label: '1. في الحافظة' },
+            { id: 'deposited', label: '2. برسم التحصيل' },
+            { id: 'collected', label: '3. محصل ومودع' },
+            { id: 'bounced', label: '4. شيك راجع' },
+            { id: 'returned_to_customer', label: '5. معاد للمصدر' },
+            { id: 'endorsed', label: '6. مجيّر لمورد' },
+            { id: 'supplier_returned', label: '7. معاد من مورد' },
           ].map(st => (
             <button
               key={st.id}
@@ -641,58 +678,126 @@ export default function ChequesClient({
                       </td>
 
                       <td className="p-3.5 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          {/* Operations depending on status */}
+                        <div className="flex items-center justify-center flex-wrap gap-1">
+                          {/* المرحلة 1: في الحافظة */}
                           {check.status === 'in_portfolio' && (
                             <>
                               <button
                                 onClick={() => setShowOpModal({ check, opType: 'deposit' })}
-                                className="rounded-lg bg-sky-500/10 px-2 py-1 text-[11px] font-bold text-sky-400 hover:bg-sky-500/20 transition"
+                                className="rounded-lg bg-sky-500/15 px-2 py-1 text-[11px] font-bold text-sky-400 hover:bg-sky-500/25 transition"
+                                title="إيداع برسم التحصيل"
                               >
-                                إيداع
+                                إيداع برسم التحصيل
                               </button>
                               <button
                                 onClick={() => setShowOpModal({ check, opType: 'collect' })}
-                                className="rounded-lg bg-emerald-500/10 px-2 py-1 text-[11px] font-bold text-emerald-400 hover:bg-emerald-500/20 transition"
+                                className="rounded-lg bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-400 hover:bg-emerald-500/25 transition"
+                                title="تحصيل فوري بالحساب البنكي"
                               >
-                                تحصيل
+                                تحصيل بالبنك
                               </button>
                               {check.type === 'received' && (
                                 <button
                                   onClick={() => setShowOpModal({ check, opType: 'endorse' })}
-                                  className="rounded-lg bg-purple-500/10 px-2 py-1 text-[11px] font-bold text-purple-400 hover:bg-purple-500/20 transition"
+                                  className="rounded-lg bg-purple-500/15 px-2 py-1 text-[11px] font-bold text-purple-400 hover:bg-purple-500/25 transition"
+                                  title="تجيير الشيك لمورد"
                                 >
-                                  تظهير
+                                  تجيير لمورد
                                 </button>
                               )}
                             </>
                           )}
 
+                          {/* المرحلة 2: برسم التحصيل */}
                           {check.status === 'deposited' && (
                             <>
                               <button
                                 onClick={() => setShowOpModal({ check, opType: 'collect' })}
-                                className="rounded-lg bg-emerald-500/10 px-2 py-1 text-[11px] font-bold text-emerald-400 hover:bg-emerald-500/20 transition"
+                                className="rounded-lg bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-400 hover:bg-emerald-500/25 transition"
+                                title="تأكيد التحصيل والإيداع بالحساب"
                               >
                                 تأكيد تحصيل
                               </button>
                               <button
                                 onClick={() => setShowOpModal({ check, opType: 'bounce' })}
-                                className="rounded-lg bg-rose-500/10 px-2 py-1 text-[11px] font-bold text-rose-400 hover:bg-rose-500/20 transition"
+                                className="rounded-lg bg-rose-500/15 px-2 py-1 text-[11px] font-bold text-rose-400 hover:bg-rose-500/25 transition"
+                                title="تسجيل ارتداد / شيك راجع"
                               >
-                                تسجيل ارتداد
+                                تسجيل راجع
                               </button>
                             </>
                           )}
 
-                          {['in_portfolio', 'bounced'].includes(check.status) && (
+                          {/* المرحلة 3: محصل ومودع */}
+                          {check.status === 'collected' && (
                             <button
-                              onClick={() => setShowOpModal({ check, opType: 'return' })}
-                              className="rounded-lg bg-slate-700 px-2 py-1 text-[11px] font-bold text-slate-300 hover:bg-slate-600 transition"
+                              onClick={() => setShowOpModal({ check, opType: 'bounce' })}
+                              className="rounded-lg bg-rose-500/15 px-2 py-1 text-[11px] font-bold text-rose-400 hover:bg-rose-500/25 transition"
+                              title="تسجيل ارتداد لاحق للشيك"
                             >
-                              إرجاع
+                              ارتداد لاحق
                             </button>
                           )}
+
+                          {/* المرحلة 4: شيك راجع */}
+                          {check.status === 'bounced' && (
+                            <>
+                              <button
+                                onClick={() => setShowOpModal({ check, opType: 'return_to_customer' })}
+                                className="rounded-lg bg-slate-700 px-2 py-1 text-[11px] font-bold text-amber-300 hover:bg-slate-600 transition"
+                                title="إعادة الشيك للزبون وإثبات دينه"
+                              >
+                                إعادة للمصدر
+                              </button>
+                              <button
+                                onClick={() => setShowOpModal({ check, opType: 'recollect' })}
+                                className="rounded-lg bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-300 hover:bg-emerald-500/25 transition"
+                                title="إعادة قبض بالمحفظة"
+                              >
+                                إعادة قبض
+                              </button>
+                            </>
+                          )}
+
+                          {/* المرحلة 5: مجيّر لمورد */}
+                          {check.status === 'endorsed' && (
+                            <button
+                              onClick={() => setShowOpModal({ check, opType: 'supplier_return' })}
+                              className="rounded-lg bg-orange-500/15 px-2 py-1 text-[11px] font-bold text-orange-400 hover:bg-orange-500/25 transition"
+                              title="تسجيل إرجاع الشيك من المورد"
+                            >
+                              معاد من المورد
+                            </button>
+                          )}
+
+                          {/* المرحلة 6: مجيّر - معاد من مورد */}
+                          {check.status === 'supplier_returned' && (
+                            <>
+                              <button
+                                onClick={() => setShowOpModal({ check, opType: 'return_to_customer' })}
+                                className="rounded-lg bg-slate-700 px-2 py-1 text-[11px] font-bold text-amber-300 hover:bg-slate-600 transition"
+                                title="إعادة للساحب الأصلي"
+                              >
+                                إعادة للمصدر
+                              </button>
+                              <button
+                                onClick={() => setShowOpModal({ check, opType: 'recollect' })}
+                                className="rounded-lg bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-300 hover:bg-emerald-500/25 transition"
+                                title="إعادة قبض بالمحفظة"
+                              >
+                                إعادة قبض
+                              </button>
+                            </>
+                          )}
+
+                          {/* زر سجل التدقيق */}
+                          <button
+                            onClick={() => openAuditModal(check)}
+                            className="rounded-lg border border-white/10 bg-white/5 p-1.5 text-slate-300 hover:bg-white/10 hover:text-white transition text-xs"
+                            title="سجل العمليات والتدقيق التاريخي"
+                          >
+                            📜
+                          </button>
 
                           <Link
                             href={`/dashboard/cheques/print/${check.id}`}
@@ -964,30 +1069,84 @@ export default function ChequesClient({
         </div>
       )}
 
-      {/* ── Modal: تنفيذ عملية على الشيك ── */}
+      {/* ── Modal: تنفيذ عملية على الشيك مع المعادلة المحاسبية المزدوجة ── */}
       {showOpModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-          <div className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl">
-            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-              <span>⚡</span> تنفيذ عملية:{' '}
-              {showOpModal.opType === 'deposit' && 'إيداع الشيك برسم التحصيل'}
-              {showOpModal.opType === 'collect' && 'تحصيل الشيك في الحساب البنكي'}
-              {showOpModal.opType === 'bounce' && 'تسجيل ارتداد / شيك راجع'}
-              {showOpModal.opType === 'endorse' && 'تظهير الشيك لمورد'}
-              {showOpModal.opType === 'return' && 'إرجاع الشيك'}
-            </h2>
-
-            <div className="mt-3 rounded-xl bg-slate-800 p-3 text-xs space-y-1">
-              <p><span className="text-slate-400">رقم الشيك:</span> <span className="font-mono text-white">#{showOpModal.check.check_number}</span></p>
-              <p><span className="text-slate-400">البنك:</span> <span className="text-white">{showOpModal.check.bank_name} ({showOpModal.check.branch_name})</span></p>
-              <p><span className="text-slate-400">المبلغ:</span> <span className="font-bold text-sky-400">{Number(showOpModal.check.amount).toLocaleString('en-GB', { minimumFractionDigits: 2 })} {showOpModal.check.currency}</span></p>
+          <div className="relative max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <span>⚡</span>
+                <span>
+                  {showOpModal.opType === 'deposit' && 'إيداع الشيك برسم التحصيل'}
+                  {showOpModal.opType === 'collect' && 'تحصيل الشيك في الحساب البنكي'}
+                  {showOpModal.opType === 'bounce' && 'تسجيل ارتداد / شيك راجع'}
+                  {showOpModal.opType === 'return_to_customer' && 'إعادة الشيك للمصدر / للزبون'}
+                  {showOpModal.opType === 'recollect' && 'إعادة استلام وقبض الشيك في المحفظة'}
+                  {showOpModal.opType === 'endorse' && 'تجيير الشيك لصالح مورد'}
+                  {showOpModal.opType === 'supplier_return' && 'استلام شيك مجيّر راجع من مورد'}
+                </span>
+              </h2>
+              <button
+                onClick={() => setShowOpModal(null)}
+                className="text-slate-400 hover:text-white text-sm"
+              >
+                ✕
+              </button>
             </div>
 
-            {error && <div className="mt-3 rounded-xl bg-rose-500/10 border border-rose-500/20 p-3 text-xs text-rose-400">{error}</div>}
+            <div className="rounded-xl bg-slate-800/80 p-3 text-xs space-y-1.5 border border-white/5">
+              <div className="flex justify-between">
+                <span className="text-slate-400">رقم الشيك:</span>
+                <span className="font-mono font-bold text-white">#{showOpModal.check.check_number}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">البنك المسحوب عليه:</span>
+                <span className="text-white">{showOpModal.check.bank_name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">المبلغ:</span>
+                <span className="font-bold text-sky-400 font-mono text-sm">
+                  {Number(showOpModal.check.amount).toLocaleString('ar-u-nu-latn', { minimumFractionDigits: 2 })} {showOpModal.check.currency}
+                </span>
+              </div>
+            </div>
 
-            <form onSubmit={handleExecuteOperation} className="mt-4 space-y-4">
+            {/* ── صندوق المعادلة المحاسبية المزدوجة المتوقعة ── */}
+            {accountingPreview && (
+              <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-3.5 text-xs space-y-2">
+                <p className="font-bold text-sky-300 flex items-center gap-1.5">
+                  <span>⚖️</span>
+                  <span>معاينة القيد المحاسبي المزدوج التلقائي:</span>
+                </p>
+                <div className="space-y-1.5 pt-1 border-t border-sky-500/20 font-mono">
+                  <div className="flex items-center justify-between text-rose-300">
+                    <span className="text-slate-400 font-sans">الطرف المدين (+):</span>
+                    <strong className="text-left" dir="ltr">{accountingPreview.debit}</strong>
+                  </div>
+                  <div className="flex items-center justify-between text-emerald-300">
+                    <span className="text-slate-400 font-sans">الطرف الدائن (-):</span>
+                    <strong className="text-left" dir="ltr">{accountingPreview.credit}</strong>
+                  </div>
+                  <div className="flex items-center justify-between text-white pt-1 border-t border-white/5">
+                    <span className="text-slate-400 font-sans">المبلغ:</span>
+                    <strong>{Number(accountingPreview.amount).toLocaleString('ar-u-nu-latn', { minimumFractionDigits: 2 })} {accountingPreview.currency}</strong>
+                  </div>
+                  <p className="text-[11px] text-slate-400 font-sans mt-1">
+                    البيان: {accountingPreview.desc}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {error && (
+              <div className="rounded-xl bg-rose-500/10 border border-rose-500/20 p-3 text-xs text-rose-400">
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={handleExecuteOperation} className="space-y-4">
               <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-300">تاريخ العملية</label>
+                <label className="mb-1 block text-xs font-semibold text-slate-300">تاريخ تنفيذ العملية *</label>
                 <input
                   type="date"
                   required
@@ -999,7 +1158,9 @@ export default function ChequesClient({
 
               {['deposit', 'collect'].includes(showOpModal.opType) && (
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-300">الحساب البنكي المستهدف *</label>
+                  <label className="mb-1 block text-xs font-semibold text-slate-300">
+                    {showOpModal.opType === 'deposit' ? 'البنك المودع به برسم التحصيل *' : 'الحساب البنكي الفعلي للتحصيل والإيداع *'}
+                  </label>
                   <select
                     required
                     value={opData.target_bank_account_id}
@@ -1021,18 +1182,22 @@ export default function ChequesClient({
 
               {showOpModal.opType === 'endorse' && (
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-300">المورد المجيّر له *</label>
+                  <label className="mb-1 block text-xs font-semibold text-slate-300">المورد المجيّر له صراحة *</label>
                   <select
                     required
                     value={opData.target_supplier_id}
                     onChange={e => setOpData({ ...opData, target_supplier_id: e.target.value })}
                     className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500"
                   >
-                    {suppliers.map(s => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} {s.phone ? `(${s.phone})` : ''}
-                      </option>
-                    ))}
+                    {suppliers.length === 0 ? (
+                      <option value="">لا يوجد موردون مسجلون</option>
+                    ) : (
+                      suppliers.map(s => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} {s.phone ? `(${s.phone})` : ''}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
               )}
@@ -1043,7 +1208,7 @@ export default function ChequesClient({
                   rows={2}
                   value={opData.notes}
                   onChange={e => setOpData({ ...opData, notes: e.target.value })}
-                  placeholder="سبب الارتداد أو تفاصيل إضافية..."
+                  placeholder="ملاحظات تفصيلية للتدقيق والمتابعة..."
                   className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500"
                 />
               </div>
@@ -1061,10 +1226,101 @@ export default function ChequesClient({
                   disabled={loading}
                   className="flex-1 rounded-xl bg-sky-500 py-2.5 text-xs font-bold text-slate-950 hover:bg-sky-400 transition disabled:opacity-50"
                 >
-                  {loading ? 'جارٍ المعالجة...' : 'تأكيد العملية'}
+                  {loading ? 'جارٍ تسجيل القيد...' : 'تأكيد العملية وإنشاء القيد'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: سجل التدقيق التاريخي للعمليات (Audit Trail) ── */}
+      {showAuditModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div>
+                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <span>📜</span>
+                  <span>سجل التدقيق وتاريخ حركات الشيك</span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  شيك رقم #{showAuditModal.check_number} — {showAuditModal.bank_name}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAuditModal(null)}
+                className="text-slate-400 hover:text-white text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            {loadingAudit ? (
+              <div className="py-12 text-center text-slate-400 space-y-2">
+                <div className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-sky-400 border-t-transparent" />
+                <p className="text-xs">جاري تحميل سجل العمليات والقيود...</p>
+              </div>
+            ) : auditHistory.length === 0 ? (
+              <div className="py-12 text-center text-slate-500 text-xs">
+                لا توجد عمليات مسجلة حتى الآن لهذا الشيك
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {auditHistory.map(op => (
+                  <div
+                    key={op.id}
+                    className="rounded-xl border border-white/10 bg-slate-800/60 p-3.5 text-xs space-y-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-lg bg-sky-500/20 px-2 py-0.5 font-bold text-sky-300">
+                          {op.operation_type === 'deposit' && 'إيداع برسم التحصيل'}
+                          {op.operation_type === 'collect' && 'تحصيل بنكي'}
+                          {op.operation_type === 'bounce' && 'ارتداد / شيك راجع'}
+                          {op.operation_type === 'return_to_customer' && 'إعادة للعميل'}
+                          {op.operation_type === 'recollect' && 'إعادة قبض بالمحفظة'}
+                          {op.operation_type === 'endorse' && 'تجيير لمورد'}
+                          {op.operation_type === 'supplier_return' && 'معاد من مورد'}
+                          {op.operation_type === 'status_change' && 'تسجيل الشيك'}
+                        </span>
+                        <span className="text-slate-400 font-mono">{op.operation_date}</span>
+                      </div>
+
+                      {op.journal_entry?.entry_number && (
+                        <span className="font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                          قيد: {op.journal_entry.entry_number}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="text-slate-300">
+                      {op.notes || '—'}
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-white/5">
+                      <span>من: <strong className="text-slate-200">{STATUS_CONFIG[op.from_status]?.label || op.from_status}</strong></span>
+                      <span>إلى: <strong className="text-sky-300">{STATUS_CONFIG[op.to_status]?.label || op.to_status}</strong></span>
+                      {op.target_bank && (
+                        <span>البنك: <strong className="text-slate-200">{op.target_bank.bank_name}</strong></span>
+                      )}
+                      {op.target_supp && (
+                        <span>المورد: <strong className="text-slate-200">{op.target_supp.name}</strong></span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setShowAuditModal(null)}
+                className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 transition"
+              >
+                إغلاق
+              </button>
+            </div>
           </div>
         </div>
       )}

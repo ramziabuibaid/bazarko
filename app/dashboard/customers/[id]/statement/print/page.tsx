@@ -119,25 +119,80 @@ export default async function PrintCustomerStatementPage({ params, searchParams 
   const totalPeriodCredit = periodTxs.reduce((s, t) => s + t.credit, 0)
   const finalBalance = runningBalance
 
+  const cleanPhone = customer.phone ? customer.phone.replace(/\D/g, '') : ''
+  const waText = encodeURIComponent(
+    `مرحباً ${customer.name} المحترم،\n` +
+    `مرفق ملخص كشف الحساب المالي لدى ${store.name}:\n` +
+    (fromDate || toDate ? `📅 الفترة: من ${fromDate || 'البداية'} إلى ${toDate || 'تاريخه'}\n` : '') +
+    `📌 الرصيد الافتتاحي: ${fmt(openingBalance)} ${currency}\n` +
+    `➕ إجمالي المبيعات (مدين): ${fmt(totalPeriodDebit)} ${currency}\n` +
+    `➖ إجمالي المسدد (دائن): ${fmt(totalPeriodCredit)} ${currency}\n` +
+    `⚖️ صافي الرصيد المستحق: ${fmt(finalBalance)} ${currency}\n\n` +
+    `شاكرين حسن تعاونكم معنا 🙏`
+  )
+
   return (
     <div className="min-h-screen bg-slate-100 p-4 sm:p-8 text-slate-900 font-sans print:p-0 print:bg-white" dir="rtl">
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          @page {
+            size: A4 portrait;
+            margin: 10mm;
+          }
+          body {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            background: #ffffff !important;
+          }
+          tr {
+            page-break-inside: avoid !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+        }
+      `}} />
+
       {/* ── شريط الأدوات العلوي ── */}
-      <div className="mx-auto mb-6 flex max-w-4xl items-center justify-between rounded-2xl bg-slate-900 p-4 text-white shadow-xl print:hidden">
-        <Link
-          href="/dashboard/customers"
-          className="text-xs font-bold text-slate-300 hover:text-white transition flex items-center gap-1.5"
-        >
-          <span>←</span>
-          <span>العودة لدليل العملاء</span>
-        </Link>
-        <PrintButton
-          label="🖨️ طباعة كشف الحساب الرسمى (PDF)"
-          className="rounded-xl bg-sky-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-sky-400 transition shadow-sm"
-        />
+      <div className="mx-auto mb-6 flex max-w-4xl flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-900 p-4 text-white shadow-xl print:hidden">
+        <div className="flex items-center gap-3">
+          <Link
+            href="/dashboard/customers/ledger"
+            className="text-xs font-bold text-slate-300 hover:text-white transition flex items-center gap-1.5"
+          >
+            <span>←</span>
+            <span>كشوف حسابات العملاء</span>
+          </Link>
+          <span className="text-slate-600">|</span>
+          <Link
+            href={`/dashboard/customers/${customer.id}`}
+            className="text-xs text-slate-400 hover:text-white transition"
+          >
+            ملف الزبون
+          </Link>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {cleanPhone && (
+            <a
+              href={`https://wa.me/${cleanPhone}?text=${waText}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3.5 py-2 text-xs font-bold text-white transition flex items-center gap-1.5"
+            >
+              <span>💬</span>
+              <span>مشاركة عبر واتساب</span>
+            </a>
+          )}
+          <PrintButton
+            label="🖨️ طباعة كشف الحساب الرسمى (PDF)"
+            className="rounded-xl bg-sky-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-sky-400 transition shadow-sm"
+          />
+        </div>
       </div>
 
       {/* ── المستند الرسمي ── */}
-      <div className="mx-auto max-w-4xl rounded-2xl border border-slate-300 bg-white p-8 shadow-sm print:border-none print:shadow-none print:p-4">
+      <div className="mx-auto max-w-4xl rounded-2xl border border-slate-300 bg-white p-8 shadow-sm print:border-none print:shadow-none print:p-0">
         {/* الترويسة الرئيسية */}
         <div className="flex items-start justify-between border-b-2 border-slate-900 pb-5">
           <div className="flex items-center gap-4">
