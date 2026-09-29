@@ -136,6 +136,28 @@ export default async function JournalEntriesPage({ searchParams }: { searchParam
                     <span className="rounded-full bg-white/5 px-2.5 py-0.5 text-[11px] font-bold text-slate-300 border border-white/10">
                       {SOURCE_LABELS[entry.source] || entry.source}
                     </span>
+                    {entry.source_url ? (
+                      <Link
+                        href={entry.source_url}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/10 border border-sky-500/20 px-2.5 py-0.5 text-[11px] font-bold text-sky-300 hover:bg-sky-500/20 transition"
+                      >
+                        <span>🔗</span>
+                        <span>
+                          {entry.source_type === 'receipt_voucher' ? 'عرض سند القبض' :
+                           entry.source_type === 'payment_voucher' ? 'عرض سند الصرف' :
+                           entry.source_type === 'sales_invoice' ? 'عرض فاتورة المبيعات' :
+                           entry.source_type === 'purchase_invoice' ? 'عرض فاتورة الشراء' :
+                           entry.source_type === 'sales_return' ? 'عرض مردود المبيعات' :
+                           entry.source_type === 'purchase_return' ? 'عرض مردود المشتريات' :
+                           entry.source_type === 'check_operation' ? 'عرض بطاقة الشيك' : 'عرض الحركة الأصلية'}
+                          {entry.source_number ? ` (${entry.source_number})` : ''} ↗
+                        </span>
+                      </Link>
+                    ) : (
+                      <span className="rounded-full bg-purple-500/10 border border-purple-500/20 px-2.5 py-0.5 text-[11px] font-bold text-purple-300">
+                        ✍️ قيد يدوي
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-4">
@@ -145,6 +167,13 @@ export default async function JournalEntriesPage({ searchParams }: { searchParam
                         {entryTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪
                       </span>
                     </div>
+
+                    <Link
+                      href={`/dashboard/accounting/journal/${entry.id}/edit`}
+                      className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-[11px] font-bold text-amber-300 hover:text-white hover:bg-amber-500/20 transition"
+                    >
+                      ✏️ تعديل القيد
+                    </Link>
 
                     <Link
                       href={`/dashboard/accounting/journal/print/${entry.id}`}

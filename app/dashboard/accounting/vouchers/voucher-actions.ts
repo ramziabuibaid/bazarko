@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
 import { logFinancialEvent } from '@/lib/accounting/audit'
 import { checkIsPeriodClosed } from '@/app/dashboard/accounting/periods/period-actions'
-import { postReceiptVoucherEntry, postPaymentVoucherEntry, reverseJournalEntry } from '@/lib/accounting/engine'
+import { postReceiptVoucherEntry, postPaymentVoucherEntry, reverseJournalEntry, deleteJournalEntryForRef } from '@/lib/accounting/engine'
 import { revalidatePath } from 'next/cache'
 
 export interface ChequeItem {
@@ -375,7 +375,28 @@ export async function createVoucher(input: CreateVoucherInput) {
         created_by: user.id,
       }))
 
-      await supabase.from('checks').insert(checkRows)
+      const { data: insertedChecks, error: checksErr } = await supabase
+        .from('checks')
+        .insert(checkRows)
+        .select('id, check_number, amount')
+
+      if (checksErr) {
+        console.error('Error inserting voucher checks:', checksErr)
+      } else if (insertedChecks && insertedChecks.length > 0) {
+        const checkOps = insertedChecks.map((c: any) => ({
+          store_id: storeId,
+          check_id: c.id,
+          operation_type: 'status_change',
+          from_status: 'none',
+          to_status: 'in_portfolio',
+          operation_date: input.date,
+          notes: isReceipt
+            ? `استلام شيك بموجب سند قبض رقم ${voucherNumber}`
+            : `تحرير شيك بموجب سند صرف رقم ${voucherNumber}`,
+          performed_by: user.id,
+        }))
+        await supabase.from('check_operations').insert(checkOps)
+      }
     }
 
     // 5. كشف حساب العميل ورصيده (في سندات القبض أو دفعات الزبائن)
@@ -589,14 +610,32 @@ export async function deleteVoucher(voucherId: string) {
       .eq('ref_id', v.id)
       .eq('store_id', storeId)
 
-    // 2. عكس الشيكات المرتبطة إن وجدت
+    // 2. عكس وحذف الشيكات المرتبطة وحركاتها في محفظة الشيكات
+    const { data: linkedChecks } = await supabase
+      .from('checks')
+      .select('id')
+      .eq('store_id', storeId)
+      .eq('voucher_id', v.id)
+
+    if (linkedChecks && linkedChecks.length > 0) {
+      const checkIds = linkedChecks.map(c => c.id)
+      await supabase.from('check_operations').delete().in('check_id', checkIds)
+      await supabase.from('checks').delete().eq('store_id', storeId).eq('voucher_id', v.id)
+    }
+
     if (v.checks_data && Array.isArray(v.checks_data) && v.checks_data.length > 0) {
-      const checkNumbers = v.checks_data.map((c: any) => c.check_number)
-      await supabase
-        .from('checks')
-        .delete()
-        .eq('store_id', storeId)
-        .in('check_number', checkNumbers)
+      const checkNumbers = v.checks_data.map((c: any) => c.check_number).filter(Boolean)
+      if (checkNumbers.length > 0) {
+        const { data: numChecks } = await supabase
+          .from('checks')
+          .select('id')
+          .eq('store_id', storeId)
+          .in('check_number', checkNumbers)
+        if (numChecks && numChecks.length > 0) {
+          await supabase.from('check_operations').delete().in('check_id', numChecks.map(c => c.id))
+          await supabase.from('checks').delete().eq('store_id', storeId).in('check_number', checkNumbers)
+        }
+      }
     }
 
     // 3. عكس الحساب البنكي
@@ -709,12 +748,8 @@ export async function deleteVoucher(voucherId: string) {
       }
     }
 
-    // 6.5. عكس القيد المحاسبي في دفتر الأستاذ العام
-    try {
-      await reverseJournalEntry(v.id, `حذف سند #${v.voucher_number}`, user.id)
-    } catch (glRevErr) {
-      console.error('Error reversing voucher GL entry:', glRevErr)
-    }
+    // 6.5. عكس وحذف القيد المحاسبي وحركاته بالكامل من دفتر الأستاذ وحسابات الشجرة
+    await deleteJournalEntryForRef(supabase, storeId, v.id, 'voucher', user.id)
 
     // 7. حذف السند نفسه
     const { error: delErr } = await supabase
@@ -762,6 +797,8 @@ export interface UpdateVoucherInput {
   bank_account_id?: string | null
   customer_id?: string | null
   supplier_id?: string | null
+  invoice_id?: string | null
+  purchase_invoice_id?: string | null
   party_name: string
   category?: string | null
   description: string
@@ -770,7 +807,8 @@ export interface UpdateVoucherInput {
 }
 
 /**
- * تعديل السند المحاسبي وعكس الأثر القديم وتحديث حركة الخزينة والشيكات
+ * تعديل السند المحاسبي وعكس الأثر القديم بالكامل وتحديث الحسابات والخزينة والشيكات
+ * لا ينشئ أي قيد مالي مكرر أو أثر مالي مضاعف
  */
 export async function updateVoucher(input: UpdateVoucherInput) {
   try {
@@ -781,7 +819,7 @@ export async function updateVoucher(input: UpdateVoucherInput) {
     const storeId = await getStoreForUser(supabase, user.id)
     if (!storeId) return { success: false, error: 'المتجر غير موجود' }
 
-    // التحقق من قفل الفترة المحاسبية لتاريخ السند الجديد
+    // التحقق من قفل الفترة المحاسبية لتاريخ السند الجديد والقديم
     const periodCheck = await checkIsPeriodClosed(storeId, input.date)
     if (periodCheck.isClosed) {
       return { success: false, error: `لا يمكن تعديل سند في فترة محاسبية مقفلة (${periodCheck.periodName})` }
@@ -812,7 +850,133 @@ export async function updateVoucher(input: UpdateVoucherInput) {
       effectiveChecks = Number(input.checks_amount || 0)
     }
 
-    // تحديث جدول vouchers
+    const oldAmt = Number(oldV.amount || 0)
+    const isReceipt = oldV.type === 'receipt'
+
+    // ─────────────────────────────────────────────────────────────
+    // 1. عكس الأثر القديم للسند بالكامل قبل التحديث
+    // ─────────────────────────────────────────────────────────────
+
+    // أ) عكس وحذف القيد المحاسبي القديم من الأستاذ العام والأرصدة
+    await deleteJournalEntryForRef(supabase, storeId, oldV.id, 'voucher', user.id)
+
+    // ب) عكس رصيد وكشف حساب العميل القديم
+    if (oldV.customer_id) {
+      await supabase
+        .from('customer_ledger')
+        .delete()
+        .eq('reference_id', oldV.id)
+        .eq('customer_id', oldV.customer_id)
+
+      const { data: oldCust } = await supabase
+        .from('customers')
+        .select('balance, total_paid')
+        .eq('id', oldV.customer_id)
+        .single()
+
+      if (oldCust) {
+        const curBal = Number(oldCust.balance || 0)
+        const curPaid = Number(oldCust.total_paid || 0)
+        const revBal = isReceipt ? curBal + oldAmt : curBal - oldAmt
+        const revPaid = isReceipt ? Math.max(0, curPaid - oldAmt) : curPaid
+        await supabase
+          .from('customers')
+          .update({ balance: revBal, total_paid: revPaid })
+          .eq('id', oldV.customer_id)
+      }
+    }
+
+    // ج) عكس رصيد المورد القديم
+    if (oldV.supplier_id) {
+      const { data: oldSupp } = await supabase
+        .from('suppliers')
+        .select('balance')
+        .eq('id', oldV.supplier_id)
+        .single()
+
+      if (oldSupp) {
+        const curBal = Number(oldSupp.balance || 0)
+        const revBal = isReceipt ? curBal - oldAmt : curBal + oldAmt
+        await supabase
+          .from('suppliers')
+          .update({ balance: revBal })
+          .eq('id', oldV.supplier_id)
+      }
+    }
+
+    // د) عكس الفاتورة المرتبطة القديمة
+    if (oldV.invoice_id) {
+      const { data: oldInv } = await supabase
+        .from('invoices')
+        .select('total, amount_paid')
+        .eq('id', oldV.invoice_id)
+        .single()
+
+      if (oldInv) {
+        const revPaid = Math.max(0, Number(oldInv.amount_paid || 0) - oldAmt)
+        const invTotal = Number(oldInv.total || 0)
+        const revStatus = revPaid >= invTotal ? 'paid' : (revPaid > 0 ? 'partial' : 'draft')
+        await supabase
+          .from('invoices')
+          .update({ amount_paid: revPaid, status: revStatus })
+          .eq('id', oldV.invoice_id)
+      }
+    }
+
+    // هـ) عكس فاتورة الشراء المرتبطة القديمة
+    if (oldV.purchase_invoice_id) {
+      const { data: oldPInv } = await supabase
+        .from('purchase_invoices')
+        .select('total_amount, paid_amount')
+        .eq('id', oldV.purchase_invoice_id)
+        .single()
+
+      if (oldPInv) {
+        const revPaid = Math.max(0, Number(oldPInv.paid_amount || 0) - oldAmt)
+        const pTotal = Number(oldPInv.total_amount || 0)
+        const revStatus = revPaid >= pTotal ? 'paid' : (revPaid > 0 ? 'partial' : 'unpaid')
+        await supabase
+          .from('purchase_invoices')
+          .update({ paid_amount: revPaid, payment_status: revStatus })
+          .eq('id', oldV.purchase_invoice_id)
+      }
+    }
+
+    // و) عكس رصيد البنك القديم
+    if ((oldV.payment_method === 'bank' || oldV.payment_method === 'transfer') && oldV.bank_account_id) {
+      const { data: oldBank } = await supabase
+        .from('bank_accounts')
+        .select('balance')
+        .eq('id', oldV.bank_account_id)
+        .single()
+
+      if (oldBank) {
+        const revBal = isReceipt
+          ? Number(oldBank.balance || 0) - oldAmt
+          : Number(oldBank.balance || 0) + oldAmt
+        await supabase
+          .from('bank_accounts')
+          .update({ balance: revBal })
+          .eq('id', oldV.bank_account_id)
+      }
+    }
+
+    // ز) حذف الشيكات القديمة وحركاتها
+    const { data: oldChecks } = await supabase
+      .from('checks')
+      .select('id')
+      .eq('store_id', storeId)
+      .eq('voucher_id', oldV.id)
+
+    if (oldChecks && oldChecks.length > 0) {
+      const checkIds = oldChecks.map(c => c.id)
+      await supabase.from('check_operations').delete().in('check_id', checkIds)
+      await supabase.from('checks').delete().eq('store_id', storeId).eq('voucher_id', oldV.id)
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 2. تحديث بيانات السند في جدول vouchers
+    // ─────────────────────────────────────────────────────────────
     const { data: updatedVoucher, error: updErr } = await supabase
       .from('vouchers')
       .update({
@@ -821,10 +985,12 @@ export async function updateVoucher(input: UpdateVoucherInput) {
         cash_amount: effectiveCash,
         checks_amount: effectiveChecks,
         checks_data: input.checks || [],
-        cash_box_id: (effectiveCash > 0 && input.cash_box_id) ? input.cash_box_id : null,
+        cash_box_id: (effectiveCash > 0 && input.cash_box_id) ? input.cash_box_id : (input.cash_box_id || null),
         bank_account_id: input.bank_account_id || null,
         customer_id: input.customer_id || null,
         supplier_id: input.supplier_id || null,
+        invoice_id: input.invoice_id !== undefined ? input.invoice_id : oldV.invoice_id,
+        purchase_invoice_id: input.purchase_invoice_id !== undefined ? input.purchase_invoice_id : oldV.purchase_invoice_id,
         party_name: input.party_name.trim(),
         payment_method: input.payment_method,
         category: input.category || null,
@@ -837,7 +1003,11 @@ export async function updateVoucher(input: UpdateVoucherInput) {
 
     if (updErr) throw updErr
 
-    // تحديث حركة الخزينة المرتبطة
+    // ─────────────────────────────────────────────────────────────
+    // 3. تطبيق الأثر الجديد للسند
+    // ─────────────────────────────────────────────────────────────
+
+    // أ) تحديث حركة الخزينة المرتبطة
     if (effectiveCash > 0) {
       const { data: existMovement } = await supabase
         .from('cash_movements')
@@ -885,7 +1055,6 @@ export async function updateVoucher(input: UpdateVoucherInput) {
           })
       }
     } else {
-      // إذا كان السند لم يعد نقدياً، نحذف الحركة النقدية
       await supabase
         .from('cash_movements')
         .delete()
@@ -893,10 +1062,8 @@ export async function updateVoucher(input: UpdateVoucherInput) {
         .eq('store_id', storeId)
     }
 
-    // تحديث الشيكات المرتبطة
-    await supabase.from('checks').delete().eq('voucher_id', input.id).eq('store_id', storeId)
+    // ب) إدراج الشيكات الجديدة وحركاتها
     if (input.checks && input.checks.length > 0) {
-      const isReceipt = oldV.type === 'receipt'
       const checkRows = input.checks.map(c => ({
         store_id: storeId,
         type: isReceipt ? 'received' : 'issued',
@@ -915,6 +1082,7 @@ export async function updateVoucher(input: UpdateVoucherInput) {
         due_date: c.due_date,
         issue_date: c.date || input.date,
         voucher_id: input.id,
+        cashbox_id: input.cash_box_id || null,
         status: 'in_portfolio',
         customer_id: input.customer_id || null,
         supplier_id: input.supplier_id || null,
@@ -922,12 +1090,153 @@ export async function updateVoucher(input: UpdateVoucherInput) {
         images: c.images || [],
         created_by: user.id,
       }))
-      await supabase.from('checks').insert(checkRows)
+
+      const { data: insertedNewChecks } = await supabase
+        .from('checks')
+        .insert(checkRows)
+        .select('id, check_number')
+
+      if (insertedNewChecks && insertedNewChecks.length > 0) {
+        const checkOps = insertedNewChecks.map((c: any) => ({
+          store_id: storeId,
+          check_id: c.id,
+          operation_type: 'status_change',
+          from_status: 'none',
+          to_status: 'in_portfolio',
+          operation_date: input.date,
+          notes: isReceipt
+            ? `استلام شيك بموجب سند قبض رقم ${oldV.voucher_number}`
+            : `تحرير شيك بموجب سند صرف رقم ${oldV.voucher_number}`,
+          performed_by: user.id,
+        }))
+        await supabase.from('check_operations').insert(checkOps)
+      }
     }
 
-    // إعادة ترحيل القيد في دفتر الأستاذ العام
+    // ج) تطبيق أثر العميل الجديد
+    if (input.customer_id) {
+      const { data: newCust } = await supabase
+        .from('customers')
+        .select('balance, total_paid')
+        .eq('id', input.customer_id)
+        .single()
+
+      if (newCust) {
+        const curBal = Number(newCust.balance || 0)
+        const curPaid = Number(newCust.total_paid || 0)
+
+        if (isReceipt) {
+          const balanceAfter = curBal - totalAmount
+          await supabase.from('customer_ledger').insert({
+            store_id: storeId,
+            customer_id: input.customer_id,
+            type: 'payment',
+            date: input.date,
+            description: `سند قبض ${oldV.voucher_number} — ${input.description.trim()}`,
+            debit: 0,
+            credit: totalAmount,
+            balance: balanceAfter,
+            reference_id: input.id,
+            reference_type: 'voucher',
+            created_by: user.id,
+          })
+
+          await supabase
+            .from('customers')
+            .update({
+              balance: balanceAfter,
+              total_paid: curPaid + totalAmount,
+            })
+            .eq('id', input.customer_id)
+        } else {
+          const balanceAfter = curBal + totalAmount
+          await supabase.from('customer_ledger').insert({
+            store_id: storeId,
+            customer_id: input.customer_id,
+            type: 'refund',
+            date: input.date,
+            description: `سند صرف للعميل ${oldV.voucher_number} — ${input.description.trim()}`,
+            debit: totalAmount,
+            credit: 0,
+            balance: balanceAfter,
+            reference_id: input.id,
+            reference_type: 'voucher',
+            created_by: user.id,
+          })
+
+          await supabase
+            .from('customers')
+            .update({ balance: balanceAfter })
+            .eq('id', input.customer_id)
+        }
+      }
+    }
+
+    // د) تطبيق أثر المورد الجديد
+    if (input.supplier_id) {
+      const { data: newSupp } = await supabase
+        .from('suppliers')
+        .select('balance')
+        .eq('id', input.supplier_id)
+        .single()
+
+      if (newSupp) {
+        const curBal = Number(newSupp.balance || 0)
+        const newBal = isReceipt ? curBal + totalAmount : curBal - totalAmount
+        await supabase
+          .from('suppliers')
+          .update({ balance: newBal })
+          .eq('id', input.supplier_id)
+      }
+    }
+
+    // هـ) تطبيق أثر الفاتورة الجديدة إن وُجدت
+    const effectiveInvoiceId = input.invoice_id || oldV.invoice_id
+    if (effectiveInvoiceId) {
+      const { data: inv } = await supabase
+        .from('invoices')
+        .select('total, amount_paid')
+        .eq('id', effectiveInvoiceId)
+        .single()
+
+      if (inv) {
+        const newPaid = Number(inv.amount_paid || 0) + totalAmount
+        const invTotal = Number(inv.total || 0)
+        const newStatus = newPaid >= invTotal ? 'paid' : (newPaid > 0 ? 'partial' : 'draft')
+        await supabase
+          .from('invoices')
+          .update({
+            amount_paid: newPaid,
+            status: newStatus,
+            paid_date: newStatus === 'paid' ? input.date : null,
+          })
+          .eq('id', effectiveInvoiceId)
+      }
+    }
+
+    // و) تطبيق أثر البنك الجديد
+    if ((input.payment_method === 'bank' || input.payment_method === 'transfer') && input.bank_account_id) {
+      const { data: bAcc } = await supabase
+        .from('bank_accounts')
+        .select('balance')
+        .eq('id', input.bank_account_id)
+        .single()
+
+      if (bAcc) {
+        const newBal = isReceipt
+          ? Number(bAcc.balance || 0) + totalAmount
+          : Number(bAcc.balance || 0) - totalAmount
+        await supabase
+          .from('bank_accounts')
+          .update({ balance: newBal, updated_at: new Date().toISOString() })
+          .eq('id', input.bank_account_id)
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 4. ترحيل القيد المحاسبي الجديد في دفتر الأستاذ العام
+    // ─────────────────────────────────────────────────────────────
     try {
-      await reverseJournalEntry(input.id, `تعديل سند #${oldV.voucher_number}`, user.id)
       if (oldV.type === 'receipt') {
         await postReceiptVoucherEntry(input.id, user.id)
       } else {

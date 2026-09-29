@@ -17,8 +17,12 @@ export interface PostJournalEntryParams {
   storeId: string
   date: string
   description: string
-  source: 'invoice' | 'purchase' | 'voucher' | 'sales_return' | 'purchase_return' | 'manual' | 'reversal' | 'closing'
+  source: 'invoice' | 'purchase' | 'voucher' | 'sales_return' | 'purchase_return' | 'manual' | 'reversal' | 'closing' | 'check_op' | 'inventory' | 'transfer'
   refId?: string | null
+  sourceType?: string | null
+  sourceId?: string | null
+  sourceNumber?: string | null
+  sourceUrl?: string | null
   lines: JournalLineInput[]
   actorId?: string | null
 }
@@ -32,8 +36,44 @@ export async function getOrEnsureAccount(
   code: string,
   defaultName: string,
   type: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense',
-  normalBalance: 'debit' | 'credit' = type === 'asset' || type === 'expense' ? 'debit' : 'credit'
+  normalBalance: 'debit' | 'credit' = type === 'asset' || type === 'expense' ? 'debit' : 'credit',
+  accountTag?: string | null
 ): Promise<string> {
+  // 1. استنتاج أو استخدام وسم الحساب (Account Tag) المعتمد في النظام
+  const effectiveTag = accountTag || (
+    code === '5001' ? 'COGS' :
+    code === '1201' ? 'INVENTORY' :
+    code === '4001' ? 'SALES_REVENUE' :
+    code === '4002' ? 'SERVICE_REVENUE' :
+    code === '4003' ? 'OTHER_REVENUE' :
+    code === '1320' ? 'CHECKS_UNDER_COLLECTION' :
+    code === '1330' ? 'CHECKS_BOUNCED' :
+    code === '1110' ? 'CHECKS_PORTFOLIO' :
+    code === '1400' ? 'CUSTOMER_RECEIVABLE' :
+    code === '2100' ? 'SUPPLIER_PAYABLE' :
+    code === '5199' ? 'GENERAL_EXPENSE' :
+    null
+  )
+
+  // البحث أولاً بواسطة وسم الحساب (Account Tag)
+  if (effectiveTag) {
+    const { data: byTag } = await supabase
+      .from('accounts')
+      .select('id, is_group, is_active')
+      .eq('store_id', storeId)
+      .eq('account_tag', effectiveTag)
+      .eq('is_group', false)
+      .limit(1)
+      .maybeSingle()
+
+    if (byTag) {
+      if (!byTag.is_active) {
+        await supabase.from('accounts').update({ is_active: true }).eq('id', byTag.id)
+      }
+      return byTag.id
+    }
+  }
+
   // 0. فحص ربط الصندوق الافتراضي إن كان الحساب المطلوب هو حساب الصندوق
   if (code === '1001' || defaultName.includes('صندوق') || defaultName.includes('الصندوق')) {
     const { data: defBox } = await supabase
@@ -48,7 +88,7 @@ export async function getOrEnsureAccount(
     }
   }
 
-  // 1. البحث بالكود أولاً
+  // 2. البحث بالكود أولاً
   const { data: byCode } = await supabase
     .from('accounts')
     .select('id, is_group, is_active')
@@ -63,7 +103,7 @@ export async function getOrEnsureAccount(
     return byCode.id
   }
 
-  // 2. البحث بالاسم والنوع
+  // 3. البحث بالاسم والنوع
   const { data: byName } = await supabase
     .from('accounts')
     .select('id, is_group, is_active')
@@ -75,7 +115,7 @@ export async function getOrEnsureAccount(
 
   if (byName) return byName.id
 
-  // 3. إنشاء الحساب إن لم يوجد
+  // 4. إنشاء الحساب مع إسناد الوسم المناسب له
   const { data: newAcc, error } = await supabase
     .from('accounts')
     .insert({
@@ -89,6 +129,7 @@ export async function getOrEnsureAccount(
       normal_balance: normalBalance,
       balance: 0,
       currency: 'ILS',
+      account_tag: effectiveTag || null,
     })
     .select('id')
     .single()
@@ -180,7 +221,8 @@ export async function postJournalEntry(params: PostJournalEntryParams) {
   const datePrefix = params.date.replace(/-/g, '').slice(0, 6)
   const entryNumber = `JV-${datePrefix}-${String((count ?? 0) + 1).padStart(4, '0')}`
 
-  // 5. إدراج رأس القيد في journal_entries بالحالة POSTED
+  // 5. إدراج رأس القيد في journal_entries بالحالة POSTED مع الربط الوثيق بالحركة الأصلية
+  const effectiveSourceId = params.sourceId || params.refId || null
   const { data: entry, error: entryErr } = await supabase
     .from('journal_entries')
     .insert({
@@ -189,7 +231,11 @@ export async function postJournalEntry(params: PostJournalEntryParams) {
       date: params.date,
       description: params.description.trim(),
       source: params.source,
-      ref_id: params.refId || null,
+      ref_id: effectiveSourceId,
+      source_id: effectiveSourceId,
+      source_type: params.sourceType || params.source,
+      source_number: params.sourceNumber || null,
+      source_url: params.sourceUrl || null,
       status: 'posted',
       created_by: params.actorId || null,
     })
@@ -199,6 +245,21 @@ export async function postJournalEntry(params: PostJournalEntryParams) {
   if (entryErr) {
     console.error('Error inserting journal entry:', entryErr)
     return { success: false, error: entryErr.message || 'فشل إدراج القيد' }
+  }
+
+  // تحديث العلاقة العكسية journal_entry_id في الجدول المصدري
+  if (effectiveSourceId) {
+    if (params.source === 'voucher') {
+      await supabase.from('vouchers').update({ journal_entry_id: entry.id }).eq('id', effectiveSourceId)
+    } else if (params.source === 'invoice') {
+      await supabase.from('invoices').update({ journal_entry_id: entry.id }).eq('id', effectiveSourceId)
+    } else if (params.source === 'purchase') {
+      await supabase.from('purchase_invoices').update({ journal_entry_id: entry.id }).eq('id', effectiveSourceId)
+    } else if (params.source === 'sales_return') {
+      await supabase.from('sales_returns').update({ journal_entry_id: entry.id }).eq('id', effectiveSourceId)
+    } else if (params.source === 'purchase_return') {
+      await supabase.from('purchase_returns').update({ journal_entry_id: entry.id }).eq('id', effectiveSourceId)
+    }
   }
 
   // 6. إدراج بنود القيد في journal_lines
@@ -289,30 +350,7 @@ export async function postSalesInvoiceEntry(invoiceId: string, actorId?: string 
   const total = Number(inv.total || 0)
   if (total <= 0) return { success: false, error: 'مبلغ الفاتورة صفر أو سالب' }
 
-  // حسابات الإيراد والذمم والنقدية
-  const salesAccId = await getOrEnsureAccount(supabase, storeId, '4001', 'إيرادات المبيعات', 'revenue', 'credit')
-  let debitAccId = ''
-
-  if (inv.payment_method === 'cash') {
-    debitAccId = await getOrEnsureAccount(supabase, storeId, '1001', 'الصندوق', 'asset', 'debit')
-  } else {
-    debitAccId = await getCustomerAccount(supabase, storeId, inv.customer_id, inv.customer_name)
-  }
-
-  const lines: JournalLineInput[] = [
-    {
-      account_id: debitAccId,
-      debit: total,
-      credit: 0,
-      description: `فاتورة مبيعات #${inv.invoice_number} - ${inv.customer_name || 'عميل نقدي'}`,
-    },
-    {
-      account_id: salesAccId,
-      debit: 0,
-      credit: total,
-      description: `مبيعات فاتورة #${inv.invoice_number}`,
-    },
-  ]
+  const date = inv.issue_date || new Date().toISOString().slice(0, 10)
 
   // احتساب تكلفة البضاعة المباعة COGS إن وجدت
   let totalCost = 0
@@ -325,38 +363,142 @@ export async function postSalesInvoiceEntry(invoiceId: string, actorId?: string 
     }
   }
 
+  // 1. قيد تكلفة المبيعات: Depit: تكلفة البضاعة المباعة (5001) / Cridet: مخزون البضاعة (1201)
   if (totalCost > 0) {
     const cogsAccId = await getOrEnsureAccount(supabase, storeId, '5001', 'تكلفة البضاعة المباعة', 'expense', 'debit')
     const invAccId = await getOrEnsureAccount(supabase, storeId, '1201', 'المخزون', 'asset', 'debit')
 
-    lines.push({
-      account_id: cogsAccId,
-      debit: totalCost,
-      credit: 0,
-      description: `تكلفة بضاعة فاتورة #${inv.invoice_number}`,
-    })
-    lines.push({
-      account_id: invAccId,
-      debit: 0,
-      credit: totalCost,
-      description: `إخراج مخزون فاتورة #${inv.invoice_number}`,
+    await postJournalEntry({
+      storeId,
+      date,
+      description: `قيد تكلفة البضاعة والمخزون - فاتورة مبيعات #${inv.invoice_number}`,
+      source: 'invoice',
+      refId: inv.id,
+      sourceType: 'sales_invoice',
+      sourceId: inv.id,
+      sourceNumber: inv.invoice_number,
+      sourceUrl: `/dashboard/accounting/invoices/${inv.id}`,
+      lines: [
+        {
+          account_id: cogsAccId,
+          debit: totalCost,
+          credit: 0,
+          description: `تكلفة بضاعة مباعة فاتورة #${inv.invoice_number}`,
+        },
+        {
+          account_id: invAccId,
+          debit: 0,
+          credit: totalCost,
+          description: `إخراج مخزون بضاعة مباعة فاتورة #${inv.invoice_number}`,
+        },
+      ],
+      actorId,
     })
   }
 
+  // 2. قيد البيع والتحصيل (نقدي) أو قيد البيع الآجل (آجل):
+  // مبيعات نقدية: Depit: الصندوق المحدد في عملية القبض / Cridet: إيراد المبيعات (4001)
+  // بيع آجل: Depit: حساب الزبون المحدد / Cridet: إيراد المبيعات (4001)
+  const salesAccId = await getOrEnsureAccount(supabase, storeId, '4001', 'إيرادات المبيعات', 'revenue', 'credit')
+  let debitAccId = ''
+
+  if (inv.payment_method === 'cash') {
+    let cashBoxId: string | null = null
+    const { data: cm } = await supabase
+      .from('cash_movements')
+      .select('cash_box_id')
+      .or(`ref_id.eq.${inv.id}${inv.order_id ? `,ref_id.eq.${inv.order_id}` : ''}`)
+      .limit(1)
+      .maybeSingle()
+    if (cm?.cash_box_id) {
+      cashBoxId = cm.cash_box_id
+    }
+    debitAccId = await getCashBoxAccount(supabase, storeId, cashBoxId)
+  } else {
+    debitAccId = await getCustomerAccount(supabase, storeId, inv.customer_id, inv.customer_name)
+  }
+
+  const isCash = inv.payment_method === 'cash'
+  const salesLines: JournalLineInput[] = [
+    {
+      account_id: debitAccId,
+      debit: total,
+      credit: 0,
+      description: isCash
+        ? `قبض مبيعات نقدية فاتورة #${inv.invoice_number}`
+        : `استحقاق مبيعات آجلة فاتورة #${inv.invoice_number} - ${inv.customer_name || 'عميل آجل'}`,
+    },
+    {
+      account_id: salesAccId,
+      debit: 0,
+      credit: total,
+      description: `إيرادات مبيعات فاتورة #${inv.invoice_number}`,
+    },
+  ]
+
   return await postJournalEntry({
     storeId,
-    date: inv.issue_date || new Date().toISOString().slice(0, 10),
-    description: `إثبات فاتورة مبيعات #${inv.invoice_number} - ${inv.customer_name || 'عميل نقدي'}`,
+    date,
+    description: isCash
+      ? `قيد البيع والتحصيل النقدي - فاتورة مبيعات #${inv.invoice_number}`
+      : `قيد البيع الآجل - فاتورة مبيعات #${inv.invoice_number} - ${inv.customer_name || 'عميل آجل'}`,
     source: 'invoice',
     refId: inv.id,
-    lines,
+    sourceType: 'sales_invoice',
+    sourceId: inv.id,
+    sourceNumber: inv.invoice_number,
+    sourceUrl: `/dashboard/accounting/invoices/${inv.id}`,
+    lines: salesLines,
     actorId,
   })
 }
 
 /**
+ * جلب حساب محفظة الشيكات الواردة (أوراق قبض)
+ */
+export async function getChecksPortfolioAccount(supabase: any, storeId: string): Promise<string> {
+  // 1. البحث أولاً بواسطة وسم الحساب CHECKS_PORTFOLIO
+  const { data: tagged } = await supabase
+    .from('accounts')
+    .select('id, is_active')
+    .eq('store_id', storeId)
+    .eq('account_tag', 'CHECKS_PORTFOLIO')
+    .eq('is_group', false)
+    .limit(1)
+    .maybeSingle()
+
+  if (tagged) {
+    if (!tagged.is_active) {
+      await supabase.from('accounts').update({ is_active: true }).eq('id', tagged.id)
+    }
+    return tagged.id
+  }
+
+  // 2. الرجوع للكود والاسم كبديل احتياطي
+  const { data: accounts } = await supabase
+    .from('accounts')
+    .select('id, code, name')
+    .eq('store_id', storeId)
+    .eq('type', 'asset')
+    .eq('is_group', false)
+
+  if (accounts && accounts.length > 0) {
+    const match = accounts.find((a: any) =>
+      a.code === '1110' ||
+      a.code === '1300' ||
+      a.name.includes('محفظة الشيكات') ||
+      a.name.includes('أوراق قبض') ||
+      (a.name.includes('شيكات واردة') && !a.name.includes('صندوق'))
+    )
+    if (match) return match.id
+  }
+
+  return await getOrEnsureAccount(supabase, storeId, '1110', 'محفظة الشيكات الواردة (أوراق قبض)', 'asset', 'debit', 'CHECKS_PORTFOLIO')
+}
+
+/**
  * جلب أو ربط الحساب المحاسبي الخاص بالعميل في دليل الحسابات
- * يربطه تحت الحساب الرئيسي "ذمم الزبائن" (1101)
+ * يربطه تحت الحساب الرئيسي "ذمم الزبائن / ذمم مدينة" (مع تجنب أي تضارب مع الصناديق والبنوك)
  */
 export async function getCustomerAccount(
   supabase: any,
@@ -364,14 +506,9 @@ export async function getCustomerAccount(
   customerId?: string | null,
   customerName?: string | null
 ): Promise<string> {
-  const controlAccId = await getOrEnsureAccount(supabase, storeId, '1101', 'ذمم الزبائن', 'asset', 'debit')
-
-  if (!customerId && !customerName) {
-    return controlAccId
-  }
-
   const targetName = (customerName || '').trim()
 
+  // 1. نبحث أولاً عن حساب فرعي تحليلي مخصص للعميل باسمه (مع استبعاد الصناديق والبنوك والشيكات)
   if (targetName) {
     const { data: subAcc } = await supabase
       .from('accounts')
@@ -380,6 +517,9 @@ export async function getCustomerAccount(
       .ilike('name', `%${targetName}%`)
       .eq('type', 'asset')
       .eq('is_group', false)
+      .not('name', 'ilike', '%صندوق%')
+      .not('name', 'ilike', '%بنك%')
+      .not('name', 'ilike', '%شيك%')
       .maybeSingle()
 
     if (subAcc) {
@@ -390,7 +530,132 @@ export async function getCustomerAccount(
     }
   }
 
-  return controlAccId
+  // 2. البحث عن الحساب الرئيسي لذمم الزبائن بواسطة وسم CUSTOMER_RECEIVABLE
+  const { data: taggedCustAcc } = await supabase
+    .from('accounts')
+    .select('id, is_active')
+    .eq('store_id', storeId)
+    .eq('account_tag', 'CUSTOMER_RECEIVABLE')
+    .eq('is_group', false)
+    .limit(1)
+    .maybeSingle()
+
+  if (taggedCustAcc) {
+    if (!taggedCustAcc.is_active) {
+      await supabase.from('accounts').update({ is_active: true }).eq('id', taggedCustAcc.id)
+    }
+    return taggedCustAcc.id
+  }
+
+  // 3. البحث بالاسم والكود 1400 كبديل احتياطي
+  const { data: accounts } = await supabase
+    .from('accounts')
+    .select('id, code, name, is_active')
+    .eq('store_id', storeId)
+    .eq('type', 'asset')
+    .eq('is_group', false)
+    .not('name', 'ilike', '%صندوق%')
+    .not('name', 'ilike', '%بنك%')
+    .not('name', 'ilike', '%شيك%')
+
+  if (accounts && accounts.length > 0) {
+    const bestMatch = accounts.find((a: any) =>
+      a.code === '1400' ||
+      a.name.includes('ذمم مدينة') ||
+      a.name.includes('ذمم الزبائن') ||
+      a.name.includes('ذمم العملاء')
+    ) || accounts.find((a: any) =>
+      a.name.includes('الزبائن') ||
+      a.name.includes('العملاء') ||
+      a.name.includes('مدين')
+    )
+
+    if (bestMatch) {
+      if (!bestMatch.is_active) {
+        await supabase.from('accounts').update({ is_active: true }).eq('id', bestMatch.id)
+      }
+      return bestMatch.id
+    }
+  }
+
+  // 4. إن لم يوجد، نضمن وجود الحساب بالوسم CUSTOMER_RECEIVABLE
+  return await getOrEnsureAccount(supabase, storeId, '1400', 'ذمم الزبائن', 'asset', 'debit', 'CUSTOMER_RECEIVABLE')
+}
+
+/**
+ * جلب أو ربط الحساب المحاسبي الخاص بالمورد في دليل الحسابات
+ * يربطه تحت الحساب الرئيسي "ذمم الموردين" (2100 أو 2001)
+ */
+export async function getSupplierAccount(
+  supabase: any,
+  storeId: string,
+  supplierId?: string | null,
+  supplierName?: string | null
+): Promise<string> {
+  const targetName = (supplierName || '').trim()
+
+  if (targetName) {
+    const { data: subAcc } = await supabase
+      .from('accounts')
+      .select('id, is_active')
+      .eq('store_id', storeId)
+      .ilike('name', `%${targetName}%`)
+      .eq('type', 'liability')
+      .eq('is_group', false)
+      .not('name', 'ilike', '%صندوق%')
+      .not('name', 'ilike', '%بنك%')
+      .maybeSingle()
+
+    if (subAcc) {
+      if (!subAcc.is_active) {
+        await supabase.from('accounts').update({ is_active: true }).eq('id', subAcc.id)
+      }
+      return subAcc.id
+    }
+  }
+
+  // 2. البحث عن الحساب الرئيسي لذمم الموردين بواسطة وسم SUPPLIER_PAYABLE
+  const { data: taggedSuppAcc } = await supabase
+    .from('accounts')
+    .select('id, is_active')
+    .eq('store_id', storeId)
+    .eq('account_tag', 'SUPPLIER_PAYABLE')
+    .eq('is_group', false)
+    .limit(1)
+    .maybeSingle()
+
+  if (taggedSuppAcc) {
+    if (!taggedSuppAcc.is_active) {
+      await supabase.from('accounts').update({ is_active: true }).eq('id', taggedSuppAcc.id)
+    }
+    return taggedSuppAcc.id
+  }
+
+  // 3. البحث بالاسم والكود 2100 كبديل احتياطي
+  const { data: accounts } = await supabase
+    .from('accounts')
+    .select('id, code, name, is_active')
+    .eq('store_id', storeId)
+    .eq('type', 'liability')
+    .eq('is_group', false)
+
+  if (accounts && accounts.length > 0) {
+    const bestMatch = accounts.find((a: any) =>
+      a.code === '2100' ||
+      a.code === '2001' ||
+      a.name.includes('ذمم الموردين') ||
+      a.name.includes('الموردين') ||
+      a.name.includes('ذمم دائنة')
+    )
+    if (bestMatch) {
+      if (!bestMatch.is_active) {
+        await supabase.from('accounts').update({ is_active: true }).eq('id', bestMatch.id)
+      }
+      return bestMatch.id
+    }
+  }
+
+  return await getOrEnsureAccount(supabase, storeId, '2100', 'ذمم الموردين', 'liability', 'credit', 'SUPPLIER_PAYABLE')
 }
 
 export interface PostPosSaleJournalEntriesParams {
@@ -403,6 +668,7 @@ export interface PostPosSaleJournalEntriesParams {
   mode: 'pos' | 'account'
   customerId?: string | null
   customerName?: string | null
+  cashBoxId?: string | null
   totalAmount: number
   totalCost: number
   amountPaid: number
@@ -413,8 +679,8 @@ export interface PostPosSaleJournalEntriesParams {
  * تسجيل القيود المحاسبية لنقطة البيع (POS):
  * 1. القيد الأول: تكلفة البضاعة والمخزون (مدين تكلفة البضاعة 5001 / دائن المخزون 1201)
  * 2. القيد الثاني: المبيعات النقدية أو الآجلة:
- *    - بيع نقدي: مدين الصندوق 1001 / دائن المبيعات 4001
- *    - بيع آجل: مدين حساب العميل (أو 1101) / دائن المبيعات 4001
+ *    - بيع نقدي: مدين الصندوق المحدد في عملية القبض / دائن المبيعات 4001
+ *    - بيع آجل: مدين حساب الزبون المحدد / دائن المبيعات 4001
  */
 export async function postPosSaleJournalEntries(params: PostPosSaleJournalEntriesParams) {
   const supabase = createClient()
@@ -483,12 +749,26 @@ export async function postPosSaleJournalEntries(params: PostPosSaleJournalEntrie
   if (totalAmount > 0) {
     try {
       const salesAccId = await getOrEnsureAccount(supabase, storeId, '4001', 'إيرادات المبيعات', 'revenue', 'credit')
-      const cashAccId = await getOrEnsureAccount(supabase, storeId, '1001', 'الصندوق', 'asset', 'debit')
+
+      // جلب الحساب التحليلي للصندوق المحدد بدقة
+      let effectiveCashBoxId = params.cashBoxId
+      if (!effectiveCashBoxId && effectiveRefId) {
+        const { data: cm } = await supabase
+          .from('cash_movements')
+          .select('cash_box_id')
+          .or(`ref_id.eq.${effectiveRefId},ref_id.eq.${orderId}`)
+          .limit(1)
+          .maybeSingle()
+        if (cm?.cash_box_id) {
+          effectiveCashBoxId = cm.cash_box_id
+        }
+      }
+      const cashAccId = await getCashBoxAccount(supabase, storeId, effectiveCashBoxId)
 
       const salesLines: JournalLineInput[] = []
 
       if (mode === 'pos') {
-        // بيع نقدي: مدين الصندوق 1001 / دائن المبيعات 4001
+        // بيع نقدي: مدين الصندوق المحدد في القبض / دائن إيراد المبيعات 4001
         salesLines.push(
           {
             account_id: cashAccId,
@@ -567,9 +847,170 @@ export async function postPosSaleJournalEntries(params: PostPosSaleJournalEntrie
 }
 
 /**
+ * جلب أو إنشاء الحساب المحاسبي الخاص بصندوق محدد بدقة
+ * يضمن ربط الصندوق بحساب دقيق في الأصول (الرمز 1001، 1002، إلخ)
+ */
+export async function getCashBoxAccount(
+  supabase: any,
+  storeId: string,
+  cashBoxId?: string | null
+): Promise<string> {
+  let box: any = null
+  if (cashBoxId) {
+    const { data: foundBox } = await supabase
+      .from('cash_boxes')
+      .select('id, name, account_id')
+      .eq('id', cashBoxId)
+      .eq('store_id', storeId)
+      .maybeSingle()
+    box = foundBox
+  }
+
+  if (!box) {
+    const { data: defBox } = await supabase
+      .from('cash_boxes')
+      .select('id, name, account_id')
+      .eq('store_id', storeId)
+      .eq('is_default', true)
+      .maybeSingle()
+    box = defBox
+  }
+
+  if (!box) {
+    const { data: anyBox } = await supabase
+      .from('cash_boxes')
+      .select('id, name, account_id')
+      .eq('store_id', storeId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+    box = anyBox
+  }
+
+  // 1. إذا كان الصندوق مرتبطاً بحساب بالفعل
+  if (box?.account_id) {
+    const { data: acc } = await supabase
+      .from('accounts')
+      .select('id, is_active')
+      .eq('id', box.account_id)
+      .maybeSingle()
+    if (acc) {
+      if (!acc.is_active) {
+        await supabase.from('accounts').update({ is_active: true }).eq('id', acc.id)
+      }
+      return acc.id
+    }
+  }
+
+  const boxName = box?.name?.trim() || 'الصندوق الرئيسي'
+
+  // 2. البحث عن حساب يحمل وسم CASH ومطابق لاسم الصندوق
+  const { data: taggedNamedAcc } = await supabase
+    .from('accounts')
+    .select('id, is_active')
+    .eq('store_id', storeId)
+    .eq('account_tag', 'CASH')
+    .ilike('name', `%${boxName}%`)
+    .eq('is_group', false)
+    .limit(1)
+    .maybeSingle()
+
+  if (taggedNamedAcc) {
+    if (!taggedNamedAcc.is_active) {
+      await supabase.from('accounts').update({ is_active: true }).eq('id', taggedNamedAcc.id)
+    }
+    if (box) {
+      await supabase.from('cash_boxes').update({ account_id: taggedNamedAcc.id }).eq('id', box.id)
+    }
+    return taggedNamedAcc.id
+  }
+
+  // 3. البحث عن أي حساب يحمل وسم CASH
+  const { data: generalTaggedCash } = await supabase
+    .from('accounts')
+    .select('id, is_active')
+    .eq('store_id', storeId)
+    .eq('account_tag', 'CASH')
+    .eq('is_group', false)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (generalTaggedCash) {
+    if (!generalTaggedCash.is_active) {
+      await supabase.from('accounts').update({ is_active: true }).eq('id', generalTaggedCash.id)
+    }
+    if (box) {
+      await supabase.from('cash_boxes').update({ account_id: generalTaggedCash.id }).eq('id', box.id)
+    }
+    return generalTaggedCash.id
+  }
+
+  // 4. إذا لم يوجد: نبحث عن حساب بنفس الاسم والنوع
+  const { data: existingAcc } = await supabase
+    .from('accounts')
+    .select('id, is_active')
+    .eq('store_id', storeId)
+    .eq('type', 'asset')
+    .ilike('name', boxName)
+    .maybeSingle()
+
+  if (existingAcc) {
+    if (box) {
+      await supabase.from('cash_boxes').update({ account_id: existingAcc.id }).eq('id', box.id)
+    }
+    return existingAcc.id
+  }
+
+  // توليد كود محاسبي متاح
+  const { data: cashAccounts } = await supabase
+    .from('accounts')
+    .select('code')
+    .eq('store_id', storeId)
+    .like('code', '100%')
+
+  const existingCodes = new Set((cashAccounts || []).map((a: any) => a.code))
+  let newCode = '1001'
+  let counter = 1
+  while (existingCodes.has(newCode)) {
+    counter++
+    newCode = `100${counter}`
+  }
+
+  const { data: newAcc, error: createErr } = await supabase
+    .from('accounts')
+    .insert({
+      store_id: storeId,
+      code: newCode,
+      name: boxName,
+      type: 'asset',
+      is_group: false,
+      is_active: true,
+      is_system: true,
+      normal_balance: 'debit',
+      balance: 0,
+      currency: 'ILS',
+      account_tag: 'CASH',
+    })
+    .select('id')
+    .single()
+
+  if (createErr) {
+    console.error('Error creating cash box account:', createErr)
+    return await getOrEnsureAccount(supabase, storeId, '1001', 'الصندوق الرئيسي', 'asset', 'debit', 'CASH')
+  }
+
+  if (box) {
+    await supabase.from('cash_boxes').update({ account_id: newAcc.id }).eq('id', box.id)
+  }
+
+  return newAcc.id
+}
+
+/**
  * إنشاء وترحيل قيد سند قبض
- * مدين: الصندوق / محفظة الشيكات
- * دائن: العميل / إيرادات أخرى
+ * مدين: حساب الصندوق المحدد بدقة (أو البنك أو محفظة الشيكات حسب طريقة القبض)
+ * دائن: العميل / ذمم الزبائن (أو إيرادات أخرى)
  */
 export async function postReceiptVoucherEntry(voucherId: string, actorId?: string | null) {
   const supabase = createClient()
@@ -595,46 +1036,65 @@ export async function postReceiptVoucherEntry(voucherId: string, actorId?: strin
 
   const storeId = v.store_id
   const total = Number(v.amount || 0)
-  const cashAmt = Number(v.cash_amount || (v.payment_method === 'cash' ? total : 0))
-  const checksAmt = Number(v.checks_amount || (v.payment_method === 'cheque' ? total : 0))
+  if (total <= 0) return { success: false, error: 'مبلغ سند القبض صفر أو سالب' }
 
   const lines: JournalLineInput[] = []
+  const cashAmount = Number(v.cash_amount ?? (v.payment_method === 'cash' ? total : 0))
+  const checksAmount = Number(v.checks_amount ?? (v.payment_method === 'check' ? total : 0))
 
-  // المدين: الصندوق والشيكات
-  if (cashAmt > 0) {
-    const cashAccId = await getOrEnsureAccount(supabase, storeId, '1001', 'الصندوق', 'asset', 'debit')
+  // الطرف المدين: الصندوق أو البنك أو محفظة الشيكات
+  if ((v.payment_method === 'bank' || v.payment_method === 'transfer') && v.bank_account_id) {
+    const { data: bAcc } = await supabase
+      .from('bank_accounts')
+      .select('id, bank_name')
+      .eq('id', v.bank_account_id)
+      .maybeSingle()
+    const debitAccId = await getOrEnsureAccount(supabase, storeId, '1200', bAcc?.bank_name || 'البنك', 'asset', 'debit')
     lines.push({
-      account_id: cashAccId,
-      debit: cashAmt,
-      credit: 0,
-      description: `قبض نقدي سند #${v.voucher_number}`,
-    })
-  }
-
-  if (checksAmt > 0) {
-    const checkAccId = await getOrEnsureAccount(supabase, storeId, '1110', 'محفظة الشيكات الواردة (أوراق قبض)', 'asset', 'debit')
-    lines.push({
-      account_id: checkAccId,
-      debit: checksAmt,
-      credit: 0,
-      description: `قبض شيكات سند #${v.voucher_number}`,
-    })
-  }
-
-  // إذا لم يكن نقداً ولا شيكاً وكان بنكياً
-  if (lines.length === 0 && total > 0) {
-    const bankAccId = await getOrEnsureAccount(supabase, storeId, '1002', 'البنك', 'asset', 'debit')
-    lines.push({
-      account_id: bankAccId,
+      account_id: debitAccId,
       debit: total,
       credit: 0,
-      description: `قبض بنكي سند #${v.voucher_number}`,
+      description: `قبض بنكي/تحويل بموجب سند #${v.voucher_number} - ${v.party_name || ''}`,
+    })
+  } else if (cashAmount > 0 && checksAmount > 0) {
+    // سند مركب (نقد + شيكات)
+    const cashAccId = await getCashBoxAccount(supabase, storeId, v.cash_box_id)
+    const checkAccId = await getChecksPortfolioAccount(supabase, storeId)
+    lines.push({
+      account_id: cashAccId,
+      debit: cashAmount,
+      credit: 0,
+      description: `قبض نقدي بموجب سند #${v.voucher_number} - ${v.party_name || ''}`,
+    })
+    lines.push({
+      account_id: checkAccId,
+      debit: checksAmount,
+      credit: 0,
+      description: `قبض شيكات بموجب سند #${v.voucher_number} - ${v.party_name || ''}`,
+    })
+  } else if (checksAmount > 0 || v.payment_method === 'check') {
+    // شيكات فقط
+    const checkAccId = await getChecksPortfolioAccount(supabase, storeId)
+    lines.push({
+      account_id: checkAccId,
+      debit: total,
+      credit: 0,
+      description: `قبض شيكات بموجب سند #${v.voucher_number} - ${v.party_name || ''}`,
+    })
+  } else {
+    // نقد فقط: الصندوق المحدد بدقة من قبل المستخدم في السند
+    const debitAccId = await getCashBoxAccount(supabase, storeId, v.cash_box_id)
+    lines.push({
+      account_id: debitAccId,
+      debit: total,
+      credit: 0,
+      description: `قبض نقدي بموجب سند #${v.voucher_number} - ${v.party_name || ''}`,
     })
   }
 
-  // الدائن: العميل أو إيراد متنوع
+  // الطرف الدائن: العميل (حساب ذمم الزبائن / ذمم مدينة)
   let creditAccId = ''
-  if (v.customer_id) {
+  if (v.customer_id || v.party_name) {
     creditAccId = await getCustomerAccount(supabase, storeId, v.customer_id, v.party_name)
   } else {
     creditAccId = await getOrEnsureAccount(supabase, storeId, '4003', 'إيرادات وأرباح متنوعة', 'revenue', 'credit')
@@ -644,15 +1104,19 @@ export async function postReceiptVoucherEntry(voucherId: string, actorId?: strin
     account_id: creditAccId,
     debit: 0,
     credit: total,
-    description: `سداد/قبض من ${v.party_name || 'عميل'} سند #${v.voucher_number}`,
+    description: `سداد/قبض من ${v.party_name || 'العميل'} بموجب سند #${v.voucher_number}`,
   })
 
   return await postJournalEntry({
     storeId,
-    date: v.date || new Date().toISOString().slice(0, 10),
+    date: v.date ? (typeof v.date === 'string' ? v.date.slice(0, 10) : new Date(v.date).toISOString().slice(0, 10)) : new Date().toISOString().slice(0, 10),
     description: `سند قبض #${v.voucher_number} - ${v.description || v.party_name || ''}`,
     source: 'voucher',
     refId: v.id,
+    sourceType: 'receipt_voucher',
+    sourceId: v.id,
+    sourceNumber: v.voucher_number,
+    sourceUrl: `/dashboard/accounting/receipts/print/${v.id}`,
     lines,
     actorId,
   })
@@ -660,8 +1124,8 @@ export async function postReceiptVoucherEntry(voucherId: string, actorId?: strin
 
 /**
  * إنشاء وترحيل قيد سند صرف
- * مدين: المورد / حساب المصروف
- * دائن: الصندوق / البنك / شيكات صادرة
+ * مدين: المورد (ذمم الموردين) / حساب المصروف
+ * دائن: حساب الصندوق المحدد بدقة من قبل المستخدم (أو البنك)
  */
 export async function postPaymentVoucherEntry(voucherId: string, actorId?: string | null) {
   const supabase = createClient()
@@ -687,15 +1151,14 @@ export async function postPaymentVoucherEntry(voucherId: string, actorId?: strin
 
   const storeId = v.store_id
   const total = Number(v.amount || 0)
-  const cashAmt = Number(v.cash_amount || (v.payment_method === 'cash' ? total : 0))
-  const checksAmt = Number(v.checks_amount || (v.payment_method === 'cheque' ? total : 0))
+  if (total <= 0) return { success: false, error: 'مبلغ سند الصرف صفر أو سالب' }
 
   const lines: JournalLineInput[] = []
 
-  // المدين: المورد أو المصروف
+  // المدين: المورد (ذمم الموردين) أو المصروف
   let debitAccId = ''
-  if (v.supplier_id) {
-    debitAccId = await getOrEnsureAccount(supabase, storeId, '2001', 'ذمم الموردين', 'liability', 'credit')
+  if (v.supplier_id || v.party_name) {
+    debitAccId = await getSupplierAccount(supabase, storeId, v.supplier_id, v.party_name)
   } else {
     debitAccId = await getOrEnsureAccount(supabase, storeId, '5199', 'مصاريف إدارية وتشغيلية متنوعة', 'expense', 'debit')
   }
@@ -707,43 +1170,69 @@ export async function postPaymentVoucherEntry(voucherId: string, actorId?: strin
     description: `صرف لـ ${v.party_name || 'جهة'} سند #${v.voucher_number}`,
   })
 
-  // الدائن: الصندوق أو البنك أو الشيكات الصادرة
-  if (cashAmt > 0) {
-    const cashAccId = await getOrEnsureAccount(supabase, storeId, '1001', 'الصندوق', 'asset', 'debit')
+  // الدائن: الصندوق المحدد، محفظة الشيكات، أو البنك
+  const cashAmount = Number(v.cash_amount ?? (v.payment_method === 'cash' ? total : 0))
+  const checksAmount = Number(v.checks_amount ?? ((v.payment_method === 'check' || v.payment_method === 'cheque') ? total : 0))
+
+  if ((v.payment_method === 'bank' || v.payment_method === 'transfer') && v.bank_account_id) {
+    const { data: bAcc } = await supabase
+      .from('bank_accounts')
+      .select('id, bank_name')
+      .eq('id', v.bank_account_id)
+      .maybeSingle()
+    const creditAccId = await getOrEnsureAccount(supabase, storeId, '1200', bAcc?.bank_name || 'البنك', 'asset', 'debit')
+    lines.push({
+      account_id: creditAccId,
+      debit: 0,
+      credit: total,
+      description: `صرف بنكي/تحويل بموجب سند #${v.voucher_number}`,
+    })
+  } else if (cashAmount > 0 && checksAmount > 0) {
+    // صرف مركب (نقد + شيكات)
+    const cashAccId = await getCashBoxAccount(supabase, storeId, v.cash_box_id)
+    const checkAccId = await getChecksPortfolioAccount(supabase, storeId)
     lines.push({
       account_id: cashAccId,
       debit: 0,
-      credit: cashAmt,
-      description: `صرف نقدي سند #${v.voucher_number}`,
+      credit: cashAmount,
+      description: `صرف نقدي بموجب سند #${v.voucher_number}`,
     })
-  }
-
-  if (checksAmt > 0) {
-    const checkPayableId = await getOrEnsureAccount(supabase, storeId, '2110', 'شيكات صادرة للموردين (أوراق دفع)', 'liability', 'credit')
     lines.push({
-      account_id: checkPayableId,
+      account_id: checkAccId,
       debit: 0,
-      credit: checksAmt,
-      description: `صرف شيك سند #${v.voucher_number}`,
+      credit: checksAmount,
+      description: `صرف شيكات بموجب سند #${v.voucher_number}`,
     })
-  }
-
-  if (lines.length === 1 && total > 0) {
-    const bankAccId = await getOrEnsureAccount(supabase, storeId, '1002', 'البنك', 'asset', 'debit')
+  } else if (checksAmount > 0 || v.payment_method === 'check' || v.payment_method === 'cheque') {
+    // قيد رقم 6: صرف بشيك: Cridet: محفظة الشيكات
+    const checkAccId = await getChecksPortfolioAccount(supabase, storeId)
     lines.push({
-      account_id: bankAccId,
+      account_id: checkAccId,
       debit: 0,
       credit: total,
-      description: `صرف بنكي سند #${v.voucher_number}`,
+      description: `صرف شيكات بموجب سند #${v.voucher_number}`,
+    })
+  } else {
+    // قيد رقم 5: صرف نقدي: Cridet: الصندوق المحدد
+    const creditAccId = await getCashBoxAccount(supabase, storeId, v.cash_box_id)
+    lines.push({
+      account_id: creditAccId,
+      debit: 0,
+      credit: total,
+      description: `صرف نقدي بموجب سند #${v.voucher_number}`,
     })
   }
 
   return await postJournalEntry({
     storeId,
-    date: v.date || new Date().toISOString().slice(0, 10),
+    date: v.date ? (typeof v.date === 'string' ? v.date.slice(0, 10) : new Date(v.date).toISOString().slice(0, 10)) : new Date().toISOString().slice(0, 10),
     description: `سند صرف #${v.voucher_number} - ${v.description || v.party_name || ''}`,
     source: 'voucher',
     refId: v.id,
+    sourceType: 'payment_voucher',
+    sourceId: v.id,
+    sourceNumber: v.voucher_number,
+    sourceUrl: `/dashboard/accounting/payments/print/${v.id}`,
     lines,
     actorId,
   })
@@ -783,10 +1272,12 @@ export async function postPurchaseInvoiceEntry(purchaseId: string, actorId?: str
   const invAccId = await getOrEnsureAccount(supabase, storeId, '1201', 'المخزون', 'asset', 'debit')
   let creditAccId = ''
 
-  if (p.payment_method === 'cash') {
-    creditAccId = await getOrEnsureAccount(supabase, storeId, '1001', 'الصندوق', 'asset', 'debit')
+  if (p.supplier_id || p.supplier_name) {
+    creditAccId = await getSupplierAccount(supabase, storeId, p.supplier_id, p.supplier_name)
+  } else if (p.payment_method === 'cash') {
+    creditAccId = await getCashBoxAccount(supabase, storeId, null)
   } else {
-    creditAccId = await getOrEnsureAccount(supabase, storeId, '2001', 'ذمم الموردين', 'liability', 'credit')
+    creditAccId = await getSupplierAccount(supabase, storeId, null, null)
   }
 
   const lines: JournalLineInput[] = [
@@ -810,51 +1301,93 @@ export async function postPurchaseInvoiceEntry(purchaseId: string, actorId?: str
     description: `إثبات فاتورة مشتريات #${p.invoice_number}`,
     source: 'purchase',
     refId: p.id,
+    sourceType: 'purchase_invoice',
+    sourceId: p.id,
+    sourceNumber: p.invoice_number,
+    sourceUrl: `/dashboard/purchases/${p.id}`,
     lines,
     actorId,
   })
 }
 
 /**
- * إلغاء وعكس قيد محاسبي عبر قيد عكسي Reversal Entry
+ * حذف قيد اليومية الخاص بعملية مالية وعكس كامل أثره من أرصدة الحسابات
+ * يضمن حذف سطور القيد وإعادة رصيد كل حساب في الدليل إلى ما قبل العملية بدقة
+ */
+export async function deleteJournalEntryForRef(
+  supabase: any,
+  storeId: string,
+  refId: string,
+  source: string,
+  actorId?: string | null
+) {
+  const { data: entries, error } = await supabase
+    .from('journal_entries')
+    .select('id, entry_number, store_id, lines:journal_lines(id, account_id, debit, credit)')
+    .eq('store_id', storeId)
+    .eq('ref_id', refId)
+    .eq('source', source)
+
+  if (error || !entries || entries.length === 0) return { success: true }
+
+  for (const entry of entries) {
+    // عكس أثر سطور القيد على أرصدة شجرة الحسابات
+    for (const line of entry.lines || []) {
+      const { data: acc } = await supabase
+        .from('accounts')
+        .select('id, balance, normal_balance')
+        .eq('id', line.account_id)
+        .single()
+
+      if (acc) {
+        const d = Number(line.debit || 0)
+        const c = Number(line.credit || 0)
+        const delta = acc.normal_balance === 'credit' ? (c - d) : (d - c)
+        await supabase
+          .from('accounts')
+          .update({ balance: Number(acc.balance || 0) - delta })
+          .eq('id', acc.id)
+      }
+    }
+
+    // حذف سطور القيد ثم رأس القيد
+    await supabase.from('journal_lines').delete().eq('journal_entry_id', entry.id)
+    const { error: delErr } = await supabase.from('journal_entries').delete().eq('id', entry.id)
+    if (delErr) {
+      // إن تعذر الحذف بسبب قيود خارجية نضع الحالة voided
+      await supabase.from('journal_entries').update({ status: 'voided' }).eq('id', entry.id)
+    }
+
+    if (actorId) {
+      await logFinancialEvent({
+        storeId,
+        entityType: 'voucher',
+        entityId: entry.id,
+        entityLabel: entry.entry_number,
+        action: 'delete',
+        actorId,
+        details: { action: 'delete_journal_entry', refId, source },
+      })
+    }
+  }
+
+  return { success: true }
+}
+
+/**
+ * إلغاء وعكس قيد محاسبي عبر حذف أثره وإرجاع رصيد الحسابات
  */
 export async function reverseJournalEntry(refId: string, reason: string, actorId?: string | null) {
   const supabase = createClient()
-
   const { data: original } = await supabase
     .from('journal_entries')
-    .select('*, lines:journal_lines(*)')
+    .select('id, store_id, source')
     .eq('ref_id', refId)
-    .eq('status', 'posted')
     .maybeSingle()
 
-  if (!original) return { success: true } // لا يوجد قيد لعكسه
+  if (!original) return { success: true }
 
-  const lines: JournalLineInput[] = (original.lines || []).map((l: any) => ({
-    account_id: l.account_id,
-    debit: Number(l.credit || 0), // عكس المدين والدائن
-    credit: Number(l.debit || 0),
-    description: `عكس قيد #${original.entry_number}: ${reason}`,
-  }))
-
-  const res = await postJournalEntry({
-    storeId: original.store_id,
-    date: new Date().toISOString().slice(0, 10),
-    description: `قيد عكسي للقيد #${original.entry_number} (${reason})`,
-    source: 'reversal',
-    refId: original.id,
-    lines,
-    actorId,
-  })
-
-  if (res.success) {
-    await supabase
-      .from('journal_entries')
-      .update({ status: 'cancelled' })
-      .eq('id', original.id)
-  }
-
-  return res
+  return await deleteJournalEntryForRef(supabase, original.store_id, refId, original.source, actorId)
 }
 
 /**

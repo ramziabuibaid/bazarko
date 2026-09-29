@@ -60,7 +60,7 @@ interface Props {
   }
 }
 
-type TabType = 'explorer_customers' | 'explorer_cheques' | 'explorer_stock' | 'explorer_accounts' | 'import_wizard' | 'gdrive'
+type TabType = 'explorer_customers' | 'explorer_cheques' | 'explorer_stock' | 'explorer_accounts' | 'import_wizard' | 'gdrive' | 'reconstruct_engine'
 
 export default function ShamelWizardClient({
   store,
@@ -76,6 +76,14 @@ export default function ShamelWizardClient({
 
   const hasIsolatedData = (isolatedStats.customers + isolatedStats.stock + isolatedStats.cheques + isolatedStats.accounts) > 0
   const [activeTab, setActiveTab] = useState<TabType>(hasIsolatedData ? 'explorer_customers' : 'import_wizard')
+
+  // Reconstruction Engine (17 Stages) State
+  const [reconstructing, setReconstructing] = useState(false)
+  const [currentStage, setCurrentStage] = useState(0)
+  const [stageProgress, setStageProgress] = useState(0)
+  const [reconstructLogs, setReconstructLogs] = useState<string[]>([])
+  const [reconstructResult, setReconstructResult] = useState<any>(null)
+  const [reconstructError, setReconstructError] = useState<string | null>(null)
 
   // Parsing & File State
   const [parsing, setParsing] = useState(false)
@@ -560,6 +568,100 @@ export default function ShamelWizardClient({
   }
 
   // ─────────────────────────────────────────────────────────────
+  // 3.1 Strict 17-Stage Operational Reconstruction Engine
+  // ─────────────────────────────────────────────────────────────
+  const appendReconstructLog = (msg: string) => {
+    setReconstructLogs(prev => [...prev, `[${new Date().toLocaleTimeString('en-US', { hour12: false })}] ${msg}`])
+  }
+
+  const handleRunReconstruction = async (specificStage: number = 0) => {
+    setReconstructing(true)
+    setReconstructError(null)
+    if (specificStage === 0) {
+      setReconstructResult(null)
+      setReconstructLogs([])
+    }
+    setErrorMsg(null)
+    setSuccessMsg(null)
+
+    const STAGE_TITLES: Record<number, string> = {
+      1: 'المرحلة 1 – شجرة الحسابات (الأرصدة = 0)',
+      2: 'المرحلة 2 – العملاء والموردون (البيانات الأساسية فقط)',
+      3: 'المرحلة 3 – الأصناف والمخازن (الكميات = 0)',
+      4: 'المرحلة 4 – فواتير المشتريات (+المخزون +القيود +الموردين)',
+      5: 'المرحلة 5 – مردودات المشتريات (عكس أثر الشراء)',
+      6: 'المرحلة 6 – فواتير المبيعات (-المخزون +الإيرادات +COGS +الذمم)',
+      7: 'المرحلة 7 – مردودات المبيعات (إرجاع المخزون +تسوية الذمم)',
+      8: 'المرحلة 8 – سندات القبض (الصناديق المحددة +الشيكات)',
+      9: 'المرحلة 9 – محفظة الشيكات التشغيلية',
+      10: 'المرحلة 10 – سندات الصرف والمصروفات (تخفيض الصندوق/البنك)',
+      11: 'المرحلة 11 – باقي العمليات المالية والتحويلات',
+      12: 'المرحلة 12 – القيود المستقلة فعلياً (استبعاد قيود الفواتير)',
+      13: 'المرحلة 13 – إعادة احتساب المخزون الفعلي من الحركات',
+      14: 'المرحلة 14 – إعادة احتساب الصناديق والبنوك من الحركات',
+      15: 'المرحلة 15 – إعادة احتساب أرصدة العملاء والموردين',
+      16: 'المرحلة 16 – إعادة احتساب محفظة الشيكات',
+      17: 'المرحلة 17 – المطابقة النهائية والتدقيق الشامل',
+    }
+
+    try {
+      if (specificStage > 0) {
+        // تشغيل مرحلة واحدة محددة
+        setCurrentStage(specificStage)
+        setStageProgress(Math.round((specificStage / 17) * 100))
+        appendReconstructLog(`جاري تنفيذ ${STAGE_TITLES[specificStage]}...`)
+
+        const res = await fetch('/api/shamel/import-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'reconstruct', stage: specificStage }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || `فشل تنفيذ المرحلة ${specificStage}`)
+
+        if (specificStage === 17) {
+          setReconstructResult(data.result)
+        }
+        appendReconstructLog(`✓ اكتملت بنجاح: ${STAGE_TITLES[specificStage]}`)
+        setSuccessMsg(`✓ اكتملت ${STAGE_TITLES[specificStage]} بنجاح!`)
+      } else {
+        // تشغيل المراحل الـ 17 بالتتابع مع التحديث اللحظي للتقدم
+        appendReconstructLog('🚀 بدء محرك إعادة بناء النظام الكامل من العمليات الفعلية (17 مرحلة)...')
+        for (let s = 1; s <= 17; s++) {
+          setCurrentStage(s)
+          setStageProgress(Math.round(((s - 1) / 17) * 100))
+          appendReconstructLog(`جاري معالجة ${STAGE_TITLES[s]}...`)
+
+          const res = await fetch('/api/shamel/import-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'reconstruct', stage: s }),
+          })
+          const data = await res.json()
+          if (!res.ok) throw new Error(data.error || `فشل في المرحلة ${s}: ${STAGE_TITLES[s]}`)
+
+          if (s === 17) {
+            setReconstructResult(data.result)
+          }
+          appendReconstructLog(`✓ تم إنجاز: ${STAGE_TITLES[s]}`)
+          setStageProgress(Math.round((s / 17) * 100))
+        }
+
+        appendReconstructLog('🎉 تم إكمال إعادة بناء وتكوين النظام بنجاح تام وفقاً للعمليات الفعلية 100%!')
+        setSuccessMsg('✓ تم إنجاز المراحل الـ 17 بنجاح تام وبناء كافة أرصدة المتجر من العمليات الفعلية بدون أي رصيد افتتاحي!')
+      }
+
+      router.refresh()
+    } catch (err: any) {
+      console.error('Reconstruction error:', err)
+      setReconstructError(err.message || 'حدث خطأ أثناء تنفيذ عملية إعادة البناء.')
+      appendReconstructLog(`❌ توقف: ${err.message}`)
+    } finally {
+      setReconstructing(false)
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
   // 4. Wipe / Reset Entire Store Data
   // ─────────────────────────────────────────────────────────────
   const handleWipeStore = async () => {
@@ -819,6 +921,18 @@ export default function ShamelWizardClient({
                 {isolatedStats.accounts.toLocaleString('ar-u-nu-latn')}
               </span>
             )}
+          </button>
+
+          <button
+            onClick={() => handleTabChange('reconstruct_engine')}
+            className={`px-4 py-2 rounded-lg font-bold text-xs transition-all flex items-center gap-2 ${
+              activeTab === 'reconstruct_engine'
+                ? 'bg-amber-400 text-slate-950 shadow-md font-black ring-2 ring-amber-400/50'
+                : 'text-amber-300 hover:text-white hover:bg-amber-500/10 border border-amber-500/30'
+            }`}
+          >
+            <span className={activeTab === 'reconstruct_engine' ? 'animate-spin' : ''}>⚙️</span>
+            <span>إعادة البناء من العمليات (17 مرحلة)</span>
           </button>
 
           <button
@@ -1941,6 +2055,393 @@ export default function ShamelWizardClient({
           </form>
         </div>
       )}
+
+      {/* ───────────────────────────────────────────────────────── */}
+      {/* 7. TAB: OPERATIONAL RECONSTRUCTION ENGINE (17 STAGES)     */}
+      {/* ───────────────────────────────────────────────────────── */}
+      {activeTab === 'reconstruct_engine' && (
+        <div className="space-y-6">
+          {/* Main Control Banner */}
+          <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-amber-950/40 border border-amber-500/30 rounded-2xl p-6 shadow-2xl">
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+              <div className="space-y-2 max-w-3xl">
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-full text-xs font-bold">
+                  <span>⚡</span>
+                  <span>معيار التدقيق المحاسبي الصارم: لا أرصدة افتتاحية مستقلة</span>
+                </div>
+                <h3 className="text-xl font-black text-white">
+                  محرك إعادة بناء النظام وتكوين الأرصدة من العمليات الفعلية (17 مرحلة)
+                </h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  يقوم هذا المحرك بنقل العمليات التي كوّنت الأرصدة وليس الأرصدة بحد ذاتها:
+                  الأصناف تبدأ برصيد صفر، الحسابات بصفر، الصناديق بصفر، والعملاء بصفر.
+                  ثم يُعاد احتساب كل رصيد بدقة رياضية تراكمياً وحصرياً من واقع فواتير الشراء، البيع، المردودات، والقبوضات والصرف.
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto">
+                <button
+                  type="button"
+                  onClick={() => handleRunReconstruction(0)}
+                  disabled={reconstructing}
+                  className="w-full sm:w-auto px-6 py-3.5 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-sm rounded-xl shadow-lg hover:shadow-amber-500/20 disabled:opacity-50 transition flex items-center justify-center gap-2"
+                >
+                  <span className={reconstructing ? 'animate-spin' : ''}>⚡</span>
+                  <span>{reconstructing ? 'جاري إعادة بناء النظام...' : 'تشغيل إعادة البناء الكاملة (17 مرحلة)'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Live Progress Bar */}
+            {(reconstructing || stageProgress > 0) && (
+              <div className="mt-6 pt-6 border-t border-white/10 space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-300">
+                  <span className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
+                    <span>المرحلة الحالية: {currentStage > 0 ? `المرحلة ${currentStage} من 17` : 'جاهز'}</span>
+                  </span>
+                  <span className="font-mono text-amber-400">{stageProgress}%</span>
+                </div>
+                <div className="w-full bg-slate-950 rounded-full h-3 overflow-hidden p-0.5 border border-white/10">
+                  <div
+                    className="bg-gradient-to-r from-amber-500 to-yellow-400 h-full rounded-full transition-all duration-300 shadow-sm shadow-amber-400/50"
+                    style={{ width: `${stageProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Audit & Final Reconciliation Card (Stage 17 Result) */}
+          {reconstructResult?.audit && (
+            <div className={`border rounded-2xl p-6 shadow-xl space-y-4 ${
+              reconstructResult.audit.is_balanced && (reconstructResult.audit.discrepancies_count || 0) === 0
+                ? 'bg-emerald-950/20 border-emerald-500/30'
+                : 'bg-amber-950/20 border-amber-500/30'
+            }`}>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl font-bold ${
+                    reconstructResult.audit.is_balanced
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                  }`}>
+                    {reconstructResult.audit.is_balanced ? '✓' : '⚠️'}
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold text-white">
+                      تقرير المطابقة والتدقيق النهائي الشامل (المرحلة 17)
+                    </h4>
+                    <p className="text-xs text-slate-400">
+                      {reconstructResult.audit.is_balanced
+                        ? 'كافة قيود اليومية متوازنة بالمليمتر (إجمالي المدين = إجمالي الدائن) دون أي فجوات حسابية.'
+                        : 'يوجد عدم توازن طفيف في قيود اليومية يتطلب تدقيقاً في التسويات.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="text-xs font-mono font-bold px-3 py-1.5 rounded-lg bg-slate-950 border border-white/10 text-slate-300">
+                  زمن المعالجة: {((reconstructResult.execution_time_ms || 0) / 1000).toFixed(2)} ثانية
+                </div>
+              </div>
+
+              {/* Metric Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+                <div className="bg-slate-950/60 border border-white/5 rounded-xl p-3.5 text-center">
+                  <div className="text-[11px] text-slate-400 mb-1 font-semibold">إجمالي المدين المحاسبي</div>
+                  <div className="text-lg font-black font-mono text-emerald-400">
+                    {(reconstructResult.audit.total_debit || 0).toLocaleString('ar-u-nu-latn')}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-mono mt-0.5">{store.currency_code}</div>
+                </div>
+
+                <div className="bg-slate-950/60 border border-white/5 rounded-xl p-3.5 text-center">
+                  <div className="text-[11px] text-slate-400 mb-1 font-semibold">إجمالي الدائن المحاسبي</div>
+                  <div className="text-lg font-black font-mono text-emerald-400">
+                    {(reconstructResult.audit.total_credit || 0).toLocaleString('ar-u-nu-latn')}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-mono mt-0.5">{store.currency_code}</div>
+                </div>
+
+                <div className="bg-slate-950/60 border border-white/5 rounded-xl p-3.5 text-center">
+                  <div className="text-[11px] text-slate-400 mb-1 font-semibold">الفارق المحاسبي</div>
+                  <div className={`text-lg font-black font-mono ${
+                    reconstructResult.audit.difference === 0 ? 'text-emerald-400' : 'text-amber-400'
+                  }`}>
+                    {(reconstructResult.audit.difference || 0).toLocaleString('ar-u-nu-latn')}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-mono mt-0.5">صفر (متوازن تام)</div>
+                </div>
+
+                <div className="bg-slate-950/60 border border-white/5 rounded-xl p-3.5 text-center">
+                  <div className="text-[11px] text-slate-400 mb-1 font-semibold">حالة الفروقات التشغيلية</div>
+                  <div className="text-lg font-black font-mono text-emerald-400">
+                    {reconstructResult.audit.discrepancies_count === 0 ? '0 فروقات' : `${reconstructResult.audit.discrepancies_count} فرق`}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-mono mt-0.5">مطابقة تامة 100%</div>
+                </div>
+              </div>
+
+              {/* Discrepancies Table if any */}
+              {reconstructResult.audit.discrepancies && reconstructResult.audit.discrepancies.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-white/10 space-y-2">
+                  <div className="text-xs font-bold text-amber-300">سجل الفروقات المكتشفة وتوصيات المعالجة:</div>
+                  <div className="overflow-x-auto rounded-xl border border-white/10 bg-slate-950">
+                    <table className="w-full text-right text-xs">
+                      <thead className="bg-slate-900 text-slate-400 border-b border-white/10">
+                        <tr>
+                          <th className="p-3">الفئة</th>
+                          <th className="p-3">نوع الفرق</th>
+                          <th className="p-3">المتوقع</th>
+                          <th className="p-3">الفعلي</th>
+                          <th className="p-3">الفارق</th>
+                          <th className="p-3">التوصية</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5 font-mono text-slate-300">
+                        {reconstructResult.audit.discrepancies.map((d: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-white/5">
+                            <td className="p-3 font-sans font-bold text-amber-400">{d.category}</td>
+                            <td className="p-3 font-sans">{d.message}</td>
+                            <td className="p-3">{Number(d.expected || 0).toLocaleString('ar-u-nu-latn')}</td>
+                            <td className="p-3">{Number(d.actual || 0).toLocaleString('ar-u-nu-latn')}</td>
+                            <td className="p-3 text-rose-400">{Number(d.difference || 0).toLocaleString('ar-u-nu-latn')}</td>
+                            <td className="p-3 font-sans text-slate-400">{d.recommendation}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 17 Stages Interactive Grid */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-base font-bold text-white flex items-center gap-2">
+                <span>📋</span>
+                <span>المراحل الـ 17 لإعادة البناء التشغيلي بالتسلسل الصارم:</span>
+              </h4>
+              <span className="text-xs text-slate-400">
+                يمكن تنفيذ أي مرحلة بمفردها أو تشغيل السلسلة كاملة
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {[
+                {
+                  stage: 1,
+                  title: '1. شجرة الحسابات',
+                  desc: 'تصفير الأرصدة وبناء خارطة الربط (Shamel Code → Bazarko ID)',
+                  badge: 'حسابات',
+                  icon: '🌳',
+                },
+                {
+                  stage: 2,
+                  title: '2. العملاء والموردون',
+                  desc: 'البيانات الأساسية فقط بدون رصيد افتتاحي (الرصيد الابتدائي = 0)',
+                  badge: 'أطراف',
+                  icon: '👥',
+                },
+                {
+                  stage: 3,
+                  title: '3. الأصناف والمخازن',
+                  desc: 'بطاقات الأصناف والباركودات بدون كمية افتتاحية (المخزون = 0)',
+                  badge: 'مخزون',
+                  icon: '📦',
+                },
+                {
+                  stage: 4,
+                  title: '4. فواتير المشتريات',
+                  desc: 'مرتبة زمنياً: +المخزون +تكلفة الشراء +قيد المورد/الصندوق',
+                  badge: 'مشتريات',
+                  icon: '📥',
+                },
+                {
+                  stage: 5,
+                  title: '5. مردودات المشتريات',
+                  desc: 'تخفيض المخزون والتكلفة، وعكس قيد المورد وربطه بالفاتورة الأصلية',
+                  badge: 'مردودات',
+                  icon: '↩️',
+                },
+                {
+                  stage: 6,
+                  title: '6. فواتير المبيعات',
+                  desc: 'مرتبة زمنياً: -المخزون +إثبات تكلفة COGS +إيراد +ذمم العملاء',
+                  badge: 'مبيعات',
+                  icon: '📤',
+                },
+                {
+                  stage: 7,
+                  title: '7. مردودات المبيعات',
+                  desc: 'إرجاع البضاعة للمخزون +عكس الإيراد والتكلفة وتسوية حساب العميل',
+                  badge: 'مردودات',
+                  icon: '↪️',
+                },
+                {
+                  stage: 8,
+                  title: '8. سندات القبض',
+                  desc: 'تغذية الصندوق المحدد بالسند بدقة +الشيكات -ذمة العميل وقيدها',
+                  badge: 'قبوضات',
+                  icon: '💵',
+                },
+                {
+                  stage: 9,
+                  title: '9. محفظة الشيكات',
+                  desc: 'استخلاص الشيكات وحالاتها كلياً من عمليات وسندات القبض الفعلية',
+                  badge: 'شيكات',
+                  icon: '🏦',
+                },
+                {
+                  stage: 10,
+                  title: '10. سندات الصرف والمصروفات',
+                  desc: 'تخفيض الصندوق/البنك المحدد وتسجيل المصروف أو سداد المورد',
+                  badge: 'صرفيات',
+                  icon: '💸',
+                },
+                {
+                  stage: 11,
+                  title: '11. باقي العمليات والتحويلات',
+                  desc: 'التحويلات والتسويات البنكية مع منع تكرار قيود الفواتير الصادرة',
+                  badge: 'تسويات',
+                  icon: '⚖️',
+                },
+                {
+                  stage: 12,
+                  title: '12. القيود المستقلة فعلياً',
+                  desc: 'ترحيل القيود العامة المستقلة فقط التي لا تنشأ عن فواتير أو سندات',
+                  badge: 'قيود عامة',
+                  icon: '📜',
+                },
+                {
+                  stage: 13,
+                  title: '13. إعادة احتساب المخزون',
+                  desc: 'الرصيد الفعلي = المشتريات - المبيعات + المردودات ± الحركات الفعلية',
+                  badge: 'احتساب',
+                  icon: '🔄',
+                },
+                {
+                  stage: 14,
+                  title: '14. إعادة احتساب الصناديق والبنوك',
+                  desc: 'الرصيد الفعلي = تراكم حركات القبض والصرف الفعلية الصادرة والواردة',
+                  badge: 'احتساب',
+                  icon: '💰',
+                },
+                {
+                  stage: 15,
+                  title: '15. إعادة احتساب العملاء والموردين',
+                  desc: 'تراكم الفواتير والقبوضات والمردودات لكل طرف على حدة في كشف حسابه',
+                  badge: 'احتساب',
+                  icon: '🧮',
+                },
+                {
+                  stage: 16,
+                  title: '16. إعادة احتساب محفظة الشيكات',
+                  desc: 'حصر وقيمة الشيكات الموجودة داخل المحفظة بحسب حالاتها الفعلية',
+                  badge: 'احتساب',
+                  icon: '📂',
+                },
+                {
+                  stage: 17,
+                  title: '17. المطابقة والتدقيق النهائي',
+                  desc: 'فحص توازن الأستاذ العام (مدين = دائن)، مطابقة المخزون والصناديق والأطراف',
+                  badge: 'تدقيق',
+                  icon: '🔍',
+                },
+              ].map(s => {
+                const isCurrent = reconstructing && currentStage === s.stage
+                const isDone = currentStage > s.stage || (reconstructResult && !reconstructing)
+
+                return (
+                  <div
+                    key={s.stage}
+                    className={`bg-slate-900 border rounded-xl p-4 transition flex flex-col justify-between gap-3 ${
+                      isCurrent
+                        ? 'border-amber-400 bg-amber-950/20 ring-1 ring-amber-400/30'
+                        : isDone
+                        ? 'border-emerald-500/30 bg-slate-900/90'
+                        : 'border-white/10 hover:border-white/20'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xl">{s.icon}</span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold font-mono ${
+                          isCurrent
+                            ? 'bg-amber-400 text-slate-950 animate-pulse'
+                            : isDone
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-slate-800 text-slate-400'
+                        }`}>
+                          {isCurrent ? 'قيد التنفيذ...' : isDone ? '✓ مكتملة' : s.badge}
+                        </span>
+                      </div>
+                      <h5 className="text-xs font-bold text-white mb-1">{s.title}</h5>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">{s.desc}</p>
+                    </div>
+
+                    <div className="pt-2 border-t border-white/5 flex items-center justify-between">
+                      <span className="text-[10px] text-slate-500 font-mono">مرحلة {s.stage} من 17</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRunReconstruction(s.stage)}
+                        disabled={reconstructing}
+                        className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[10px] font-bold rounded-lg border border-white/10 disabled:opacity-50 transition"
+                      >
+                        تشغيل منفرد
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Terminal / Real-time Execution Logs */}
+          <div className="bg-slate-950 border border-white/10 rounded-2xl p-5 shadow-2xl space-y-3 font-mono">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-rose-500/80 inline-block" />
+                <span className="w-3 h-3 rounded-full bg-amber-500/80 inline-block" />
+                <span className="w-3 h-3 rounded-full bg-emerald-500/80 inline-block" />
+                <span className="text-xs font-bold text-slate-300 font-sans mr-2">سجل أحداث محرك إعادة البناء (Operational Event Log)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReconstructLogs([])}
+                className="text-[10px] text-slate-500 hover:text-slate-300 transition"
+              >
+                مسح السجل
+              </button>
+            </div>
+
+            <div className="h-48 overflow-y-auto space-y-1 text-[11px] text-slate-300 pr-1">
+              {reconstructLogs.length === 0 ? (
+                <div className="text-slate-600 italic py-8 text-center font-sans">
+                  المحرك جاهز لبدء إعادة بناء النظام بالكامل من العمليات الفعلية...
+                </div>
+              ) : (
+                reconstructLogs.map((log, idx) => (
+                  <div key={idx} className={
+                    log.includes('✓') || log.includes('🎉')
+                      ? 'text-emerald-400'
+                      : log.includes('❌')
+                      ? 'text-rose-400 font-bold'
+                      : log.includes('جاري')
+                      ? 'text-amber-300'
+                      : 'text-slate-300'
+                  }>
+                    {log}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* ───────────────────────────────────────────────────────── */}
       {/* MODAL: CUSTOMER STATEMENT                                 */}

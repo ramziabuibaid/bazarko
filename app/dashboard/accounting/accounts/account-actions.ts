@@ -5,6 +5,16 @@ import { getStoreForUser } from '@/lib/supabase/getStore'
 import { logFinancialEvent } from '@/lib/accounting/audit'
 import { revalidatePath } from 'next/cache'
 
+export interface AccountTagItem {
+  id: string
+  code: string
+  name_ar: string
+  name_en: string
+  allowed_account_type: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense'
+  description?: string | null
+  is_active: boolean
+}
+
 export interface CreateAccountInput {
   code: string
   name: string
@@ -15,6 +25,8 @@ export interface CreateAccountInput {
   is_active?: boolean
   currency?: string
   description?: string | null
+  account_tag_id?: string | null
+  account_tag?: string | null
 }
 
 export interface UpdateAccountInput {
@@ -28,6 +40,29 @@ export interface UpdateAccountInput {
   is_active?: boolean
   currency?: string
   description?: string | null
+  account_tag_id?: string | null
+  account_tag?: string | null
+}
+
+/**
+ * جلب قائمة وسوم الحسابات (Account Tags) المعرفة مسبقاً في النظام
+ */
+export async function getAccountTags(): Promise<AccountTagItem[]> {
+  try {
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from('account_tags')
+      .select('*')
+      .eq('is_active', true)
+      .order('allowed_account_type', { ascending: true })
+      .order('code', { ascending: true })
+
+    if (error) throw error
+    return (data || []) as AccountTagItem[]
+  } catch (err) {
+    console.error('Error fetching account tags:', err)
+    return []
+  }
 }
 
 /**
@@ -114,6 +149,8 @@ export async function createAccount(input: CreateAccountInput) {
       currency: input.currency || 'ILS',
       description: input.description?.trim() || null,
       balance: 0,
+      account_tag_id: input.account_tag_id || null,
+      account_tag: input.account_tag || null,
     }
 
     const { data: newAccount, error: insertErr } = await supabase
@@ -274,6 +311,13 @@ export async function updateAccount(input: UpdateAccountInput) {
 
     if (input.is_active !== undefined) {
       payload.is_active = input.is_active
+    }
+
+    if (input.account_tag_id !== undefined) {
+      payload.account_tag_id = input.account_tag_id || null
+    }
+    if (input.account_tag !== undefined) {
+      payload.account_tag = input.account_tag || null
     }
 
     const { data: updated, error: updateErr } = await supabase
@@ -448,7 +492,7 @@ export async function deleteAccount(id: string) {
 /**
  * جلب كشف الحساب المباشر والتفصيلي لأي حساب من الشجرة
  */
-export async function getAccountStatement(accountId: string, fromDate?: string, toDate?: string) {
+export async function getAccountStatement(accountId: string, fromDate?: string, toDate?: string, source?: string) {
   try {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -476,7 +520,7 @@ export async function getAccountStatement(accountId: string, fromDate?: string, 
         description,
         created_at,
         currency,
-        entry:journal_entries!inner(id, entry_number, date, description, source, status, store_id)
+        entry:journal_entries!inner(id, entry_number, ref_id, date, description, source, status, store_id, source_type, source_id, source_number, source_url)
       `)
       .eq('account_id', accountId)
       .eq('entry.store_id', storeId)
@@ -487,6 +531,15 @@ export async function getAccountStatement(accountId: string, fromDate?: string, 
     }
     if (toDate) {
       query = query.lte('entry.date', toDate)
+    }
+    if (source && source !== 'all') {
+      if (source === 'manual') {
+        query = query.or('source.eq.manual,source_type.eq.manual')
+      } else if (source === 'voucher') {
+        query = query.or('source.eq.voucher,source_type.in.(receipt_voucher,payment_voucher)')
+      } else {
+        query = query.eq('entry.source', source)
+      }
     }
 
     const { data: lines, error: linesErr } = await query
@@ -530,17 +583,49 @@ export async function getAccountStatement(accountId: string, fromDate?: string, 
         runningBalance += (credit - debit)
       }
 
+      const entry = line.entry || {}
+      const rawSource = entry.source || 'manual'
+      const sourceType = entry.source_type || rawSource
+      const sourceId = entry.source_id || entry.ref_id || null
+      const isManual = sourceType === 'manual' || (!sourceId && rawSource === 'manual')
+
+      // Resolve URL if missing
+      let sourceUrl = entry.source_url || null
+      if (!sourceUrl && sourceId) {
+        if (sourceType === 'receipt_voucher' || (rawSource === 'voucher' && debit === 0)) {
+          sourceUrl = `/dashboard/accounting/receipts/print/${sourceId}`
+        } else if (sourceType === 'payment_voucher' || rawSource === 'voucher') {
+          sourceUrl = `/dashboard/accounting/payments/print/${sourceId}`
+        } else if (sourceType === 'sales_invoice' || rawSource === 'invoice') {
+          sourceUrl = `/dashboard/accounting/invoices/${sourceId}`
+        } else if (sourceType === 'purchase_invoice' || rawSource === 'purchase') {
+          sourceUrl = `/dashboard/purchases/${sourceId}`
+        } else if (sourceType === 'check_operation' || rawSource === 'check_op') {
+          sourceUrl = `/dashboard/cheques/print/${sourceId}`
+        } else if (sourceType === 'sales_return') {
+          sourceUrl = `/dashboard/invoices/returns/print/${sourceId}`
+        } else if (sourceType === 'purchase_return') {
+          sourceUrl = `/dashboard/purchases/returns/print/${sourceId}`
+        }
+      }
+
       return {
         id: line.id,
-        date: line.entry?.date || line.created_at?.slice(0, 10),
-        entry_number: line.entry?.entry_number || 'قيد',
-        entry_id: line.entry?.id,
-        description: line.description || line.entry?.description || 'حركة محاسبية',
-        source: line.entry?.source || 'manual',
-        status: line.entry?.status || 'posted',
+        date: entry.date || line.created_at?.slice(0, 10),
+        entry_number: entry.entry_number || 'قيد',
+        entry_id: entry.id,
+        ref_id: sourceId,
+        source_id: sourceId,
+        source: rawSource,
+        source_type: sourceType,
+        source_number: entry.source_number || null,
+        source_url: sourceUrl,
+        description: line.description || entry.description || 'حركة محاسبية',
+        status: entry.status || 'posted',
         debit,
         credit,
         balance: runningBalance,
+        is_manual: isManual,
       }
     })
 
@@ -563,5 +648,182 @@ export async function getAccountStatement(accountId: string, fromDate?: string, 
   } catch (err: any) {
     console.error('Error fetching statement:', err)
     return { success: false, error: err.message || 'فشل تحميل كشف الحساب' }
+  }
+}
+
+/**
+ * جلب تفاصيل قيد اليومية بالكامل مع تفاصيل الحركة الأصلية المرتبطة به
+ */
+export async function getJournalEntryFullDetails(entryId: string) {
+  try {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { success: false, error: 'يجب تسجيل الدخول أولاً' }
+
+    const storeId = await getStoreForUser(supabase, user.id)
+    if (!storeId) return { success: false, error: 'المتجر غير موجود' }
+
+    const { data: entry, error: entryErr } = await supabase
+      .from('journal_entries')
+      .select('*, lines:journal_lines(*, account:accounts(code, name, type, normal_balance))')
+      .eq('id', entryId)
+      .eq('store_id', storeId)
+      .single()
+
+    if (entryErr || !entry) {
+      return { success: false, error: 'القيد المحاسبي غير موجود' }
+    }
+
+    const sourceType = entry.source_type || entry.source || 'manual'
+    const sourceId = entry.source_id || entry.ref_id || null
+    let originDetails: any = null
+
+    // جلب بيانات الحركة الأصلية بحسب نوعها
+    if (sourceId) {
+      if (sourceType === 'receipt_voucher' || sourceType === 'payment_voucher' || entry.source === 'voucher') {
+        const { data: v } = await supabase
+          .from('vouchers')
+          .select('id, voucher_number, type, date, amount, party_name, payment_method, category, description, cash_box_id, bank_account_id, cash_boxes(name), bank_accounts(bank_name)')
+          .eq('id', sourceId)
+          .maybeSingle()
+        if (v) {
+          originDetails = {
+            kind: v.type === 'receipt' ? 'سند قبض مالي' : 'سند صرف مالي',
+            number: v.voucher_number,
+            date: v.date,
+            party: v.party_name,
+            amount: v.amount,
+            method: v.payment_method,
+            description: v.description,
+            destination: (Array.isArray(v.cash_boxes) ? v.cash_boxes[0]?.name : (v.cash_boxes as any)?.name) ||
+                         (Array.isArray(v.bank_accounts) ? v.bank_accounts[0]?.bank_name : (v.bank_accounts as any)?.bank_name) ||
+                         'خزينة المتجر',
+            url: v.type === 'receipt' ? `/dashboard/accounting/receipts/print/${v.id}` : `/dashboard/accounting/payments/print/${v.id}`,
+            actionLabel: v.type === 'receipt' ? 'فتح سند القبض الأصلي' : 'فتح سند الصرف الأصلي',
+          }
+        }
+      } else if (sourceType === 'sales_invoice' || entry.source === 'invoice') {
+        const { data: inv } = await supabase
+          .from('invoices')
+          .select('id, invoice_number, issue_date, total, status, customer_name, payment_method')
+          .eq('id', sourceId)
+          .maybeSingle()
+        if (inv) {
+          originDetails = {
+            kind: 'فاتورة مبيعات',
+            number: inv.invoice_number,
+            date: inv.issue_date,
+            party: inv.customer_name || 'عميل نقدي',
+            amount: inv.total,
+            method: inv.payment_method,
+            status: inv.status,
+            url: `/dashboard/accounting/invoices/${inv.id}`,
+            actionLabel: 'فتح فاتورة المبيعات الأصلية',
+          }
+        }
+      } else if (sourceType === 'purchase_invoice' || entry.source === 'purchase') {
+        const { data: p } = await supabase
+          .from('purchase_invoices')
+          .select('id, invoice_number, invoice_date, total_amount, payment_status, supplier_id, suppliers(name)')
+          .eq('id', sourceId)
+          .maybeSingle()
+        if (p) {
+          originDetails = {
+            kind: 'فاتورة مشتريات',
+            number: p.invoice_number,
+            date: p.invoice_date,
+            party: (p.suppliers as any)?.name || 'مورد',
+            amount: p.total_amount,
+            status: p.payment_status,
+            url: `/dashboard/purchases/${p.id}`,
+            actionLabel: 'فتح فاتورة المشتريات الأصلية',
+          }
+        }
+      } else if (sourceType === 'sales_return') {
+        const { data: sr } = await supabase
+          .from('sales_returns')
+          .select('id, return_number, return_date, total_amount, reason, customers(name)')
+          .eq('id', sourceId)
+          .maybeSingle()
+        if (sr) {
+          originDetails = {
+            kind: 'مردود مبيعات',
+            number: sr.return_number,
+            date: sr.return_date,
+            party: (sr.customers as any)?.name || 'العميل',
+            amount: sr.total_amount,
+            description: sr.reason,
+            url: `/dashboard/invoices/returns/print/${sr.id}`,
+            actionLabel: 'فتح مردود المبيعات الأصلي',
+          }
+        }
+      } else if (sourceType === 'purchase_return') {
+        const { data: pr } = await supabase
+          .from('purchase_returns')
+          .select('id, return_number, return_date, total_amount, reason, suppliers(name)')
+          .eq('id', sourceId)
+          .maybeSingle()
+        if (pr) {
+          originDetails = {
+            kind: 'مردود مشتريات',
+            number: pr.return_number,
+            date: pr.return_date,
+            party: (pr.suppliers as any)?.name || 'المورد',
+            amount: pr.total_amount,
+            description: pr.reason,
+            url: `/dashboard/purchases/returns/print/${pr.id}`,
+            actionLabel: 'فتح مردود المشتريات الأصلي',
+          }
+        }
+      } else if (sourceType === 'check_operation' || entry.source === 'check_op') {
+        const { data: c } = await supabase
+          .from('checks')
+          .select('id, check_number, bank_name, branch_name, amount, due_date, status, drawer_name')
+          .eq('id', sourceId)
+          .maybeSingle()
+        if (c) {
+          originDetails = {
+            kind: 'حركة شيك مالي',
+            number: `شيك #${c.check_number}`,
+            date: c.due_date,
+            party: c.drawer_name || 'الساحب',
+            amount: c.amount,
+            destination: `${c.bank_name} - ${c.branch_name || ''}`,
+            status: c.status,
+            url: `/dashboard/cheques/print/${c.id}`,
+            actionLabel: 'عرض بطاقة وحركة الشيك الأصلية',
+          }
+        }
+      } else if (sourceType === 'inventory_movement') {
+        originDetails = {
+          kind: 'حركة مخزون مستودعية',
+          number: entry.source_number || entry.entry_number,
+          date: entry.date,
+          url: '/dashboard/inventory/movements',
+          actionLabel: 'فتح سجل حركات المخزون',
+        }
+      } else if (sourceType === 'treasury_transfer') {
+        originDetails = {
+          kind: 'تحويل نقدي بين الصناديق',
+          number: entry.source_number || entry.entry_number,
+          date: entry.date,
+          url: '/dashboard/accounting/treasury',
+          actionLabel: 'فتح سجل الخزينة والتحويلات',
+        }
+      }
+    }
+
+    const isManual = sourceType === 'manual' || (!originDetails && !sourceId)
+
+    return {
+      success: true,
+      entry,
+      lines: entry.lines || [],
+      origin: originDetails,
+      isManual,
+    }
+  } catch (err: any) {
+    console.error('Error fetching journal details:', err)
+    return { success: false, error: err.message || 'فشل جلب تفاصيل القيد' }
   }
 }

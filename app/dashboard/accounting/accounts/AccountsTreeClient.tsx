@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
 import AccountFormModal, { AccountItem } from '@/components/dashboard/accounting/AccountFormModal'
 import AccountStatementModal from '@/components/dashboard/accounting/AccountStatementModal'
-import { toggleAccountActive, deleteAccount } from '@/app/dashboard/accounting/accounts/account-actions'
+import { toggleAccountActive, deleteAccount, AccountTagItem } from '@/app/dashboard/accounting/accounts/account-actions'
 
 interface EnrichedAccount extends AccountItem {
   total_debit?: number
@@ -19,6 +19,7 @@ interface EnrichedAccount extends AccountItem {
 interface Props {
   store: { id: string; name: string; currency_code: string }
   initialAccounts: EnrichedAccount[]
+  tags?: AccountTagItem[]
 }
 
 const TYPE_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> = {
@@ -29,7 +30,7 @@ const TYPE_CONFIG: Record<string, { label: string; color: string; bg: string; ic
   expense: { label: 'المصروفات (Expenses)', color: 'text-amber-400', bg: 'bg-amber-500/10', icon: '📉' },
 }
 
-export default function AccountsTreeClient({ store, initialAccounts }: Props) {
+export default function AccountsTreeClient({ store, initialAccounts, tags }: Props) {
   const router = useRouter()
 
   const [accounts, setAccounts] = useState<EnrichedAccount[]>(initialAccounts)
@@ -324,6 +325,13 @@ export default function AccountsTreeClient({ store, initialAccounts }: Props) {
             {account.is_group && (
               <span className="shrink-0 rounded bg-slate-800 px-1.5 py-0.2 text-[9px] font-semibold text-slate-400">
                 تجميعي
+              </span>
+            )}
+
+            {/* Account Tag Badge */}
+            {account.account_tag && (
+              <span className="shrink-0 rounded bg-sky-500/15 border border-sky-500/30 px-1.5 py-0.5 text-[9px] font-mono font-bold text-sky-300" title={`وسم الحساب: ${account.account_tag}`}>
+                🏷️ {account.account_tag}
               </span>
             )}
           </div>
@@ -627,6 +635,30 @@ export default function AccountsTreeClient({ store, initialAccounts }: Props) {
                   </div>
                 </div>
 
+                {/* بطاقة وسم الحساب (Account Tag) */}
+                <div className="rounded-xl border border-sky-500/20 bg-sky-950/20 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-sky-400 font-semibold flex items-center gap-1.5">
+                      <span>🏷️</span>
+                      <span>وسم الحساب (Account Tag)</span>
+                    </span>
+                    {selectedAccount.account_tag && (
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-bold border border-sky-500/30">
+                        {selectedAccount.account_tag}
+                      </span>
+                    )}
+                  </div>
+                  {selectedAccount.account_tag ? (
+                    <p className="mt-1 text-xs text-slate-200">
+                      الوظيفة التشغيلية: <strong className="text-sky-300 font-mono">{selectedAccount.account_tag}</strong>
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-xs text-slate-500 italic">
+                      حساب عادي غير مرتبط بوظيفة نظام تلقائية
+                    </p>
+                  )}
+                </div>
+
                 {/* Current Balance Card */}
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4">
                   <div className="flex items-center justify-between">
@@ -705,7 +737,7 @@ export default function AccountsTreeClient({ store, initialAccounts }: Props) {
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={() => setStatementModalAcc(selectedAccount)}
+                      onClick={() => router.push(`/dashboard/accounting/statement?accountId=${selectedAccount.id}`)}
                       className="flex items-center justify-center gap-1.5 rounded-xl bg-sky-600 px-3 py-2.5 text-xs font-bold text-white hover:bg-sky-500 transition shadow"
                     >
                       <span>📜</span> كشف الحساب
@@ -803,6 +835,7 @@ export default function AccountsTreeClient({ store, initialAccounts }: Props) {
           presetType={formModalState.presetType}
           accounts={accounts}
           currencyCode={store.currency_code}
+          tags={tags}
           onClose={() => setFormModalState({ open: false, mode: 'create' })}
           onSuccess={handleModalSuccess}
         />

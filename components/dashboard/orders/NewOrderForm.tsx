@@ -256,18 +256,23 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
         try {
           const { data: parentAcc } = await supabase
             .from('accounts')
-            .select('id')
+            .select('id, code')
             .eq('store_id', storeId)
-            .eq('code', '1101')
+            .eq('type', 'asset')
+            .not('name', 'ilike', '%صندوق%')
+            .not('name', 'ilike', '%بنك%')
+            .or('code.eq.1400,code.eq.1101,name.ilike.%ذمم الزبائن%,name.ilike.%ذمم مدينة%')
+            .limit(1)
             .maybeSingle()
 
+          const pCode = parentAcc?.code || '1400'
           const { count: custAccCount } = await supabase
             .from('accounts')
             .select('id', { count: 'exact', head: true })
             .eq('store_id', storeId)
-            .ilike('code', '1101%')
+            .ilike('code', `${pCode}%`)
 
-          const nextCode = `1101${String((custAccCount ?? 0) + 1).padStart(3, '0')}`
+          const nextCode = `${pCode}${String((custAccCount ?? 0) + 1).padStart(3, '0')}`
 
           await supabase.from('accounts').insert({
             store_id: storeId,

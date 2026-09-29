@@ -18,7 +18,8 @@ export default async function AccountsTreePage() {
   const [
     { data: store },
     { data: accounts },
-    { data: journalLines }
+    { data: journalLines },
+    { data: tags }
   ] = await Promise.all([
     supabase.from('stores').select('id, name, currency_code').eq('id', storeId).single(),
     supabase
@@ -29,7 +30,13 @@ export default async function AccountsTreePage() {
     supabase
       .from('journal_lines')
       .select('account_id, debit, credit, created_at, journal_entries!inner(store_id)')
-      .eq('journal_entries.store_id', storeId)
+      .eq('journal_entries.store_id', storeId),
+    supabase
+      .from('account_tags')
+      .select('*')
+      .eq('is_active', true)
+      .order('allowed_account_type', { ascending: true })
+      .order('code', { ascending: true })
   ])
 
   // حساب الإحصائيات والأرصدة الدفترية للحسابات
@@ -95,6 +102,7 @@ export default async function AccountsTreePage() {
     <AccountsTreeClient
       store={store!}
       initialAccounts={enrichedAccounts}
+      tags={tags || []}
     />
   )
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { createAccount, updateAccount } from '@/app/dashboard/accounting/accounts/account-actions'
+import { createAccount, updateAccount, AccountTagItem, getAccountTags } from '@/app/dashboard/accounting/accounts/account-actions'
 
 export interface AccountItem {
   id: string
@@ -16,6 +16,8 @@ export interface AccountItem {
   currency: string
   balance?: number
   description?: string | null
+  account_tag_id?: string | null
+  account_tag?: string | null
 }
 
 interface Props {
@@ -25,6 +27,7 @@ interface Props {
   presetType?: AccountItem['type']
   accounts: AccountItem[]
   currencyCode: string
+  tags?: AccountTagItem[]
   onClose: () => void
   onSuccess: (savedAccount: AccountItem) => void
 }
@@ -36,11 +39,24 @@ export default function AccountFormModal({
   presetType,
   accounts,
   currencyCode,
+  tags,
   onClose,
   onSuccess,
 }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  // الوسوم المعرفة مسبقاً في النظام
+  const [availableTags, setAvailableTags] = useState<AccountTagItem[]>(tags || [])
+  const [accountTag, setAccountTag] = useState<string>(initialData?.account_tag || '')
+
+  useEffect(() => {
+    if (!tags || tags.length === 0) {
+      getAccountTags().then(res => {
+        if (res && res.length > 0) setAvailableTags(res)
+      })
+    }
+  }, [tags])
 
   // Selected parent
   const [parentId, setParentId] = useState<string>(
@@ -114,6 +130,21 @@ export default function AccountFormModal({
     }
   }, [parentAccount, mode])
 
+  // فلترة الوسوم المتاحة حسب النوع المحاسبي المختار للحساب
+  const filteredTags = useMemo(() => {
+    return availableTags.filter(t => t.allowed_account_type === type)
+  }, [availableTags, type])
+
+  // إعادة ضبط الوسم إذا تم تغيير نوع الحساب إلى نوع لا يقبل هذا الوسم
+  useEffect(() => {
+    if (accountTag) {
+      const match = availableTags.find(t => t.code === accountTag)
+      if (match && match.allowed_account_type !== type) {
+        setAccountTag('')
+      }
+    }
+  }, [type, availableTags, accountTag])
+
   // Prevent selecting self or descendants as parent in edit mode
   const validParents = useMemo(() => {
     if (mode !== 'edit' || !initialData) {
@@ -146,6 +177,10 @@ export default function AccountFormModal({
     setLoading(true)
     setError('')
 
+    const selectedTagObj = availableTags.find(t => t.code === accountTag)
+    const tagId = selectedTagObj?.id || null
+    const tagCode = accountTag || null
+
     try {
       if (mode === 'create') {
         const res = await createAccount({
@@ -158,6 +193,8 @@ export default function AccountFormModal({
           is_active: isActive,
           currency,
           description: description.trim() || null,
+          account_tag_id: tagId,
+          account_tag: tagCode,
         })
 
         if (!res.success || !res.account) {
@@ -178,6 +215,8 @@ export default function AccountFormModal({
           is_active: isActive,
           currency,
           description: description.trim() || null,
+          account_tag_id: tagId,
+          account_tag: tagCode,
         })
 
         if (!res.success || !res.account) {
@@ -282,6 +321,36 @@ export default function AccountFormModal({
               placeholder="مثال: بنك فلسطين - الحساب الرئيسي"
               className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500"
             />
+          </div>
+
+          {/* وسم الحساب (Account Tag) */}
+          <div className="rounded-xl border border-sky-500/20 bg-sky-950/20 p-3 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-sky-300 flex items-center gap-1.5">
+                <span>🏷️</span>
+                <span>وسم الحساب (Account Tag)</span>
+              </label>
+              {accountTag && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-200 border border-sky-500/30">
+                  TAG: {accountTag}
+                </span>
+              )}
+            </div>
+            <select
+              value={accountTag}
+              onChange={e => setAccountTag(e.target.value)}
+              className="w-full rounded-xl border border-sky-500/30 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-400"
+            >
+              <option value="">-- بدون وسم (حساب عادي غير مقيد بوظيفة نظام) --</option>
+              {filteredTags.map(t => (
+                <option key={t.id} value={t.code}>
+                  {t.code} — {t.name_ar} ({t.name_en})
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              يحدد الوظيفة التشغيلية لهذا الحساب في النظام (مثل: CASH، BANK، SALES_REVENUE). يتيح للنظام التعرف عليه في القيود والتقارير التلقائية حتى لو تم تغيير اسمه أو رقمه مستقبلاً.
+            </p>
           </div>
 
           {/* الحساب الأب وطبيعة الرصيد */}

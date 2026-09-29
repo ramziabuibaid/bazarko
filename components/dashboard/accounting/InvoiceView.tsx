@@ -51,6 +51,7 @@ interface Props {
   storeLogo?: string | null
   currencyCode: string
   linkedOrder: { id: string; order_number: string } | null
+  journalEntry?: { id: string; entry_number: string } | null
   storeId: string
   userId: string
 }
@@ -63,7 +64,7 @@ const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
   cancelled: { label: 'ملغاة',          cls: 'bg-red-500/15 text-red-300 border border-red-500/30' },
 }
 
-export default function InvoiceView({ invoice, items, storeName, storePhone, storeLogo, currencyCode, linkedOrder, storeId, userId }: Props) {
+export default function InvoiceView({ invoice, items, storeName, storePhone, storeLogo, currencyCode, linkedOrder, journalEntry, storeId, userId }: Props) {
   const router = useRouter()
   const supabase = createClient()
   const toast = useToast()
@@ -264,6 +265,15 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, sto
             🔗 <span dir="ltr">{linkedOrder.order_number}</span>
           </Link>
         )}
+        {journalEntry && (
+          <Link
+            href={`/dashboard/accounting/journal/print/${journalEntry.id}`}
+            title="عرض وطباعة قيد اليومية المحاسبي المرتبط بالفاتورة"
+            className="flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-300 hover:bg-amber-500/20 transition"
+          >
+            📋 قيد: <span dir="ltr">#{journalEntry.entry_number}</span>
+          </Link>
+        )}
         <div className="flex-1" />
 
         {/* تعديل الفاتورة */}
@@ -451,6 +461,17 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, sto
                   {sl.label}
                 </span>
               </div>
+              {journalEntry && (
+                <div className="flex justify-between gap-8">
+                  <span className="text-slate-400 print:text-gray-500">قيد اليومية</span>
+                  <Link
+                    href={`/dashboard/accounting/journal/print/${journalEntry.id}`}
+                    className="font-mono font-bold text-sky-400 hover:underline print:text-black"
+                  >
+                    #{journalEntry.entry_number}
+                  </Link>
+                </div>
+              )}
             </div>
           </div>
         </div>

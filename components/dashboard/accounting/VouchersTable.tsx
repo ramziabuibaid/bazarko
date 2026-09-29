@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { useToast } from '@/components/ui/Toast'
 import { useConfirm } from '@/components/ui/Confirm'
-import { createVoucher, deleteVoucher, getCustomerOpenInvoices, getSupplierOpenPurchases, ChequeItem } from '@/app/dashboard/accounting/vouchers/voucher-actions'
+import { createVoucher, updateVoucher, deleteVoucher, getCustomerOpenInvoices, getSupplierOpenPurchases, ChequeItem } from '@/app/dashboard/accounting/vouchers/voucher-actions'
 import { PALESTINIAN_BANKS } from '@/lib/palestineBanks'
 
 interface Customer {
@@ -49,6 +50,7 @@ interface Voucher {
   customer_id: string | null
   supplier_id?: string | null
   invoice_id?: string | null
+  purchase_invoice_id?: string | null
   invoices?: any
   purchase_invoices?: any
   cash_boxes?: any
@@ -58,6 +60,8 @@ interface Voucher {
   reference: string | null
   cash_box_id?: string | null
   bank_account_id?: string | null
+  journal_entry_id?: string | null
+  journal_entry_number?: string | null
 }
 
 interface Props {
@@ -107,12 +111,58 @@ export default function VouchersTable({
     }
   }, [searchParams])
 
+  // Editing State
+  const [editingVoucher, setEditingVoucher] = useState<Voucher | null>(null)
+
   // Form Fields
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [dateTextInput, setDateTextInput] = useState(new Date().toISOString().slice(0, 10))
+  const [dateError, setDateError] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'cheque' | 'split' | 'bank'>('cash')
   const [description, setDescription] = useState('')
   const [category, setCategory] = useState('')
   const [reference, setReference] = useState('')
+
+  // Helper to convert Arabic-Indic numerals (٠-٩) to Latin numerals (0-9)
+  const toLatinDigits = (str: string) => {
+    return str.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString())
+  }
+
+  // Parses string into YYYY-MM-DD or null
+  const parseFlexibleDate = (input: string): string | null => {
+    if (!input) return null
+    const cleaned = toLatinDigits(input.trim())
+    
+    // YYYY-MM-DD or YYYY/MM/DD
+    const ymdMatch = cleaned.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/)
+    if (ymdMatch) {
+      const y = parseInt(ymdMatch[1], 10)
+      const m = parseInt(ymdMatch[2], 10)
+      const d = parseInt(ymdMatch[3], 10)
+      if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+        const dt = new Date(y, m - 1, d)
+        if (dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d) {
+          return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+        }
+      }
+    }
+
+    // DD-MM-YYYY or DD/MM/YYYY
+    const dmyMatch = cleaned.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/)
+    if (dmyMatch) {
+      const d = parseInt(dmyMatch[1], 10)
+      const m = parseInt(dmyMatch[2], 10)
+      const y = parseInt(dmyMatch[3], 10)
+      if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+        const dt = new Date(y, m - 1, d)
+        if (dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d) {
+          return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+        }
+      }
+    }
+
+    return null
+  }
 
   // Cash Details
   const defaultCashBox = cashBoxes.find(b => b.is_default) || cashBoxes[0]
@@ -184,11 +234,33 @@ export default function VouchersTable({
     }
   }
 
-  // Party Selection
+  // Party Autocomplete & Selection
   const [partyMode, setPartyMode] = useState<'registered' | 'manual'>('registered')
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [selectedSupplierId, setSelectedSupplierId] = useState('')
   const [manualPartyName, setManualPartyName] = useState('')
+  const [partySearch, setPartySearch] = useState('')
+  const [isPartyDropdownOpen, setIsPartyDropdownOpen] = useState(false)
+  const partyContainerRef = useRef<HTMLDivElement>(null)
+
+  // Click outside listener for party autocomplete
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (partyContainerRef.current && !partyContainerRef.current.contains(event.target as Node)) {
+        setIsPartyDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Auto-filter parties based on search input
+  const matchingParties = useMemo(() => {
+    const list = isReceipt ? customers : suppliers
+    if (!partySearch.trim()) return list.slice(0, 10)
+    const q = partySearch.toLowerCase().trim()
+    return list.filter(p => p.name.toLowerCase().includes(q) || (p.phone && p.phone.includes(q))).slice(0, 15)
+  }, [isReceipt, customers, suppliers, partySearch])
 
   // Optional Invoice Decoupling
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>('')
@@ -317,6 +389,24 @@ export default function VouchersTable({
     }
   }
 
+  // البحث عن البنك وإكماله آلياً بكتابة رقم البنك
+  const handleBankCodeInput = (index: number, val: string) => {
+    const latinVal = toLatinDigits(val).trim()
+    updateChequeRow(index, 'bank_code', latinVal)
+    const pmaBank = PALESTINIAN_BANKS.find(
+      b => b.code === latinVal || b.code === latinVal.padStart(2, '0')
+    )
+    if (pmaBank) {
+      setCheques(prev => prev.map((c, idx) => idx === index ? {
+        ...c,
+        bank_code: pmaBank.code,
+        bank_name: pmaBank.name,
+        branch_code: pmaBank.branches[0]?.code || '',
+        branch_name: pmaBank.branches[0]?.name || '',
+      } : c))
+    }
+  }
+
   const handleBranchSelect = (index: number, branchCode: string) => {
     const chk = cheques[index]
     const pmaBank = PALESTINIAN_BANKS.find(b => b.code === chk.bank_code || b.name === chk.bank_name)
@@ -330,9 +420,33 @@ export default function VouchersTable({
     }
   }
 
+  // البحث عن الفرع وإكماله آلياً بكتابة رقم الفرع
+  const handleBranchCodeInput = (index: number, val: string) => {
+    const latinVal = toLatinDigits(val).trim()
+    updateChequeRow(index, 'branch_code', latinVal)
+    const chk = cheques[index]
+    const pmaBank = PALESTINIAN_BANKS.find(b => b.code === chk.bank_code || b.name === chk.bank_name)
+    if (pmaBank) {
+      const branch = pmaBank.branches.find(
+        br => br.code === latinVal || br.code === latinVal.padStart(3, '0')
+      )
+      if (branch) {
+        setCheques(prev => prev.map((c, idx) => idx === index ? {
+          ...c,
+          branch_code: branch.code,
+          branch_name: branch.name,
+        } : c))
+      }
+    }
+  }
+
   // Reset Form
   const resetForm = () => {
-    setDate(new Date().toISOString().slice(0, 10))
+    setEditingVoucher(null)
+    const today = new Date().toISOString().slice(0, 10)
+    setDate(today)
+    setDateTextInput(today)
+    setDateError('')
     setPaymentMethod('cash')
     setCashAmountInput('')
     setDescription('')
@@ -341,6 +455,8 @@ export default function VouchersTable({
     setSelectedCustomerId('')
     setSelectedSupplierId('')
     setManualPartyName('')
+    setPartySearch('')
+    setIsPartyDropdownOpen(false)
     setSelectedInvoiceId('')
     setSelectedPurchaseId('')
     setPartyMode('registered')
@@ -361,10 +477,87 @@ export default function VouchersTable({
     ])
   }
 
+  // فتح نافذة تعديل سند مالي قائم
+  const handleOpenEdit = (v: Voucher) => {
+    setEditingVoucher(v)
+    setDate(v.date)
+    setDateTextInput(v.date)
+    setDateError('')
+    setPaymentMethod((v.payment_method as any) || 'cash')
+    setDescription(v.description || '')
+    setCategory(v.category || '')
+    setReference(v.reference || '')
+    setCashAmountInput(v.cash_amount != null ? String(v.cash_amount) : (v.amount != null ? String(v.amount) : ''))
+    setSelectedCashBoxId(v.cash_box_id || defaultCashBox?.id || '')
+    setSelectedBankId(v.bank_account_id || bankAccounts[0]?.id || '')
+
+    if (v.customer_id) {
+      setSelectedCustomerId(v.customer_id)
+      setSelectedSupplierId('')
+      setPartyMode('registered')
+      const c = customers.find(x => x.id === v.customer_id)
+      setPartySearch(c?.name || v.party_name || '')
+    } else if (v.supplier_id) {
+      setSelectedSupplierId(v.supplier_id)
+      setSelectedCustomerId('')
+      setPartyMode('registered')
+      const s = suppliers.find(x => x.id === v.supplier_id)
+      setPartySearch(s?.name || v.party_name || '')
+    } else {
+      setSelectedCustomerId('')
+      setSelectedSupplierId('')
+      setPartyMode('manual')
+      setManualPartyName(v.party_name || '')
+      setPartySearch(v.party_name || '')
+    }
+
+    setSelectedInvoiceId(v.invoice_id || '')
+    setSelectedPurchaseId(v.purchase_invoice_id || '')
+
+    if (v.checks_data && Array.isArray(v.checks_data) && v.checks_data.length > 0) {
+      setCheques(v.checks_data.map(cd => ({
+        check_number: cd.check_number || '',
+        account_number: cd.account_number || '',
+        bank_code: cd.bank_code || PALESTINIAN_BANKS[0].code,
+        bank_name: cd.bank_name || PALESTINIAN_BANKS[0].name,
+        branch_code: cd.branch_code || '450',
+        branch_name: cd.branch_name || 'فرع رام الله الرئيسي',
+        due_date: cd.due_date || v.date,
+        date: cd.date || v.date,
+        amount: Number(cd.amount) || 0,
+        drawer_name: cd.drawer_name || (isReceipt ? v.party_name || '' : ''),
+        payee_name: cd.payee_name || (!isReceipt ? v.party_name || '' : ''),
+        notes: cd.notes || '',
+      })))
+    } else if (v.payment_method === 'cheque' || v.payment_method === 'split') {
+      setCheques([{
+        check_number: '',
+        account_number: '',
+        bank_code: PALESTINIAN_BANKS[0].code,
+        bank_name: PALESTINIAN_BANKS[0].name,
+        branch_code: '450',
+        branch_name: 'فرع رام الله الرئيسي',
+        due_date: v.date,
+        date: v.date,
+        amount: v.checks_amount || v.amount || 0,
+        drawer_name: isReceipt ? v.party_name || '' : '',
+        payee_name: !isReceipt ? v.party_name || '' : '',
+        notes: '',
+      }])
+    }
+
+    setShowModal(true)
+  }
+
   // Handle Submit
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+
+    if (dateError) {
+      setError('يرجى تصحيح صيغة التاريخ المدخل أولاً')
+      return
+    }
 
     const totalAmt = computedTotalAmount
     if (totalAmt <= 0) {
@@ -378,8 +571,8 @@ export default function VouchersTable({
     }
 
     const partyName = isReceipt
-      ? (partyMode === 'registered' ? customers.find(c => c.id === selectedCustomerId)?.name : manualPartyName.trim())
-      : (partyMode === 'registered' ? suppliers.find(s => s.id === selectedSupplierId)?.name : manualPartyName.trim())
+      ? (partyMode === 'registered' ? (customers.find(c => c.id === selectedCustomerId)?.name || partySearch.trim()) : manualPartyName.trim())
+      : (partyMode === 'registered' ? (suppliers.find(s => s.id === selectedSupplierId)?.name || partySearch.trim()) : manualPartyName.trim())
 
     if (!partyName) {
       setError(isReceipt ? 'يرجى تحديد العميل أو إدخال اسم الجهة' : 'يرجى تحديد المورد أو إدخال اسم المستفيد')
@@ -412,7 +605,7 @@ export default function VouchersTable({
     setSaving(true)
 
     try {
-      const res = await createVoucher({
+      const voucherPayload = {
         type,
         date,
         payment_method: paymentMethod,
@@ -421,8 +614,8 @@ export default function VouchersTable({
         checks_amount: (paymentMethod === 'cheque' || paymentMethod === 'split') ? totalChequesAmount : 0,
         cash_box_id: selectedCashBoxId || null,
         bank_account_id: paymentMethod === 'bank' ? selectedBankId : null,
-        customer_id: isReceipt && partyMode === 'registered' ? selectedCustomerId : null,
-        supplier_id: !isReceipt && partyMode === 'registered' ? selectedSupplierId : null,
+        customer_id: isReceipt && partyMode === 'registered' ? (selectedCustomerId || null) : null,
+        supplier_id: !isReceipt && partyMode === 'registered' ? (selectedSupplierId || null) : null,
         party_name: partyName,
         category: category || null,
         description: description.trim(),
@@ -432,13 +625,26 @@ export default function VouchersTable({
         checks: (paymentMethod === 'cheque' || paymentMethod === 'split')
           ? cheques.map(c => ({ ...c, date: c.date || date }))
           : [],
-      })
+      }
+
+      let res
+      if (editingVoucher) {
+        res = await updateVoucher({
+          id: editingVoucher.id,
+          ...voucherPayload,
+        })
+      } else {
+        res = await createVoucher(voucherPayload)
+      }
 
       if (!res.success) {
         throw new Error(res.error || 'فشل حفظ السند')
       }
 
-      toast(`تم حفظ سند ${isReceipt ? 'القبض' : 'الصرف'} بنجاح`)
+      toast(editingVoucher
+        ? `تم تحديث سند ${isReceipt ? 'القبض' : 'الصرف'} بنجاح وعكس الحركات السابقة`
+        : `تم حفظ سند ${isReceipt ? 'القبض' : 'الصرف'} بنجاح`
+      )
       setShowModal(false)
       resetForm()
       router.refresh()
@@ -627,8 +833,22 @@ export default function VouchersTable({
 
                   return (
                     <tr key={v.id} className="hover:bg-slate-800/40 transition">
-                      <td className="p-3.5 font-mono font-bold text-sky-400 whitespace-nowrap" dir="ltr">
-                        {v.voucher_number}
+                      <td className="p-3.5 font-mono whitespace-nowrap">
+                        <div className="flex flex-col items-start gap-1">
+                          <span className="font-bold text-sky-400" dir="ltr">
+                            {v.voucher_number}
+                          </span>
+                          {v.journal_entry_number && (
+                            <Link
+                              href={`/dashboard/accounting/journal/print/${v.journal_entry_id}`}
+                              title="عرض وطباعة قيد اليومية المالي المرتبط"
+                              className="inline-flex items-center gap-1 rounded bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-300 hover:bg-amber-500/20 transition"
+                            >
+                              <span>📋 قيد:</span>
+                              <span dir="ltr">#{v.journal_entry_number}</span>
+                            </Link>
+                          )}
+                        </div>
                       </td>
 
                       <td className="p-3.5 font-mono text-slate-400 whitespace-nowrap">
@@ -718,6 +938,15 @@ export default function VouchersTable({
                         <div className="flex items-center justify-center gap-1.5">
                           <button
                             type="button"
+                            title="تعديل السند"
+                            onClick={() => handleOpenEdit(v)}
+                            className="rounded-lg border border-sky-500/20 bg-sky-500/10 p-1.5 text-sky-400 hover:bg-sky-500 hover:text-white transition"
+                          >
+                            ✏️
+                          </button>
+
+                          <button
+                            type="button"
                             title="طباعة السند رسمياً كـ PDF"
                             onClick={() => window.open(`/dashboard/accounting/${isReceipt ? 'receipts' : 'payments'}/print/${v.id}`, '_blank')}
                             className="rounded-lg border border-white/10 bg-slate-800 p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 transition"
@@ -753,7 +982,16 @@ export default function VouchersTable({
             <div className="flex items-center justify-between border-b border-white/10 pb-4">
               <div>
                 <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  <span>{isReceipt ? '💵 إنشاء سند قبض مالي جديد' : '💸 إنشاء سند صرف مالي جديد'}</span>
+                  <span>
+                    {isReceipt
+                      ? (editingVoucher ? '💵 تعديل سند قبض مالي' : '💵 إنشاء سند قبض مالي جديد')
+                      : (editingVoucher ? '💸 تعديل سند صرف مالي' : '💸 إنشاء سند صرف مالي جديد')}
+                  </span>
+                  {editingVoucher && (
+                    <span className="text-xs font-mono font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg" dir="ltr">
+                      #{editingVoucher.voucher_number}
+                    </span>
+                  )}
                 </h2>
                 <p className="mt-1 text-xs text-slate-400">
                   {isReceipt
@@ -875,14 +1113,50 @@ export default function VouchersTable({
               {/* 2. التاريخ والتصنيف */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-300">تاريخ السند *</label>
-                  <input
-                    type="date"
-                    required
-                    value={date}
-                    onChange={e => setDate(e.target.value)}
-                    className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500"
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-slate-300">تاريخ السند *</label>
+                    <span className="text-[10px] text-slate-400">كتابة يدوية أو تقويم</span>
+                  </div>
+                  <div className="relative flex items-center">
+                    <input
+                      type="text"
+                      required
+                      value={dateTextInput}
+                      onChange={e => {
+                        const val = e.target.value
+                        setDateTextInput(val)
+                        const parsed = parseFlexibleDate(val)
+                        if (parsed) {
+                          setDate(parsed)
+                          setDateError('')
+                        } else {
+                          setDateError('صيغة التاريخ غير صالحة (استخدم YYYY-MM-DD أو DD/MM/YYYY)')
+                        }
+                      }}
+                      placeholder="2026-05-15 أو 15/05/2026"
+                      dir="ltr"
+                      className={`w-full rounded-xl border ${dateError ? 'border-rose-500' : 'border-white/10'} bg-slate-800 p-2.5 text-xs text-white font-mono outline-none focus:border-sky-500 pl-10`}
+                    />
+                    <div className="absolute left-2.5 flex items-center">
+                      <input
+                        type="date"
+                        value={date}
+                        onChange={e => {
+                          if (e.target.value) {
+                            setDate(e.target.value)
+                            setDateTextInput(e.target.value)
+                            setDateError('')
+                          }
+                        }}
+                        className="opacity-0 absolute inset-0 w-8 h-8 cursor-pointer"
+                        title="اختيار من التقويم"
+                      />
+                      <span className="text-sm pointer-events-none">📅</span>
+                    </div>
+                  </div>
+                  {dateError && (
+                    <p className="mt-1 text-[10px] text-rose-400 font-semibold">{dateError}</p>
+                  )}
                 </div>
 
                 <div>
@@ -901,7 +1175,7 @@ export default function VouchersTable({
               </div>
 
               {/* 3. الجهة المستلم منها / المستفيد */}
-              <div className="rounded-xl border border-white/10 bg-slate-800/40 p-3.5 space-y-3">
+              <div className="rounded-xl border border-white/10 bg-slate-800/40 p-3.5 space-y-3" ref={partyContainerRef}>
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-white">
                     {isReceipt ? 'العميل / المستلم منه *' : 'المورد / المستفيد *'}
@@ -909,7 +1183,7 @@ export default function VouchersTable({
                   <div className="flex items-center gap-2 text-xs">
                     <button
                       type="button"
-                      onClick={() => setPartyMode('registered')}
+                      onClick={() => { setPartyMode('registered'); setIsPartyDropdownOpen(false) }}
                       className={`px-2.5 py-0.5 rounded-md font-semibold transition ${
                         partyMode === 'registered' ? 'bg-sky-500 text-slate-950' : 'text-slate-400 hover:text-white'
                       }`}
@@ -918,7 +1192,7 @@ export default function VouchersTable({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setPartyMode('manual')}
+                      onClick={() => { setPartyMode('manual'); setIsPartyDropdownOpen(false) }}
                       className={`px-2.5 py-0.5 rounded-md font-semibold transition ${
                         partyMode === 'manual' ? 'bg-sky-500 text-slate-950' : 'text-slate-400 hover:text-white'
                       }`}
@@ -929,37 +1203,110 @@ export default function VouchersTable({
                 </div>
 
                 {partyMode === 'registered' ? (
-                  isReceipt ? (
-                    <div>
-                      <select
-                        value={selectedCustomerId}
-                        onChange={e => setSelectedCustomerId(e.target.value)}
-                        className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500 font-bold"
-                      >
-                        <option value="">-- اختر العميل من الدليل --</option>
-                        {customers.map(c => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} {c.phone ? `(${c.phone})` : ''} — الرصيد: {fmt(c.balance || 0)} {currencyCode}
-                          </option>
-                        ))}
-                      </select>
+                  <div className="relative">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={partySearch}
+                        onChange={e => {
+                          setPartySearch(e.target.value)
+                          setIsPartyDropdownOpen(true)
+                          if (isReceipt) {
+                            const matched = customers.find(c => c.name.trim().toLowerCase() === e.target.value.trim().toLowerCase())
+                            if (matched) setSelectedCustomerId(matched.id)
+                          } else {
+                            const matched = suppliers.find(s => s.name.trim().toLowerCase() === e.target.value.trim().toLowerCase())
+                            if (matched) setSelectedSupplierId(matched.id)
+                          }
+                        }}
+                        onFocus={() => setIsPartyDropdownOpen(true)}
+                        placeholder={isReceipt ? 'ابحث أو اكتب اسم العميل أو الهاتف...' : 'ابحث أو اكتب اسم المورد أو الهاتف...'}
+                        className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 pl-8 text-xs text-white outline-none focus:border-sky-500 font-bold"
+                      />
+                      {partySearch && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPartySearch('')
+                            setSelectedCustomerId('')
+                            setSelectedSupplierId('')
+                          }}
+                          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-white"
+                        >
+                          ✕
+                        </button>
+                      )}
                     </div>
-                  ) : (
-                    <div>
-                      <select
-                        value={selectedSupplierId}
-                        onChange={e => setSelectedSupplierId(e.target.value)}
-                        className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500 font-bold"
-                      >
-                        <option value="">-- اختر المورد من الدليل --</option>
-                        {suppliers.map(s => (
-                          <option key={s.id} value={s.id}>
-                            {s.name} {s.phone ? `(${s.phone})` : ''} — الرصيد: {fmt(s.balance || 0)} {currencyCode}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )
+
+                    {/* Selected party badge */}
+                    {((isReceipt && selectedCustomerId) || (!isReceipt && selectedSupplierId)) && (() => {
+                      const party = isReceipt ? customers.find(c => c.id === selectedCustomerId) : suppliers.find(s => s.id === selectedSupplierId)
+                      if (!party) return null
+                      return (
+                        <div className="mt-2 flex items-center justify-between rounded-lg bg-sky-500/10 border border-sky-500/20 px-3 py-1.5 text-xs text-sky-300">
+                          <span className="font-bold">✓ تم اختيار: {party.name}</span>
+                          <div className="flex items-center gap-2">
+                            {party.phone && <span className="font-mono text-[11px] text-slate-400" dir="ltr">📞 {party.phone}</span>}
+                            <span className="font-mono font-bold" dir="ltr">الرصيد: {fmt(party.balance || 0)} {currencyCode}</span>
+                          </div>
+                        </div>
+                      )
+                    })()}
+
+                    {/* Dropdown with live filtering */}
+                    {isPartyDropdownOpen && (
+                      <div className="absolute z-30 mt-1 w-full max-h-60 overflow-y-auto rounded-xl border border-white/10 bg-slate-900 shadow-2xl divide-y divide-white/5">
+                        {matchingParties.length === 0 ? (
+                          <div className="p-3 text-center text-xs text-slate-400">
+                            <p>لا يوجد {isReceipt ? 'عميل' : 'مورد'} مسجل بهذا الاسم.</p>
+                            {partySearch.trim() && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPartyMode('manual')
+                                  setManualPartyName(partySearch.trim())
+                                  setIsPartyDropdownOpen(false)
+                                }}
+                                className="mt-2 rounded-lg bg-sky-500/20 border border-sky-500/30 px-3 py-1 text-xs font-bold text-sky-300 hover:bg-sky-500 hover:text-slate-950 transition"
+                              >
+                                استخدام "{partySearch.trim()}" كجهة غير مسجلة ↵
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          matchingParties.map((p: any) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => {
+                                if (isReceipt) {
+                                  setSelectedCustomerId(p.id)
+                                  setSelectedSupplierId('')
+                                } else {
+                                  setSelectedSupplierId(p.id)
+                                  setSelectedCustomerId('')
+                                }
+                                setPartySearch(p.name)
+                                setIsPartyDropdownOpen(false)
+                              }}
+                              className="w-full text-right p-2.5 hover:bg-slate-800 transition flex items-center justify-between text-xs"
+                            >
+                              <div>
+                                <span className="font-bold text-white block">{p.name}</span>
+                                {p.phone && <span className="text-[10px] text-slate-400 font-mono" dir="ltr">{p.phone}</span>}
+                              </div>
+                              <div className="text-left font-mono">
+                                <span className="text-[10px] text-slate-400 block">الرصيد:</span>
+                                <span className="font-bold text-sky-400 text-xs" dir="ltr">
+                                  {fmt(p.balance || 0)} {currencyCode}
+                                </span>
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <div>
                     <input
@@ -1199,39 +1546,65 @@ export default function VouchersTable({
                           </div>
 
                           {/* 3 & 4. البنك المسحوب عليه حسب دليل سلطة النقد PMA */}
-                          <div className="sm:col-span-2">
-                            <label className="block text-[11px] font-bold text-sky-300 mb-0.5">
-                              3. البنك المسحوب عليه (دليل سلطة النقد PMA) *
-                            </label>
-                            <select
-                              required
-                              value={chk.bank_code || ''}
-                              onChange={e => handleBankSelect(idx, e.target.value)}
-                              className="w-full rounded-lg border border-sky-500/30 bg-slate-900 p-2 text-xs text-white outline-none focus:border-sky-400 font-bold"
-                            >
-                              <option value="">-- اختر البنك من دليل سلطة النقد الفلسطيني --</option>
-                              {PALESTINIAN_BANKS.map(b => (
-                                <option key={b.code} value={b.code}>
-                                  [{b.code}] {b.name} {b.nameEn ? `(${b.nameEn})` : ''}
-                                </option>
-                              ))}
-                            </select>
+                          <div className="sm:col-span-2 space-y-1">
+                            <div className="flex items-center justify-between mb-0.5">
+                              <label className="text-[11px] font-bold text-sky-300">
+                                3. البنك المسحوب عليه (البحث بالرقم أو القائمة) *
+                              </label>
+                              <span className="text-[10px] text-slate-400">PMA Code</span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                              <input
+                                type="text"
+                                value={chk.bank_code || ''}
+                                onChange={e => handleBankCodeInput(idx, e.target.value)}
+                                placeholder="رقم البنك (01)"
+                                title="اكتب رقم البنك مباشرة للبحث التلقائي"
+                                dir="ltr"
+                                className="rounded-lg border border-sky-500/40 bg-slate-900 p-2 text-xs text-white outline-none focus:border-sky-400 font-mono font-bold"
+                              />
+                              <select
+                                required
+                                value={chk.bank_code || ''}
+                                onChange={e => handleBankSelect(idx, e.target.value)}
+                                className="sm:col-span-3 rounded-lg border border-sky-500/30 bg-slate-900 p-2 text-xs text-white outline-none focus:border-sky-400 font-bold"
+                              >
+                                <option value="">-- اختر البنك من دليل سلطة النقد الفلسطيني --</option>
+                                {PALESTINIAN_BANKS.map(b => (
+                                  <option key={b.code} value={b.code}>
+                                    [{b.code}] {b.name} {b.nameEn ? `(${b.nameEn})` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
                           </div>
 
                           {/* 5 & 6. فرع البنك */}
-                          <div className="sm:col-span-2">
-                            <label className="block text-[11px] font-bold text-sky-300 mb-0.5">
-                              4. فرع البنك المسحوب عليه (PMA Branch)
-                            </label>
+                          <div className="sm:col-span-2 space-y-1">
+                            <div className="flex items-center justify-between mb-0.5">
+                              <label className="text-[11px] font-bold text-sky-300">
+                                4. فرع البنك (البحث برقم الفرع أو القائمة)
+                              </label>
+                              <span className="text-[10px] text-slate-400">Branch Code</span>
+                            </div>
                             {(() => {
                               const activeBank = PALESTINIAN_BANKS.find(b => b.code === chk.bank_code || b.name === chk.bank_name)
                               const branches = activeBank?.branches || []
                               return (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                                  <input
+                                    type="text"
+                                    value={chk.branch_code || ''}
+                                    onChange={e => handleBranchCodeInput(idx, e.target.value)}
+                                    placeholder="رقم الفرع (450)"
+                                    title="اكتب رقم الفرع مباشرة للبحث التلقائي"
+                                    dir="ltr"
+                                    className="rounded-lg border border-purple-500/40 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-400 font-mono font-bold"
+                                  />
                                   <select
                                     value={chk.branch_code || ''}
                                     onChange={e => handleBranchSelect(idx, e.target.value)}
-                                    className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500"
+                                    className="sm:col-span-2 rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500"
                                   >
                                     <option value="">-- اختر الفرع --</option>
                                     {branches.map(br => (
@@ -1245,8 +1618,8 @@ export default function VouchersTable({
                                     type="text"
                                     value={chk.branch_name || ''}
                                     onChange={e => updateChequeRow(idx, 'branch_name', e.target.value)}
-                                    placeholder="اسم الفرع يدوياً إن لم يوجد..."
-                                    className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500"
+                                    placeholder="اسم الفرع..."
+                                    className="rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white outline-none focus:border-purple-500"
                                   />
                                 </div>
                               )
@@ -1388,7 +1761,11 @@ export default function VouchersTable({
                       : 'bg-rose-500 text-white hover:bg-rose-400'
                   }`}
                 >
-                  {saving ? 'جارٍ الحفظ...' : (isReceipt ? 'حفظ سند القبض' : 'حفظ سند الصرف')}
+                  {saving
+                    ? 'جارٍ الحفظ...'
+                    : (editingVoucher
+                        ? `حفظ تعديلات سند ${isReceipt ? 'القبض' : 'الصرف'}`
+                        : (isReceipt ? 'حفظ سند القبض' : 'حفظ سند الصرف'))}
                 </button>
               </div>
             </form>

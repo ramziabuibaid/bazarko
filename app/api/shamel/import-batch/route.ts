@@ -47,6 +47,37 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, result: data })
     }
 
+    // 2.1 Reconstruct Entire System from Operations (Strict 17-Stage Engine)
+    if (action === 'reconstruct') {
+      const stage = typeof body.stage === 'number' ? body.stage : 0
+      const { data, error } = await supabase.rpc('shamel_reconstruct_from_operations', {
+        p_store_id: storeId,
+        p_stage: stage,
+        p_options: body.options || {},
+      })
+      if (error) {
+        console.error('Reconstruction error:', error)
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+      return NextResponse.json({ ok: true, result: data })
+    }
+
+    // 2.2 Cascade Delete Operational Document
+    if (action === 'delete_operational_document') {
+      if (!body.sourceType || !body.sourceId) {
+        return NextResponse.json({ error: 'يرجى تحديد نوع المستند ورقمه' }, { status: 400 })
+      }
+      const { data, error } = await supabase.rpc('shamel_delete_operational_document', {
+        p_store_id: storeId,
+        p_source_type: body.sourceType,
+        p_source_id: body.sourceId,
+      })
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+      return NextResponse.json({ ok: true, result: data })
+    }
+
     // 3. Isolated Batch Save Action (Stores in shamel_* tables first!)
     if (action === 'save_isolated') {
       const { data, error } = await supabase.rpc('shamel_save_isolated_batch', {

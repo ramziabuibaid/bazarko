@@ -31,7 +31,7 @@ export default async function InvoiceDetailPage({ params }: Props) {
 
   if (!invoice) notFound()
 
-  const [{ data: items }, { data: linkedOrder }] = await Promise.all([
+  const [{ data: items }, { data: linkedOrder }, { data: journalEntry }] = await Promise.all([
     supabase
       .from('invoice_items')
       .select('id, name, sku, quantity, unit_price, total, cost_price')
@@ -44,6 +44,13 @@ export default async function InvoiceDetailPage({ params }: Props) {
           .eq('id', invoice.order_id)
           .single()
       : Promise.resolve({ data: null }),
+    supabase
+      .from('journal_entries')
+      .select('id, entry_number')
+      .eq('store_id', store.id)
+      .eq('ref_id', invoice.id)
+      .eq('source', 'invoice')
+      .maybeSingle()
   ])
 
   return (
@@ -56,6 +63,7 @@ export default async function InvoiceDetailPage({ params }: Props) {
         storeLogo={(store as { logo_url?: string | null }).logo_url ?? null}
         currencyCode={store.currency_code}
         linkedOrder={linkedOrder ?? null}
+        journalEntry={journalEntry ?? null}
         storeId={store.id}
         userId={user.id}
       />

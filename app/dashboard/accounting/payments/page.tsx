@@ -25,7 +25,8 @@ export default async function PaymentsPage() {
     { data: suppliers },
     { data: customers },
     cashBoxes,
-    { data: bankAccounts }
+    { data: bankAccounts },
+    { data: journalEntries }
   ] = await Promise.all([
     supabase
       .from('stores')
@@ -54,8 +55,23 @@ export default async function PaymentsPage() {
       .from('bank_accounts')
       .select('id, bank_name, account_number, currency')
       .eq('store_id', storeId)
-      .eq('is_active', true)
+      .eq('is_active', true),
+    supabase
+      .from('journal_entries')
+      .select('id, entry_number, ref_id')
+      .eq('store_id', storeId)
+      .eq('source', 'voucher')
+      .eq('status', 'posted')
   ])
+
+  const vouchersWithJournals = (vouchers ?? []).map(v => {
+    const je = (journalEntries || []).find(j => j.ref_id === v.id)
+    return {
+      ...v,
+      journal_entry_id: je?.id || null,
+      journal_entry_number: je?.entry_number || null,
+    }
+  })
 
   if (!store) redirect('/onboarding')
 
@@ -77,7 +93,7 @@ export default async function PaymentsPage() {
       </div>
 
       <VouchersTable
-        vouchers={vouchers ?? []}
+        vouchers={vouchersWithJournals}
         type="payment"
         storeId={store.id}
         userId={user.id}

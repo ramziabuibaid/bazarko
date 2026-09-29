@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { getCashBoxAccount } from '@/lib/accounting/engine'
 
 export interface CashBox {
   id: string
@@ -12,6 +13,7 @@ export interface CashBox {
     id: string
     code: string
     name: string
+    balance?: number
   } | null
   balance?: number
 }
@@ -27,7 +29,7 @@ export async function getDefaultCashBox(
     .from('cash_boxes')
     .select(`
       id, name, type, opening_balance, is_active, is_default, account_id,
-      account:accounts(id, code, name)
+      account:accounts(id, code, name, balance)
     `)
     .eq('store_id', storeId)
     .eq('is_default', true)
@@ -36,10 +38,16 @@ export async function getDefaultCashBox(
     .maybeSingle()
 
   if (box) {
+    // التأكد من ربط حساب محاسبي
+    if (!box.account_id) {
+      const accId = await getCashBoxAccount(supabase, storeId, box.id)
+      box.account_id = accId
+    }
     const rawAccount = Array.isArray(box.account) ? box.account[0] : box.account
     return {
       ...box,
       account: rawAccount ?? null,
+      balance: rawAccount ? Number(rawAccount.balance || 0) : Number(box.opening_balance || 0),
     } as CashBox
   }
 
@@ -47,11 +55,14 @@ export async function getDefaultCashBox(
   const { data: boxId } = await supabase.rpc('ensure_cash_box', { p_store_id: storeId })
   if (!boxId) return null
 
+  // ربط حساب محاسبي للصندوق المنشأ
+  await getCashBoxAccount(supabase, storeId, boxId)
+
   const { data: created } = await supabase
     .from('cash_boxes')
     .select(`
       id, name, type, opening_balance, is_active, is_default, account_id,
-      account:accounts(id, code, name)
+      account:accounts(id, code, name, balance)
     `)
     .eq('id', boxId)
     .maybeSingle()
@@ -61,11 +72,12 @@ export async function getDefaultCashBox(
   return {
     ...created,
     account: rawAccount ?? null,
+    balance: rawAccount ? Number(rawAccount.balance || 0) : Number(created.opening_balance || 0),
   } as CashBox
 }
 
 /**
- * يجلب كافة الصناديق والخزائن للمتجر مع أرصدتها وحساباتها المرتبطة.
+ * يجلب كافة الصناديق والخزائن للمتجر مع أرصدتها المأخوذة مباشرة من حساباتها المحاسبية في دفتر الأستاذ العام
  */
 export async function getAllCashBoxesWithBalances(
   supabase: ReturnType<typeof createClient>,
@@ -77,7 +89,7 @@ export async function getAllCashBoxesWithBalances(
     .from('cash_boxes')
     .select(`
       id, name, type, opening_balance, is_active, is_default, account_id,
-      account:accounts(id, code, name)
+      account:accounts(id, code, name, balance)
     `)
     .eq('store_id', storeId)
     .order('is_default', { ascending: false })
@@ -85,39 +97,43 @@ export async function getAllCashBoxesWithBalances(
 
   if (!boxes || boxes.length === 0) return []
 
-  const { data: movements } = await supabase
-    .from('cash_movements')
-    .select('cash_box_id, direction, amount')
-    .eq('store_id', storeId)
+  // التأكد من ربط كافة الصناديق بحسابات محاسبية نشطة
+  const resultBoxes: CashBox[] = []
+  for (const b of boxes as any[]) {
+    let rawAccount = Array.isArray(b.account) ? b.account[0] : b.account
+    let accId = b.account_id
 
-  const balanceMap = new Map<string, number>()
-  for (const m of movements ?? []) {
-    const cur = balanceMap.get(m.cash_box_id) ?? 0
-    balanceMap.set(
-      m.cash_box_id,
-      cur + (m.direction === 'in' ? Number(m.amount || 0) : -Number(m.amount || 0))
-    )
-  }
+    if (!accId || !rawAccount) {
+      accId = await getCashBoxAccount(supabase, storeId, b.id)
+      const { data: acc } = await supabase
+        .from('accounts')
+        .select('id, code, name, balance')
+        .eq('id', accId)
+        .maybeSingle()
+      rawAccount = acc
+    }
 
-  return boxes.map((b: any) => {
-    const delta = balanceMap.get(b.id) ?? 0
-    const rawAccount = Array.isArray(b.account) ? b.account[0] : b.account
-    return {
+    // رصيد الخزينة = رصيد الحساب المحاسبي للصندوق
+    const accountingBalance = rawAccount?.balance !== undefined ? Number(rawAccount.balance) : Number(b.opening_balance || 0)
+
+    resultBoxes.push({
       id: b.id,
       name: b.name,
       type: b.type,
       opening_balance: Number(b.opening_balance || 0),
       is_active: b.is_active ?? true,
       is_default: b.is_default ?? false,
-      account_id: b.account_id ?? null,
-      account: rawAccount ? { id: rawAccount.id, code: rawAccount.code, name: rawAccount.name } : null,
-      balance: Number(b.opening_balance || 0) + delta,
-    }
-  })
+      account_id: accId,
+      account: rawAccount ? { id: rawAccount.id, code: rawAccount.code, name: rawAccount.name, balance: accountingBalance } : null,
+      balance: accountingBalance,
+    })
+  }
+
+  return resultBoxes
 }
 
 /**
- * الرصيد الحالي = الرصيد الافتتاحي + مجموع الداخل − مجموع الخارج.
+ * الرصيد الفعلي للصندوق مأخوذاً مباشرة من الحساب المحاسبي للصندوق في دفتر الأستاذ
  */
 export async function getCashBalance(
   supabase: ReturnType<typeof createClient>,
@@ -125,21 +141,30 @@ export async function getCashBalance(
   boxId: string,
   openingBalance: number,
 ): Promise<number> {
-  const { data: movements } = await supabase
-    .from('cash_movements')
-    .select('direction, amount')
-    .eq('store_id', storeId)
-    .eq('cash_box_id', boxId)
+  const { data: box } = await supabase
+    .from('cash_boxes')
+    .select('id, account_id, opening_balance, account:accounts(id, balance)')
+    .eq('id', boxId)
+    .maybeSingle()
 
-  const totals = (movements ?? []).reduce(
-    (acc, m: { direction: string; amount: number }) => {
-      if (m.direction === 'in') acc.in += m.amount
-      else acc.out += m.amount
-      return acc
-    },
-    { in: 0, out: 0 },
-  )
+  const rawAcc = Array.isArray(box?.account) ? box?.account[0] : box?.account
+  if (rawAcc?.balance !== undefined) {
+    return Number(rawAcc.balance)
+  }
 
-  return openingBalance + totals.in - totals.out
+  // إذا لم يكن الحساب جاهزاً بعد
+  const accId = await getCashBoxAccount(supabase, storeId, boxId)
+  const { data: acc } = await supabase
+    .from('accounts')
+    .select('balance')
+    .eq('id', accId)
+    .maybeSingle()
+
+  if (acc?.balance !== undefined) {
+    return Number(acc.balance)
+  }
+
+  return openingBalance
 }
+
 
