@@ -641,7 +641,7 @@ export async function postReceiptVoucherEntry(voucherId: string, actorId?: strin
     // سند مركب (نقد + شيكات)
     accountingRule = 'CUSTOMER_PAYMENT_SPLIT'
     const cashRes = await resolveAccount(supabase, 'CASH', { storeId, cashBoxId: v.cash_box_id })
-    const checkRes = await resolveAccount(supabase, 'CHECKS_PORTFOLIO', { storeId })
+    const checkRes = await resolveAccount(supabase, 'CHEQUES_IN_HAND', { storeId })
     lines.push({
       account_id: cashRes.accountId,
       debit: cashAmount,
@@ -655,19 +655,19 @@ export async function postReceiptVoucherEntry(voucherId: string, actorId?: strin
       debit: checksAmount,
       credit: 0,
       description: `قبض شيكات بموجب سند #${v.voucher_number} - ${v.party_name || ''}`,
-      account_tag_used: 'CHECKS_PORTFOLIO',
+      account_tag_used: 'CHEQUES_IN_HAND',
       source_rule: accountingRule,
     })
   } else if (checksAmount > 0 || v.payment_method === 'check' || v.payment_method === 'cheque') {
-    // شيكات فقط: محفظة الشيكات الواردة
+    // شيكات فقط: محفظة الشيكات الواردة (CHEQUES_IN_HAND)
     accountingRule = 'CUSTOMER_PAYMENT_CHECK'
-    const checkRes = await resolveAccount(supabase, 'CHECKS_PORTFOLIO', { storeId })
+    const checkRes = await resolveAccount(supabase, 'CHEQUES_IN_HAND', { storeId })
     lines.push({
       account_id: checkRes.accountId,
       debit: total,
       credit: 0,
       description: `قبض شيكات بموجب سند #${v.voucher_number} - ${v.party_name || ''}`,
-      account_tag_used: 'CHECKS_PORTFOLIO',
+      account_tag_used: 'CHEQUES_IN_HAND',
       source_rule: accountingRule,
     })
   } else {
@@ -787,7 +787,7 @@ export async function postPaymentVoucherEntry(voucherId: string, actorId?: strin
   } else if (cashAmount > 0 && checksAmount > 0) {
     accountingRule = 'SUPPLIER_PAYMENT_SPLIT'
     const cashRes = await resolveAccount(supabase, 'CASH', { storeId, cashBoxId: v.cash_box_id })
-    const checkRes = await resolveAccount(supabase, 'CHECKS_PORTFOLIO', { storeId })
+    const checkRes = await resolveAccount(supabase, 'CHEQUES_IN_HAND', { storeId })
     lines.push({
       account_id: cashRes.accountId,
       debit: 0,
@@ -801,18 +801,18 @@ export async function postPaymentVoucherEntry(voucherId: string, actorId?: strin
       debit: 0,
       credit: checksAmount,
       description: `صرف شيكات بموجب سند #${v.voucher_number}`,
-      account_tag_used: 'CHECKS_PORTFOLIO',
+      account_tag_used: 'CHEQUES_IN_HAND',
       source_rule: accountingRule,
     })
   } else if (checksAmount > 0 || v.payment_method === 'check' || v.payment_method === 'cheque') {
     accountingRule = 'SUPPLIER_PAYMENT_CHECK'
-    const checkRes = await resolveAccount(supabase, 'CHECKS_PORTFOLIO', { storeId })
+    const checkRes = await resolveAccount(supabase, 'CHEQUES_IN_HAND', { storeId })
     lines.push({
       account_id: checkRes.accountId,
       debit: 0,
       credit: total,
       description: `صرف شيكات بموجب سند #${v.voucher_number}`,
-      account_tag_used: 'CHECKS_PORTFOLIO',
+      account_tag_used: 'CHEQUES_IN_HAND',
       source_rule: accountingRule,
     })
   } else {
@@ -1015,7 +1015,7 @@ export async function getCashBoxAccount(
 }
 
 export async function getChecksPortfolioAccount(supabase: any, storeId: string): Promise<string> {
-  const res = await resolveAccount(supabase, 'CHECKS_PORTFOLIO', { storeId })
+  const res = await resolveAccount(supabase, 'CHEQUES_IN_HAND', { storeId })
   return res.accountId
 }
 

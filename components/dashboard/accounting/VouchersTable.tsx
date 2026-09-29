@@ -367,6 +367,39 @@ export default function VouchersTable({
     ])
   }
 
+  const setChequesCount = (targetCount: number) => {
+    if (targetCount < 1) targetCount = 1
+    if (targetCount > 50) targetCount = 50
+    const activeName = isReceipt
+      ? (customers.find(c => c.id === selectedCustomerId)?.name || manualPartyName)
+      : (suppliers.find(s => s.id === selectedSupplierId)?.name || manualPartyName)
+
+    setCheques(prev => {
+      if (prev.length === targetCount) return prev
+      if (prev.length < targetCount) {
+        const added: ChequeItem[] = []
+        for (let i = prev.length; i < targetCount; i++) {
+          added.push({
+            check_number: '',
+            account_number: '',
+            bank_code: PALESTINIAN_BANKS[0].code,
+            bank_name: PALESTINIAN_BANKS[0].name,
+            branch_code: PALESTINIAN_BANKS[0].branches[0]?.code || '450',
+            branch_name: PALESTINIAN_BANKS[0].branches[0]?.name || 'فرع رام الله الرئيسي',
+            due_date: new Date(Date.now() + (30 + i * 30) * 86400000).toISOString().slice(0, 10),
+            date: new Date().toISOString().slice(0, 10),
+            amount: 0,
+            drawer_name: isReceipt ? activeName : '',
+            payee_name: !isReceipt ? activeName : '',
+            notes: '',
+          })
+        }
+        return [...prev, ...added]
+      }
+      return prev.slice(0, targetCount)
+    })
+  }
+
   const removeChequeRow = (index: number) => {
     if (cheques.length <= 1) return
     setCheques(prev => prev.filter((_, idx) => idx !== index))
@@ -872,20 +905,38 @@ export default function VouchersTable({
                           }
                           if (v.payment_method === 'cheque') {
                             return (
-                              <span className="inline-flex items-center gap-1 rounded-md bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 text-[11px] font-bold text-purple-400">
-                                📑 شيكات ({checksCount > 0 ? `${checksCount} شيك` : 'شيك'})
-                              </span>
+                              <div className="space-y-1">
+                                <span className="inline-flex items-center gap-1 rounded-md bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 text-[11px] font-bold text-purple-400">
+                                  📑 شيكات ({checksCount > 0 ? `${checksCount} شيك` : 'شيك'})
+                                </span>
+                                <Link
+                                  href={`/dashboard/cheques?search=${v.voucher_number}`}
+                                  className="block text-[10px] text-purple-300 hover:text-purple-200 underline font-medium"
+                                  title="عرض الشيكات في محفظة الشيكات"
+                                >
+                                  عرض بالمحفظة ({checksCount} شيك) ←
+                                </Link>
+                              </div>
                             )
                           }
                           if (v.payment_method === 'split') {
                             return (
                               <div className="space-y-0.5">
                                 <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-400">
-                                  💵+📑 نقدي وشيكات
+                                  💵+📑 نقدي وشيكات ({checksCount} شيك)
                                 </span>
                                 <div className="text-[10px] text-slate-400 font-mono" dir="ltr">
                                   نقدي: {fmt(v.cash_amount || 0)} | شيكات: {fmt(v.checks_amount || 0)}
                                 </div>
+                                {checksCount > 0 && (
+                                  <Link
+                                    href={`/dashboard/cheques?search=${v.voucher_number}`}
+                                    className="block text-[10px] text-purple-300 hover:text-purple-200 underline font-medium"
+                                    title="عرض الشيكات في محفظة الشيكات"
+                                  >
+                                    عرض بالمحفظة ({checksCount} شيك) ←
+                                  </Link>
+                                )}
                               </div>
                             )
                           }
@@ -1483,17 +1534,54 @@ export default function VouchersTable({
               {/* 6. تفاصيل الشيكات (عند اختيار شيكات أو نقدي + شيكات) */}
               {(paymentMethod === 'cheque' || paymentMethod === 'split') && (
                 <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 p-3.5 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-bold text-purple-300 flex items-center gap-1">
-                      <span>📑</span> تفاصيل الشيكات المسجلة ({cheques.length} شيك)
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={addChequeRow}
-                      className="flex items-center gap-1 rounded-lg bg-purple-500/20 border border-purple-500/30 px-2.5 py-1 text-xs font-bold text-purple-300 hover:bg-purple-500 hover:text-white transition"
-                    >
-                      <span>⊕</span> إضافة شيك آخر
-                    </button>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-purple-500/20 pb-2.5">
+                    <div>
+                      <h3 className="text-xs font-bold text-purple-300 flex items-center gap-1.5">
+                        <span>📑</span> تفاصيل الشيكات المسجلة
+                        <span className="rounded-full bg-purple-500/20 border border-purple-500/30 px-2 py-0.5 text-[11px] font-bold text-purple-200">
+                          {cheques.length} {cheques.length === 1 ? 'شيك' : cheques.length === 2 ? 'شيكان' : 'شيكات'}
+                        </span>
+                      </h3>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        كل شيك يُسجل كـ كيان مستقل برقم ومبلغ وتاريخ استحقاق في محفظة الشيكات
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] text-slate-400 font-semibold">عدد الشيكات:</span>
+                      {[1, 2, 3, 5, 10].map(cnt => (
+                        <button
+                          key={cnt}
+                          type="button"
+                          onClick={() => setChequesCount(cnt)}
+                          className={`rounded-md px-2 py-0.5 text-[10px] font-bold transition ${
+                            cheques.length === cnt
+                              ? 'bg-purple-500 text-white shadow-sm'
+                              : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                          }`}
+                        >
+                          {cnt}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={addChequeRow}
+                        className="flex items-center gap-1 rounded-lg bg-purple-500/20 border border-purple-500/30 px-2.5 py-1 text-xs font-bold text-purple-300 hover:bg-purple-500 hover:text-white transition mr-1"
+                      >
+                        <span>⊕</span> إضافة شيك
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* تنبيه التوليد التلقائي لكيانات الشيكات في المحفظة */}
+                  <div className="rounded-lg bg-purple-950/40 border border-purple-500/20 p-2.5 text-[11px] text-purple-200 flex items-start gap-2">
+                    <span className="text-base leading-none">🏦</span>
+                    <div className="text-[11px] leading-relaxed">
+                      <strong className="text-purple-300">الربط التلقائي بمحفظة الشيكات:</strong>
+                      <span className="text-slate-300 mr-1">
+                        سيقوم النظام تلقائياً بإنشاء {cheques.length} {cheques.length === 1 ? 'سجل مستقل' : 'سجلات مستقلة'} في جدول الشيكات (Cheques Portfolio)، مع توثيق اسم البنك، الفرع، ورقم الشيك، وتثبيت الحالة الأولية «في الحافظة».
+                      </span>
+                    </div>
                   </div>
 
                   <div className="space-y-3">

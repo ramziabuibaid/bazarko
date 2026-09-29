@@ -13,6 +13,8 @@ export type AccountTagCode =
   | 'CASH'
   | 'PETTY_CASH'
   | 'BANK'
+  | 'CHEQUES_IN_HAND'
+  | 'CHEQUES_RECEIVABLE'
   | 'CHECKS_PORTFOLIO'
   | 'CHECKS_UNDER_COLLECTION'
   | 'CHECKS_BOUNCED'
@@ -123,9 +125,17 @@ export async function resolveAccount(
     return await resolveSupplierAccount(supabase, storeId, context.supplierId, context.supplierName)
   }
 
-  // 5. التعامل مع محفظة الشيكات الواردة (CHECKS_PORTFOLIO)
-  if (tag === 'CHECKS_PORTFOLIO') {
-    return await resolveStandardTaggedAccount(supabase, storeId, 'CHECKS_PORTFOLIO', 'محفظة الشيكات الواردة (أوراق قبض)', 'asset', 'debit')
+  // 5. التعامل مع محفظة الشيكات الواردة (CHEQUES_IN_HAND / CHECKS_PORTFOLIO / CHEQUES_RECEIVABLE)
+  if (tag === 'CHEQUES_IN_HAND' || tag === 'CHECKS_PORTFOLIO' || tag === 'CHEQUES_RECEIVABLE') {
+    return await resolveStandardTaggedAccount(
+      supabase,
+      storeId,
+      'CHEQUES_IN_HAND',
+      'شيكات في المحفظة (أوراق قبض)',
+      'asset',
+      'debit',
+      ['CHEQUE_RECEIPT', 'CHEQUE_ENDORSEMENT', 'CHEQUE_DEPOSIT', 'CAN_RECEIVE_PAYMENT']
+    )
   }
 
   // 6. التعامل مع الشيكات برسم التحصيل (CHECKS_UNDER_COLLECTION)
@@ -506,12 +516,16 @@ async function resolveStandardTaggedAccount(
   normalBalance: 'debit' | 'credit',
   defaultCapabilities: string[] = []
 ): Promise<AccountResolutionResult> {
-  // 1. البحث بواسطة الوسم أولاً
+  // 1. البحث بواسطة الوسم أولاً (مع مراعاة الأسماء البديلة)
+  const tagCandidates = (tag === 'CHEQUES_IN_HAND' || tag === 'CHECKS_PORTFOLIO' || tag === 'CHEQUES_RECEIVABLE')
+    ? ['CHEQUES_IN_HAND', 'CHECKS_PORTFOLIO', 'CHEQUES_RECEIVABLE']
+    : [tag]
+
   const { data: tagged } = await supabase
     .from('accounts')
     .select('id, code, name, account_tag, capabilities, is_active, is_group')
     .eq('store_id', storeId)
-    .eq('account_tag', tag)
+    .in('account_tag', tagCandidates)
     .eq('is_group', false)
     .order('created_at', { ascending: true })
     .limit(1)

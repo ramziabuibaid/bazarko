@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { PALESTINIAN_BANKS, getPmaBankByCode, normalizeBankCode } from '@/lib/palestineBanks'
 import { tafqeet } from '@/lib/tafqeet'
@@ -38,6 +38,7 @@ interface CheckItem {
   customer?: { id: string; name: string; phone: string | null } | null
   supplier?: { id: string; name: string; phone: string | null } | null
   deposit_bank?: { id: string; bank_name: string; account_number: string } | null
+  voucher?: { id: string; voucher_number: string; type: string; date: string } | null
   created_at: string
 }
 
@@ -98,10 +99,24 @@ export default function ChequesClient({
   const router = useRouter()
   const supabase = createClient()
 
+  const searchParams = useSearchParams()
+
   const [checks, setChecks] = useState<CheckItem[]>(initialChecks)
   const [activeTab, setActiveTab] = useState<'received' | 'issued'>('received')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState('')
+
+  useEffect(() => {
+    const s = searchParams?.get('search')
+    if (s) {
+      setSearchQuery(s)
+      if (s.toUpperCase().includes('PMT')) {
+        setActiveTab('issued')
+      } else if (s.toUpperCase().includes('RCP')) {
+        setActiveTab('received')
+      }
+    }
+  }, [searchParams])
 
   // Modals state
   const [showAddModal, setShowAddModal] = useState(false)
@@ -159,7 +174,8 @@ export default function ChequesClient({
         const matchesPayee = (c.payee_name || '').toLowerCase().includes(q)
         const matchesCustomer = (c.customer?.name || '').toLowerCase().includes(q)
         const matchesSupplier = (c.supplier?.name || '').toLowerCase().includes(q)
-        if (!matchesNumber && !matchesBank && !matchesDrawer && !matchesPayee && !matchesCustomer && !matchesSupplier) {
+        const matchesVoucher = (c.voucher?.voucher_number || '').toLowerCase().includes(q)
+        if (!matchesNumber && !matchesBank && !matchesDrawer && !matchesPayee && !matchesCustomer && !matchesSupplier && !matchesVoucher) {
           return false
         }
       }
@@ -637,6 +653,18 @@ export default function ChequesClient({
                         >
                           #{check.check_number}
                         </Link>
+                        {check.voucher && (
+                          <div className="mt-1">
+                            <Link
+                              href={check.voucher.type === 'receipt' ? `/dashboard/accounting/receipts?search=${check.voucher.voucher_number}` : `/dashboard/accounting/payments?search=${check.voucher.voucher_number}`}
+                              className="inline-flex items-center gap-1 rounded bg-indigo-500/15 border border-indigo-500/25 px-1.5 py-0.5 text-[10px] font-bold text-indigo-300 hover:bg-indigo-500/25 transition"
+                              title="انقر لفتح السند المالي الأصلي"
+                            >
+                              <span>{check.voucher.type === 'receipt' ? 'سند قبض' : 'سند صرف'}</span>
+                              <span className="font-mono">#{check.voucher.voucher_number}</span>
+                            </Link>
+                          </div>
+                        )}
                       </td>
 
                       <td className="p-3.5">

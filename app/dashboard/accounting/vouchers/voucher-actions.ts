@@ -172,6 +172,17 @@ export async function getSupplierOpenPurchases(supplierId: string) {
 }
 
 /**
+ * تطبيع موحد لطريقة الدفع عبر السندات
+ */
+function normalizePaymentMethod(method?: string | null): 'cash' | 'cheque' | 'split' | 'bank' {
+  const rawMethod = (method || 'cash').toLowerCase().trim()
+  const isChequeMethod = rawMethod === 'cheque' || rawMethod === 'check' || rawMethod === 'cheques' || rawMethod === 'checks' || rawMethod.includes('شيك')
+  const isSplitMethod = rawMethod === 'split' || rawMethod.includes('مختلط') || rawMethod.includes('مركب') || rawMethod.includes('مجزأ')
+  const isBankMethod = rawMethod === 'bank' || rawMethod === 'transfer' || rawMethod.includes('بنك') || rawMethod.includes('تحويل')
+  return isChequeMethod ? 'cheque' : isSplitMethod ? 'split' : isBankMethod ? 'bank' : 'cash'
+}
+
+/**
  * إنشاء سند قبض أو صرف مع دعم الدفع النقدي، الشيكات، أو (نقدي + شيكات)
  * والربط الاختياري بالفواتير
  */
@@ -210,43 +221,84 @@ export async function createVoucher(input: CreateVoucherInput) {
       }
     }
 
-    // احتساب وتدقيق مبالغ وسائل الدفع
+    // تطبيع طريقة الدفع واحتساب وتدقيق مبالغ وسائل الدفع
+    const rawMethod = (input.payment_method || 'cash').toLowerCase().trim()
+    const isChequeMethod = rawMethod === 'cheque' || rawMethod === 'check' || rawMethod === 'cheques' || rawMethod === 'checks' || rawMethod.includes('شيك')
+    const isSplitMethod = rawMethod === 'split' || rawMethod.includes('مختلط') || rawMethod.includes('مركب') || rawMethod.includes('مجزأ')
+    const isBankMethod = rawMethod === 'bank' || rawMethod === 'transfer' || rawMethod.includes('بنك') || rawMethod.includes('تحويل')
+    const normMethod: 'cash' | 'cheque' | 'split' | 'bank' = isChequeMethod ? 'cheque' : isSplitMethod ? 'split' : isBankMethod ? 'bank' : 'cash'
+
     let effectiveCash = 0
     let effectiveChecks = 0
 
-    if (input.payment_method === 'cash') {
+    if (normMethod === 'cash') {
       effectiveCash = totalAmount
       effectiveChecks = 0
-    } else if (input.payment_method === 'cheque') {
+    } else if (normMethod === 'cheque') {
       effectiveCash = 0
       effectiveChecks = totalAmount
       if (!input.checks || input.checks.length === 0) {
-        return { success: false, error: 'يرجى إضافة شيك واحد على الأقل' }
+        return { success: false, error: 'طريقة الدفع بشيكات تتطلب إدخال شيك واحد على الأقل مع كامل بياناته' }
       }
-      const sumChecks = input.checks.reduce((sum, c) => sum + Number(c.amount || 0), 0)
-      if (Math.abs(sumChecks - totalAmount) > 0.01) {
-        return { success: false, error: `مجموع مبالغ الشيكات (${sumChecks}) لا يتطابق مع إجمالي السند (${totalAmount})` }
-      }
-    } else if (input.payment_method === 'split') {
+    } else if (normMethod === 'split') {
       effectiveCash = Number(input.cash_amount || 0)
       effectiveChecks = Number(input.checks_amount || 0)
       if (effectiveCash <= 0) {
-        return { success: false, error: 'يرجى إدخال المبلغ النقدي' }
+        return { success: false, error: 'يرجى إدخال المبلغ النقدي المقبوض في السند المجزأ' }
       }
       if (!input.checks || input.checks.length === 0) {
-        return { success: false, error: 'يرجى إدخال بيانات الشيكات' }
-      }
-      const sumChecks = input.checks.reduce((sum, c) => sum + Number(c.amount || 0), 0)
-      if (Math.abs(sumChecks - effectiveChecks) > 0.01) {
-        return { success: false, error: `مجموع قيم الشيكات المدخلة (${sumChecks}) لا يتطابق مع مبلغ الشيكات المحدد (${effectiveChecks})` }
-      }
-      if (Math.abs((effectiveCash + effectiveChecks) - totalAmount) > 0.01) {
-        return { success: false, error: `مجموع (النقدي ${effectiveCash} + الشيكات ${effectiveChecks}) لا يتطابق مع إجمالي السند (${totalAmount})` }
+        return { success: false, error: 'يرجى إدخال بيانات الشيكات المقبوضة في السند المجزأ' }
       }
     } else {
       // bank or transfer
       effectiveCash = 0
       effectiveChecks = 0
+    }
+
+    // تدقيق كامل وتفصيلي لكل شيك مستقل
+    if (effectiveChecks > 0 || (input.checks && input.checks.length > 0)) {
+      if (!input.checks || input.checks.length === 0) {
+        return { success: false, error: 'يرجى إدخال تفاصيل الشيكات المسجلة بالسند' }
+      }
+
+      const sumChecks = input.checks.reduce((sum, c) => sum + (Number(c.amount) || 0), 0)
+      if (Math.abs(sumChecks - effectiveChecks) > 0.01) {
+        return {
+          success: false,
+          error: `مجموع مبالغ الشيكات المدخلة (${sumChecks.toLocaleString('en-GB', { minimumFractionDigits: 2 })}) لا يطابق إجمالي مبلغ الشيكات المطلوب (${effectiveChecks.toLocaleString('en-GB', { minimumFractionDigits: 2 })})`,
+        }
+      }
+
+      if (normMethod === 'split' && Math.abs((effectiveCash + effectiveChecks) - totalAmount) > 0.01) {
+        return {
+          success: false,
+          error: `مجموع (النقدي ${effectiveCash} + الشيكات ${effectiveChecks}) لا يتطابق مع إجمالي السند (${totalAmount})`,
+        }
+      }
+
+      // التحقق من صحة بيانات كل شيك ومنع تكرار رقم الشيك داخل السند الواحد
+      const checkNumbersSeen = new Set<string>()
+      for (let i = 0; i < input.checks.length; i++) {
+        const c = input.checks[i]
+        const num = (c.check_number || '').trim()
+        if (!num) {
+          return { success: false, error: `الشيك رقم (${i + 1}): يرجى إدخال رقم الشيك` }
+        }
+        if (checkNumbersSeen.has(num)) {
+          return { success: false, error: `رقم الشيك (${num}) مكرر أكثر من مرة داخل نفس السند!` }
+        }
+        checkNumbersSeen.add(num)
+
+        if (!c.amount || Number(c.amount) <= 0) {
+          return { success: false, error: `الشيك رقم (${num}): يرجى إدخال مبلغ صحيح وموجب` }
+        }
+        if (!c.due_date) {
+          return { success: false, error: `الشيك رقم (${num}): يرجى تحديد تاريخ الاستحقاق` }
+        }
+        if (!c.bank_name?.trim()) {
+          return { success: false, error: `الشيك رقم (${num}): يرجى تحديد البنك المسحوب عليه` }
+        }
+      }
     }
 
     // توليد رقم السند التسلسلي
@@ -278,7 +330,7 @@ export async function createVoucher(input: CreateVoucherInput) {
         invoice_id: input.invoice_id || null,
         purchase_invoice_id: input.purchase_invoice_id || null,
         party_name: input.party_name.trim(),
-        payment_method: input.payment_method,
+        payment_method: normMethod,
         category: input.category || null,
         description: input.description.trim(),
         reference: input.reference?.trim() || null,
@@ -327,7 +379,7 @@ export async function createVoucher(input: CreateVoucherInput) {
     }
 
     // 3. تحديث الحساب البنكي إذا كان الدفع بنكي
-    if ((input.payment_method === 'bank' || input.payment_method === 'transfer') && input.bank_account_id) {
+    if ((normMethod === 'bank' || input.payment_method === 'transfer') && input.bank_account_id) {
       const { data: bAcc } = await supabase
         .from('bank_accounts')
         .select('balance')
@@ -345,8 +397,8 @@ export async function createVoucher(input: CreateVoucherInput) {
       }
     }
 
-    // 4. تسجيل الشيكات في محفظة الشيكات (checks table)
-    if (input.checks && input.checks.length > 0) {
+    // 4. تسجيل الشيكات كـ كيانات مستقلة في محفظة الشيكات (checks table) مع منع التكرار
+    if (input.checks && input.checks.length > 0 && effectiveChecks > 0) {
       const isReceipt = input.type === 'receipt'
       const checkRows = input.checks.map(c => ({
         store_id: storeId,
@@ -375,14 +427,22 @@ export async function createVoucher(input: CreateVoucherInput) {
         created_by: user.id,
       }))
 
+      // إدراج ذري لكل شيك مع منع التكرار
       const { data: insertedChecks, error: checksErr } = await supabase
         .from('checks')
-        .insert(checkRows)
+        .upsert(checkRows, { onConflict: 'store_id,voucher_id,check_number' })
         .select('id, check_number, amount')
 
       if (checksErr) {
         console.error('Error inserting voucher checks:', checksErr)
-      } else if (insertedChecks && insertedChecks.length > 0) {
+        await supabase.from('vouchers').delete().eq('id', voucher.id)
+        return {
+          success: false,
+          error: `فشل تسجيل الشيكات في محفظة الشيكات: ${checksErr.message || 'خطأ غير معروف'}`,
+        }
+      }
+
+      if (insertedChecks && insertedChecks.length > 0) {
         const checkOps = insertedChecks.map((c: any) => ({
           store_id: storeId,
           check_id: c.id,
@@ -391,7 +451,7 @@ export async function createVoucher(input: CreateVoucherInput) {
           to_status: 'in_portfolio',
           operation_date: input.date,
           notes: isReceipt
-            ? `استلام شيك بموجب سند قبض رقم ${voucherNumber}`
+            ? `استلام شيك في المحفظة بموجب سند قبض رقم ${voucherNumber}`
             : `تحرير شيك بموجب سند صرف رقم ${voucherNumber}`,
           performed_by: user.id,
         }))
@@ -613,11 +673,19 @@ export async function deleteVoucher(voucherId: string) {
     // 2. عكس وحذف الشيكات المرتبطة وحركاتها في محفظة الشيكات
     const { data: linkedChecks } = await supabase
       .from('checks')
-      .select('id')
+      .select('id, status, check_number')
       .eq('store_id', storeId)
       .eq('voucher_id', v.id)
 
     if (linkedChecks && linkedChecks.length > 0) {
+      const advancedChecks = linkedChecks.filter(c => c.status && c.status !== 'in_portfolio')
+      if (advancedChecks.length > 0) {
+        const nums = advancedChecks.map(c => c.check_number).join('، ')
+        return {
+          success: false,
+          error: `لا يمكن حذف السند لوجود شيكات مرتبطة به تمت عليها حركات لاحقة في محفظة الشيكات (رقم الشيك: ${nums}). يجب إلغاء تلك الحركات أو إعادة الشيك للمحفظة أولاً.`,
+        }
+      }
       const checkIds = linkedChecks.map(c => c.id)
       await supabase.from('check_operations').delete().in('check_id', checkIds)
       await supabase.from('checks').delete().eq('store_id', storeId).eq('voucher_id', v.id)
@@ -628,10 +696,18 @@ export async function deleteVoucher(voucherId: string) {
       if (checkNumbers.length > 0) {
         const { data: numChecks } = await supabase
           .from('checks')
-          .select('id')
+          .select('id, status, check_number')
           .eq('store_id', storeId)
           .in('check_number', checkNumbers)
         if (numChecks && numChecks.length > 0) {
+          const advancedChecks = numChecks.filter(c => c.status && c.status !== 'in_portfolio')
+          if (advancedChecks.length > 0) {
+            const nums = advancedChecks.map(c => c.check_number).join('، ')
+            return {
+              success: false,
+              error: `لا يمكن حذف السند لوجود شيكات مرتبطة به تمت عليها حركات لاحقة في محفظة الشيكات (رقم الشيك: ${nums}). يجب إلغاء تلك الحركات أو إعادة الشيك للمحفظة أولاً.`,
+            }
+          }
           await supabase.from('check_operations').delete().in('check_id', numChecks.map(c => c.id))
           await supabase.from('checks').delete().eq('store_id', storeId).in('check_number', checkNumbers)
         }
@@ -839,15 +915,63 @@ export async function updateVoucher(input: UpdateVoucherInput) {
       return { success: false, error: 'يرجى إدخال مبلغ صحيح وموجب للسند' }
     }
 
+    const normMethod = normalizePaymentMethod(input.payment_method)
     let effectiveCash = 0
     let effectiveChecks = 0
-    if (input.payment_method === 'cash') {
+    if (normMethod === 'cash') {
       effectiveCash = totalAmount
-    } else if (input.payment_method === 'cheque') {
+    } else if (normMethod === 'cheque') {
       effectiveChecks = totalAmount
-    } else if (input.payment_method === 'split') {
+    } else if (normMethod === 'split') {
       effectiveCash = Number(input.cash_amount || 0)
       effectiveChecks = Number(input.checks_amount || 0)
+
+      if (effectiveCash < 0 || effectiveChecks < 0) {
+        return { success: false, error: 'مبالغ النقد والشيكات لا يمكن أن تكون سالبة' }
+      }
+      if (Math.abs((effectiveCash + effectiveChecks) - totalAmount) > 0.01) {
+        return {
+          success: false,
+          error: `مجموع النقد (${effectiveCash.toLocaleString()}) والشيكات (${effectiveChecks.toLocaleString()}) لا يتطابق مع إجمالي السند (${totalAmount.toLocaleString()})`,
+        }
+      }
+    }
+
+    // التحقق الصارم من بيانات الشيكات إذا كان هناك جزء شيكات
+    if (effectiveChecks > 0) {
+      if (!input.checks || !Array.isArray(input.checks) || input.checks.length === 0) {
+        return { success: false, error: 'يجب إدخال تفاصيل الشيكات (رقم الشيك، المبلغ، تاريخ الاستحقاق، البنك)' }
+      }
+
+      const sumChecks = input.checks.reduce((acc, c) => acc + (Number(c.amount) || 0), 0)
+      if (Math.abs(sumChecks - effectiveChecks) > 0.01) {
+        return {
+          success: false,
+          error: `مجموع مبالغ الشيكات (${sumChecks.toLocaleString()}) لا يتطابق مع قيمة الشيكات المحددة في السند (${effectiveChecks.toLocaleString()})`,
+        }
+      }
+
+      const checkNums = new Set<string>()
+      for (const [idx, c] of input.checks.entries()) {
+        const cNum = c.check_number?.trim()
+        if (!cNum) {
+          return { success: false, error: `رقم الشيك في السطر ${idx + 1} مطلوب` }
+        }
+        if (checkNums.has(cNum)) {
+          return { success: false, error: `رقم الشيك (${cNum}) مكرر داخل نفس السند` }
+        }
+        checkNums.add(cNum)
+
+        if (!c.amount || Number(c.amount) <= 0) {
+          return { success: false, error: `مبلغ الشيك (${cNum}) يجب أن يكون أكبر من صفر` }
+        }
+        if (!c.due_date) {
+          return { success: false, error: `تاريخ استحقاق الشيك (${cNum}) مطلوب` }
+        }
+        if (!c.bank_name?.trim()) {
+          return { success: false, error: `اسم بنك الشيك (${cNum}) مطلوب` }
+        }
+      }
     }
 
     const oldAmt = Number(oldV.amount || 0)
@@ -961,14 +1085,22 @@ export async function updateVoucher(input: UpdateVoucherInput) {
       }
     }
 
-    // ز) حذف الشيكات القديمة وحركاتها
+    // ز) التحقق من الشيكات القديمة وحذفها
     const { data: oldChecks } = await supabase
       .from('checks')
-      .select('id')
+      .select('id, status, check_number')
       .eq('store_id', storeId)
       .eq('voucher_id', oldV.id)
 
     if (oldChecks && oldChecks.length > 0) {
+      const advancedChecks = oldChecks.filter(c => c.status && c.status !== 'in_portfolio')
+      if (advancedChecks.length > 0) {
+        const nums = advancedChecks.map(c => c.check_number).join('، ')
+        return {
+          success: false,
+          error: `لا يمكن تعديل السند لوجود شيكات مرتبطة به تمت عليها حركات لاحقة في محفظة الشيكات (رقم الشيك: ${nums}). يجب إلغاء تلك الحركات أو إعادة الشيك للمحفظة أولاً.`,
+        }
+      }
       const checkIds = oldChecks.map(c => c.id)
       await supabase.from('check_operations').delete().in('check_id', checkIds)
       await supabase.from('checks').delete().eq('store_id', storeId).eq('voucher_id', oldV.id)
@@ -992,7 +1124,7 @@ export async function updateVoucher(input: UpdateVoucherInput) {
         invoice_id: input.invoice_id !== undefined ? input.invoice_id : oldV.invoice_id,
         purchase_invoice_id: input.purchase_invoice_id !== undefined ? input.purchase_invoice_id : oldV.purchase_invoice_id,
         party_name: input.party_name.trim(),
-        payment_method: input.payment_method,
+        payment_method: normMethod,
         category: input.category || null,
         description: input.description.trim(),
         reference: input.reference?.trim() || null,
@@ -1062,8 +1194,8 @@ export async function updateVoucher(input: UpdateVoucherInput) {
         .eq('store_id', storeId)
     }
 
-    // ب) إدراج الشيكات الجديدة وحركاتها
-    if (input.checks && input.checks.length > 0) {
+    // ب) إدراج الشيكات الجديدة كـ كيانات مستقلة وحركاتها
+    if (input.checks && input.checks.length > 0 && effectiveChecks > 0) {
       const checkRows = input.checks.map(c => ({
         store_id: storeId,
         type: isReceipt ? 'received' : 'issued',
@@ -1091,10 +1223,18 @@ export async function updateVoucher(input: UpdateVoucherInput) {
         created_by: user.id,
       }))
 
-      const { data: insertedNewChecks } = await supabase
+      const { data: insertedNewChecks, error: newChecksErr } = await supabase
         .from('checks')
-        .insert(checkRows)
+        .upsert(checkRows, { onConflict: 'store_id,voucher_id,check_number' })
         .select('id, check_number')
+
+      if (newChecksErr) {
+        console.error('Error inserting updated voucher checks:', newChecksErr)
+        return {
+          success: false,
+          error: `فشل تسجيل الشيكات في محفظة الشيكات: ${newChecksErr.message || 'خطأ غير معروف'}`,
+        }
+      }
 
       if (insertedNewChecks && insertedNewChecks.length > 0) {
         const checkOps = insertedNewChecks.map((c: any) => ({
@@ -1105,8 +1245,8 @@ export async function updateVoucher(input: UpdateVoucherInput) {
           to_status: 'in_portfolio',
           operation_date: input.date,
           notes: isReceipt
-            ? `استلام شيك بموجب سند قبض رقم ${oldV.voucher_number}`
-            : `تحرير شيك بموجب سند صرف رقم ${oldV.voucher_number}`,
+            ? `تحديث شيك بموجب تعديل سند قبض رقم ${oldV.voucher_number}`
+            : `تحديث شيك بموجب تعديل سند صرف رقم ${oldV.voucher_number}`,
           performed_by: user.id,
         }))
         await supabase.from('check_operations').insert(checkOps)
