@@ -13,6 +13,8 @@ export interface JournalLineUpdateInput {
   exchange_rate?: number
   original_debit?: number
   original_credit?: number
+  account_tag_used?: string | null
+  source_rule?: string | null
 }
 
 export interface UpdateJournalEntryInput {

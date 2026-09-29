@@ -67,6 +67,9 @@ export default async function PrintJournalEntryPage({ params }: { params: { id: 
           <div className="text-left font-mono text-xs">
             <p><span className="text-slate-500">التاريخ:</span> <span className="font-bold">{new Date(entry.date).toLocaleDateString('en-GB')}</span></p>
             <p className="mt-1"><span className="text-slate-500">المصدر:</span> {entry.source}</p>
+            {entry.accounting_rule && (
+              <p className="mt-1"><span className="text-slate-500">القاعدة:</span> <span className="text-[10px] font-mono px-1 py-0.5 rounded bg-sky-50 text-sky-800 border border-sky-200">{entry.accounting_rule}</span></p>
+            )}
             <p className="mt-1"><span className="text-slate-500">الحالة:</span> <span className="font-bold text-emerald-700">مرحل</span></p>
           </div>
         </div>
@@ -92,7 +95,16 @@ export default async function PrintJournalEntryPage({ params }: { params: { id: 
             {(entry.lines || []).map((line: any) => (
               <tr key={line.id}>
                 <td className="p-2 font-mono font-bold text-slate-900">{line.account?.code || '—'}</td>
-                <td className="p-2 font-semibold text-slate-900">{line.account?.name || '—'}</td>
+                <td className="p-2 font-semibold text-slate-900">
+                  <div className="flex items-center gap-1.5">
+                    <span>{line.account?.name || '—'}</span>
+                    {line.account_tag_used && (
+                      <span className="inline-block text-[10px] font-mono px-1.5 py-0.2 rounded bg-sky-50 text-sky-700 border border-sky-200">
+                        #{line.account_tag_used}
+                      </span>
+                    )}
+                  </div>
+                </td>
                 <td className="p-2 text-slate-600">{line.description || entry.description}</td>
                 <td className="p-2 font-mono font-bold text-emerald-800">
                   {Number(line.debit) > 0 ? Number(line.debit).toLocaleString('en-GB', { minimumFractionDigits: 2 }) : '—'}

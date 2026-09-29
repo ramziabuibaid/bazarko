@@ -175,6 +175,9 @@ export default function CreateJournalClient({ store, accounts }: Props) {
           date,
           description: description.trim(),
           source: 'manual',
+          source_type: 'manual',
+          accounting_rule: 'MANUAL_JOURNAL',
+          source_module: 'MANUAL',
           status: 'posted',
         })
         .select('id')
@@ -183,18 +186,23 @@ export default function CreateJournalClient({ store, accounts }: Props) {
       if (entryErr) throw entryErr
 
       // 2. Insert Lines with multi-currency tracking (Item 13)
-      const linePayloads = lines.map((line, idx) => ({
-        journal_entry_id: entry.id,
-        account_id: line.account_id,
-        debit: line.debit,
-        credit: line.credit,
-        original_debit: parseFloat(line.original_debit) || 0,
-        original_credit: parseFloat(line.original_credit) || 0,
-        currency: line.currency,
-        exchange_rate: Number(line.exchange_rate) || 1.0,
-        description: line.description.trim() || description.trim(),
-        sort_order: idx + 1,
-      }))
+      const linePayloads = lines.map((line, idx) => {
+        const matchingAcc = accounts.find(a => a.id === line.account_id)
+        return {
+          journal_entry_id: entry.id,
+          account_id: line.account_id,
+          debit: line.debit,
+          credit: line.credit,
+          original_debit: parseFloat(line.original_debit) || 0,
+          original_credit: parseFloat(line.original_credit) || 0,
+          currency: line.currency,
+          exchange_rate: Number(line.exchange_rate) || 1.0,
+          description: line.description.trim() || description.trim(),
+          sort_order: idx + 1,
+          account_tag_used: (matchingAcc as any)?.account_tag || null,
+          source_rule: 'MANUAL_JOURNAL',
+        }
+      })
 
       const { error: linesErr } = await supabase.from('journal_lines').insert(linePayloads)
       if (linesErr) throw linesErr

@@ -37,7 +37,9 @@ export default async function EditJournalPage({ params }: Props) {
         original_debit,
         original_credit,
         sort_order,
-        account:accounts(id, code, name, type, normal_balance)
+        account_tag_used,
+        source_rule,
+        account:accounts(id, code, name, type, normal_balance, account_tag)
       )
     `)
     .eq('id', params.id)

@@ -183,6 +183,8 @@ export default function EditJournalClient({ entry, linkedVoucher, accounts }: Pr
         exchange_rate: Number(l.exchange_rate) || 1.0,
         original_debit: parseFloat(l.original_debit) || 0,
         original_credit: parseFloat(l.original_credit) || 0,
+        account_tag_used: (accounts.find(a => a.id === l.account_id) as any)?.account_tag || (l as any).account_tag_used || null,
+        source_rule: 'MANUAL_EDIT',
       }))
 
       const res = await updateJournalEntryAction({
