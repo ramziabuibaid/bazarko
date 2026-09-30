@@ -7,6 +7,7 @@ import { useToast } from '@/components/ui/Toast'
 import { useConfirm } from '@/components/ui/Confirm'
 import { createVoucher, updateVoucher, deleteVoucher, getCustomerOpenInvoices, getSupplierOpenPurchases, ChequeItem } from '@/app/dashboard/accounting/vouchers/voucher-actions'
 import { PALESTINIAN_BANKS } from '@/lib/palestineBanks'
+import { requestKey, completeRequest } from '@/lib/client/idempotency'
 
 interface Customer {
   id: string
@@ -667,7 +668,9 @@ export default function VouchersTable({
           ...voucherPayload,
         })
       } else {
-        res = await createVoucher(voucherPayload)
+        const request_key = await requestKey('voucher', voucherPayload)
+        res = await createVoucher({ ...voucherPayload, request_key })
+        if (res.success) await completeRequest('voucher', voucherPayload)
       }
 
       if (!res.success) {
@@ -989,15 +992,6 @@ export default function VouchersTable({
                         <div className="flex items-center justify-center gap-1.5">
                           <button
                             type="button"
-                            title="تعديل السند"
-                            onClick={() => handleOpenEdit(v)}
-                            className="rounded-lg border border-sky-500/20 bg-sky-500/10 p-1.5 text-sky-400 hover:bg-sky-500 hover:text-white transition"
-                          >
-                            ✏️
-                          </button>
-
-                          <button
-                            type="button"
                             title="طباعة السند رسمياً كـ PDF"
                             onClick={() => window.open(`/dashboard/accounting/${isReceipt ? 'receipts' : 'payments'}/print/${v.id}`, '_blank')}
                             className="rounded-lg border border-white/10 bg-slate-800 p-1.5 text-slate-300 hover:text-white hover:bg-slate-700 transition"
@@ -1005,14 +999,6 @@ export default function VouchersTable({
                             🖨️
                           </button>
 
-                          <button
-                            type="button"
-                            title="حذف السند وعكس الأثر المالي"
-                            onClick={() => handleDelete(v)}
-                            className="rounded-lg border border-rose-500/20 bg-rose-500/10 p-1.5 text-rose-400 hover:bg-rose-500 hover:text-white transition"
-                          >
-                            🗑️
-                          </button>
                         </div>
                       </td>
                     </tr>

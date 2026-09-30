@@ -1,5 +1,8 @@
 'use client'
 
+import { requestKey, completeRequest } from '@/lib/client/idempotency'
+import PaymentAllocation, { SalePayment } from './PaymentAllocation'
+
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
@@ -114,13 +117,14 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
   // Payment
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash')
   const [amountPaid, setAmountPaid] = useState('')
+  const [paymentAllocations, setPaymentAllocations] = useState<SalePayment[] | null>(null)
   const [notes, setNotes] = useState('')
 
   // الحسابات المالية
   const subtotal = items.reduce((s, i) => s + i.unitPrice * i.quantity, 0)
   const totalCost = items.reduce((s, i) => s + (i.costPrice || 0) * i.quantity, 0)
   const totalAmount = subtotal
-  const effectiveAmountPaid = mode === 'pos' ? totalAmount : (parseFloat(amountPaid) || 0)
+  const effectiveAmountPaid = paymentAllocations !== null ? paymentAllocations.reduce((sum, p) => sum + p.amount, 0) : mode === 'pos' ? totalAmount : (parseFloat(amountPaid) || 0)
   const amountRemaining = Math.max(0, totalAmount - effectiveAmountPaid)
 
   // تحميل كافة الأصناف والتصنيفات فور فتح الشاشة
@@ -310,13 +314,12 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
 
     setSubmitting(true)
     try {
-      const activePayMethod = mode === 'pos' ? 'cash' : (paymentMethod || 'credit')
-      const activeEffectivePaid = mode === 'pos' ? totalAmount : (parseFloat(amountPaid) || 0)
+      const activeEffectivePaid = effectiveAmountPaid
+      const effectivePayments = paymentAllocations ?? (activeEffectivePaid > 0 ? [{ method: 'cash' as const, amount: activeEffectivePaid }] : [])
+      const activePayMethod = effectivePayments.length === 1 ? effectivePayments[0].method : 'credit'
+      if ((amountRemaining > 0 || effectivePayments.some(p => p.method === 'check')) && !selectedCustomer) { setError('اختر العميل للآجل أو الشيكات'); return }
 
-      const res = await fetch('/api/orders/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const payload = {
           mode,
           items: items.map(i => ({
             productId: i.productId,
@@ -324,18 +327,25 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
             unitPrice: i.unitPrice,
             quantity: i.quantity,
           })),
-          customerId: mode === 'account' ? selectedCustomer?.id : undefined,
+          customerId: selectedCustomer?.id,
+          payments: effectivePayments,
           customerName: mode === 'account' ? selectedCustomer?.name : (posName.trim() || 'عميل نقدي'),
           customerPhone: mode === 'account' ? (selectedCustomer?.phone || undefined) : (posPhone.trim() || undefined),
           customerEmail: mode === 'account' ? (selectedCustomer?.email || undefined) : (posEmail.trim() || undefined),
           paymentMethod: activePayMethod,
           amountPaid: activeEffectivePaid,
           notes,
-        }),
+        }
+      const res = await fetch('/api/orders/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': await requestKey('pos', payload) },
+        body: JSON.stringify(payload),
       })
 
       const data = await res.json()
       if (!res.ok) { setError(data.error ?? 'حدث خطأ أثناء الحفظ'); return }
+
+      await completeRequest('pos', payload)
 
       // إعداد بيانات الإيصال الفوري لنقطة البيع
       const receipt: ReceiptData = {
@@ -731,19 +741,19 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
 
             {/* ── اختيار العميل وطريقة البيع ── */}
             <div className="pt-2 border-t border-white/5 space-y-3">
-              {mode === 'pos' ? (
+              {mode === 'pos' && (
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/20 p-3 space-y-2">
                   <div className="flex items-center justify-between text-emerald-400 font-bold text-xs">
                     <span className="flex items-center gap-1.5">
                       <span>💵</span>
-                      <span>بيع نقدي مباشر (الصندوق)</span>
+                      <span>بيانات العميل</span>
                     </span>
                     <span className="text-[10px] bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                      حساب 1001
+                      وسيلة التسديد المحددة
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-300 leading-relaxed">
-                    يتم تسجيل العملية مباشرةً على حساب <strong className="text-emerald-300">الصندوق (1001)</strong> وحساب <strong className="text-emerald-300">المبيعات النقدية (4001)</strong> دون الحاجة لاختيار عميل.
+                    اختر توزيع التسديد أدناه. يتطلب الآجل والشيك اختيار عميل مسجل.
                   </p>
                   <div className="pt-2 border-t border-emerald-500/10 grid grid-cols-2 gap-2">
                     <div>
@@ -769,7 +779,8 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
                     </div>
                   </div>
                 </div>
-              ) : (
+              )}
+              {(
                 <div className="rounded-xl border border-amber-500/20 bg-amber-950/20 p-3 space-y-2.5">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
@@ -785,7 +796,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
                     </button>
                   </div>
                   <p className="text-[11px] text-slate-300">
-                    يتم تسجيل العملية على حساب العميل بالذمة. <strong className="text-amber-300">الصندوق لا يتغير في البيع الآجل</strong>.
+                    يتم تسجيل العملية على حساب العميل بالذمة. <strong className="text-amber-300">المتبقي بعد التسديد يضاف للذمة</strong>.
                   </p>
                   <div className="relative">
                     <input
@@ -866,49 +877,11 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
               )}
             </div>
 
-            {/* ── الأثر المحاسبي والقيود الآلية ── */}
-            <div className="rounded-xl border border-sky-500/20 bg-sky-950/20 p-3 text-[11px] space-y-2">
-              <div className="flex items-center justify-between text-sky-300 font-bold border-b border-sky-500/20 pb-1">
-                <span className="flex items-center gap-1.5">
-                  <span>⚖️</span> الأثر المحاسبي التلقائي:
-                </span>
-                <span className="bg-sky-500/20 px-2 py-0.5 rounded text-[10px]">
-                  {mode === 'pos' ? 'قيد بيع نقدي' : 'قيد بيع آجل'}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 text-slate-300">
-                <div className="bg-slate-900/90 p-2 rounded-lg border border-white/5">
-                  <span className="text-slate-400 block text-[10px]">حركة الصندوق:</span>
-                  <span className={`font-mono font-bold ${mode === 'pos' ? 'text-emerald-400' : 'text-slate-400'}`}>
-                    {mode === 'pos' ? `+${fmt(totalAmount)} ${currencyCode}` : (effectiveAmountPaid > 0 ? `+${fmt(effectiveAmountPaid)} ${currencyCode}` : 'لا يتغير (0 نقد)')}
-                  </span>
-                </div>
-                <div className="bg-slate-900/90 p-2 rounded-lg border border-white/5">
-                  <span className="text-slate-400 block text-[10px]">حساب العميل:</span>
-                  <span className={`font-mono font-bold ${mode === 'account' ? 'text-amber-400' : 'text-slate-400'}`}>
-                    {mode === 'account' ? `+${fmt(amountRemaining)} ${currencyCode}` : 'لا مديونية'}
-                  </span>
-                </div>
-              </div>
-
-              <div className="bg-slate-900/90 p-2 rounded-lg border border-white/5 space-y-1 font-mono text-[10px]">
-                <div className="text-slate-400 font-sans font-bold text-[10px] mb-1">القيود اليومية المزدوجة التلقائية:</div>
-                <div className="text-slate-300 leading-tight">
-                  <span className="text-slate-400 font-sans">القيد 1: </span>
-                  <span>مدين تكلفة البضاعة 5001 / دائن المخزون 1201</span>
-                </div>
-                <div className="leading-tight">
-                  <span className="text-slate-400 font-sans">القيد 2: </span>
-                  {mode === 'pos' ? (
-                    <span className="text-emerald-300 font-bold">مدين الصندوق 1001 / دائن المبيعات 4001</span>
-                  ) : (
-                    <span className="text-amber-300 font-bold">
-                      مدين {selectedCustomer ? selectedCustomer.name : 'حساب العميل (1101)'} / دائن المبيعات 4001
-                    </span>
-                  )}
-                </div>
-              </div>
+            <PaymentAllocation storeId={storeId} total={totalAmount} value={paymentAllocations} onChange={setPaymentAllocations} />
+            <div className="rounded-xl border border-sky-500/20 p-3 text-xs text-slate-300">
+              <p>المسدد: {fmt(effectiveAmountPaid)} {currencyCode}</p>
+              <p>المتبقي على العميل: {fmt(amountRemaining)} {currencyCode}</p>
+              <p>تثبت المبيعات وتكلفة المخزون، وكل دفعة على حساب وسيلتها المحددة.</p>
             </div>
 
             {/* ملخص الإجمالي وزر الحفظ */}

@@ -1,5 +1,7 @@
 'use server'
 
+import { financialRows } from './complete-read'
+
 import { createClient } from '@/lib/supabase/server'
 import { checkIsPeriodClosed } from '@/app/dashboard/accounting/periods/period-actions'
 
@@ -126,31 +128,31 @@ export async function getTrialBalance(
   const supabase = createClient()
 
   // جلب كافة الحسابات التحليلية النشطة
-  const { data: accounts } = await supabase
+  const { data: accounts } = await financialRows(() => supabase
     .from('accounts')
     .select('id, code, name, type, normal_balance, is_group, is_active')
     .eq('store_id', storeId)
     .eq('is_group', false)
-    .order('code', { ascending: true })
+    .order('code', { ascending: true }))
 
   const activeAccounts = accounts || []
 
   // جلب قيود اليومية المرحلة قبل تاريخ البداية (الأرصدة الافتتاحية)
-  const { data: openingLines } = await supabase
+  const { data: openingLines } = await financialRows(() => supabase
     .from('journal_lines')
     .select('account_id, debit, credit, journal_entry:journal_entries!inner(date, status, store_id)')
     .eq('journal_entry.store_id', storeId)
     .eq('journal_entry.status', 'posted')
-    .lt('journal_entry.date', fromDate)
+    .lt('journal_entry.date', fromDate))
 
   // جلب قيود اليومية المرحلة خلال الفترة
-  const { data: periodLines } = await supabase
+  const { data: periodLines } = await financialRows(() => supabase
     .from('journal_lines')
     .select('account_id, debit, credit, journal_entry:journal_entries!inner(date, status, store_id)')
     .eq('journal_entry.store_id', storeId)
     .eq('journal_entry.status', 'posted')
     .gte('journal_entry.date', fromDate)
-    .lte('journal_entry.date', toDate)
+    .lte('journal_entry.date', toDate))
 
   const openingMap = new Map<string, { dr: number; cr: number }>()
   for (const l of (openingLines || [])) {
@@ -248,13 +250,14 @@ export async function getIncomeStatement(
   const supabase = createClient()
 
   // جلب سطور القيود المرحلة خلال الفترة مع بيانات الحساب
-  const { data: lines } = await supabase
+  const { data: lines } = await financialRows(() => supabase
     .from('journal_lines')
-    .select('account_id, debit, credit, account:accounts(id, code, name, type), journal_entry:journal_entries!inner(date, status, store_id)')
+    .select('account_id, debit, credit, account:accounts(id, code, name, type, report_section), journal_entry:journal_entries!inner(date, status, store_id)')
     .eq('journal_entry.store_id', storeId)
     .eq('journal_entry.status', 'posted')
+    .neq('journal_entry.source', 'closing')
     .gte('journal_entry.date', fromDate)
-    .lte('journal_entry.date', toDate)
+    .lte('journal_entry.date', toDate))
 
   const rawLines = (lines || []) as any[]
 
@@ -267,19 +270,20 @@ export async function getIncomeStatement(
 
   for (const l of rawLines) {
     const acc = l.account
-    if (!acc) continue
+    if (!acc) throw new Error('التقرير غير مكتمل: حساب غير موجود')
+    if (['revenue', 'expense'].includes(acc.type) && !acc.report_section) throw new Error('التقرير غير مكتمل: تصنيف حساب الأرباح والخسائر مطلوب')
 
     const d = Number(l.debit || 0)
     const c = Number(l.credit || 0)
 
     if (acc.type === 'revenue') {
       // فحص هل هو حساب مقابل للإيراد (مردودات وخصومات 4099)
-      if (acc.code === '4099' || acc.name.includes('مردود') || acc.name.includes('خصم')) {
+      if (acc.report_section === 'contra_sales') {
         const net = d - c // طبيعة مدينة
         const prev = contraItems.get(acc.id) || { code: acc.code, name: acc.name, amount: 0 }
         prev.amount += net
         contraItems.set(acc.id, prev)
-      } else if (acc.code === '4003' || acc.name.includes('متنوع') || acc.name.includes('أخرى')) {
+      } else if (acc.report_section === 'other_revenue') {
         const net = c - d
         const prev = otherRevItems.get(acc.id) || { code: acc.code, name: acc.name, amount: 0 }
         prev.amount += net
@@ -292,12 +296,12 @@ export async function getIncomeStatement(
       }
     } else if (acc.type === 'expense') {
       // فحص هل هو حساب تكلفة المبيعات COGS (5001)
-      if (acc.code === '5001' || acc.name.includes('تكلفة') || acc.name.includes('COGS')) {
+      if (acc.report_section === 'cogs') {
         const net = d - c
         const prev = cogsItems.get(acc.id) || { code: acc.code, name: acc.name, amount: 0 }
         prev.amount += net
         cogsItems.set(acc.id, prev)
-      } else if (acc.code === '5199' || acc.name.includes('أخرى') || acc.name.includes('غير تشغيلية')) {
+      } else if (acc.report_section === 'other_expense') {
         const net = d - c
         const prev = otherExpItems.get(acc.id) || { code: acc.code, name: acc.name, amount: 0 }
         prev.amount += net
@@ -372,21 +376,21 @@ export async function getBalanceSheet(
   const supabase = createClient()
 
   // جلب كافة الحسابات
-  const { data: accounts } = await supabase
+  const { data: accounts } = await financialRows(() => supabase
     .from('accounts')
-    .select('id, code, name, type, normal_balance, is_group')
+    .select('id, code, name, type, normal_balance, is_group, report_section')
     .eq('store_id', storeId)
     .eq('is_group', false)
-    .in('type', ['asset', 'liability', 'equity'])
-    .order('code', { ascending: true })
+    .in('type', ['asset', 'liability', 'equity', 'revenue', 'expense'])
+    .order('code', { ascending: true }))
 
   // جلب جميع سطور القيود المرحلة حتى تاريخ التقرير
-  const { data: lines } = await supabase
+  const { data: lines } = await financialRows(() => supabase
     .from('journal_lines')
     .select('account_id, debit, credit, journal_entry:journal_entries!inner(date, status, store_id)')
     .eq('journal_entry.store_id', storeId)
     .eq('journal_entry.status', 'posted')
-    .lte('journal_entry.date', asOfDate)
+    .lte('journal_entry.date', asOfDate))
 
   const balanceMap = new Map<string, number>()
   for (const l of (lines || [])) {
@@ -394,11 +398,10 @@ export async function getBalanceSheet(
     balanceMap.set(l.account_id, cur + (Number(l.debit || 0) - Number(l.credit || 0)))
   }
 
-  // حساب صافي ربح الفترة حتى هذا التاريخ (Income Statement up to asOfDate)
-  // السنة المالية تبدأ عادة من بداية العام الحالي
-  const yearStart = `${asOfDate.slice(0, 4)}-01-01`
-  const pnl = await getIncomeStatement(storeId, yearStart, asOfDate)
-  const period_net_profit = pnl.net_profit
+  // All unclosed income balances belong in equity; closing entries already zero them.
+  // Adding only this year's profit silently drops prior unclosed years.
+  const period_net_profit = (accounts || []).filter(a => a.type === 'revenue' || a.type === 'expense')
+    .reduce((sum, a) => sum - (balanceMap.get(a.id) || 0), 0)
 
   const current_assets_items: any[] = []
   const non_current_assets_items: any[] = []
@@ -408,12 +411,13 @@ export async function getBalanceSheet(
 
   for (const acc of (accounts || [])) {
     const rawBal = balanceMap.get(acc.id) || 0
+    if (Math.abs(rawBal) >= 0.005 && !acc.report_section) throw new Error('التقرير غير مكتمل: تصنيف حساب الميزانية مطلوب')
 
     if (acc.type === 'asset') {
       const bal = rawBal // الأصول طبيعتها مدينة
       if (Math.abs(bal) < 0.001) continue
 
-      if (acc.code.startsWith('12')) {
+      if (acc.report_section === 'non_current_asset') {
         non_current_assets_items.push({ account_id: acc.id, code: acc.code, name: acc.name, amount: bal })
       } else {
         current_assets_items.push({ account_id: acc.id, code: acc.code, name: acc.name, amount: bal })
@@ -422,7 +426,7 @@ export async function getBalanceSheet(
       const bal = -rawBal // الالتزامات طبيعتها دائنة
       if (Math.abs(bal) < 0.001) continue
 
-      if (acc.code.startsWith('22')) {
+      if (acc.report_section === 'non_current_liability') {
         non_current_liab_items.push({ account_id: acc.id, code: acc.code, name: acc.name, amount: bal })
       } else {
         current_liab_items.push({ account_id: acc.id, code: acc.code, name: acc.name, amount: bal })
@@ -495,86 +499,28 @@ export async function getCashFlowStatement(
 ): Promise<CashFlowReport> {
   const supabase = createClient()
 
-  // 1. استخراج الحسابات النقدية والبنوك
-  const { data: cashAccounts } = await supabase
-    .from('accounts')
-    .select('id, code, name')
-    .eq('store_id', storeId)
-    .in('code', ['1001', '1002', '1101', '1102', '1120'])
-
-  const cashAccountIds = (cashAccounts || []).map(a => a.id)
-
-  // 2. النقد في أول الفترة (قبل fromDate)
-  const { data: openingCashLines } = await supabase
-    .from('journal_lines')
-    .select('debit, credit, journal_entry:journal_entries!inner(date, status, store_id)')
-    .eq('journal_entry.store_id', storeId)
-    .eq('journal_entry.status', 'posted')
-    .in('account_id', cashAccountIds)
-    .lt('journal_entry.date', fromDate)
-
-  const opening_cash = (openingCashLines || []).reduce(
-    (sum, l) => sum + (Number(l.debit || 0) - Number(l.credit || 0)),
-    0
-  )
-
-  // 3. تحليل حركات النقد خلال الفترة حسب نوع ومصدر الحركة
-  const { data: periodCashLines } = await supabase
-    .from('journal_lines')
-    .select(`
-      account_id, debit, credit, description,
-      journal_entry:journal_entries!inner(id, date, status, source, description, store_id)
-    `)
-    .eq('journal_entry.store_id', storeId)
-    .eq('journal_entry.status', 'posted')
-    .in('account_id', cashAccountIds)
-    .gte('journal_entry.date', fromDate)
-    .lte('journal_entry.date', toDate)
-
-  let customer_collections = 0
-  let supplier_payments = 0
-  let operating_expenses = 0
-
-  let fixed_assets_purchases = 0
-  let fixed_assets_sales = 0
-
-  let capital_injections = 0
-  let loans_net = 0
-  let drawings = 0
-
-  for (const l of ((periodCashLines || []) as any[])) {
-    const d = Number(l.debit || 0)  // وارد نقد (+)
-    const c = Number(l.credit || 0) // خارج نقد (-)
-    const jEntry = Array.isArray(l.journal_entry) ? l.journal_entry[0] : l.journal_entry
-    const source = jEntry?.source
-
-    if (source === 'invoice' || (source === 'voucher' && d > 0)) {
-      customer_collections += d
-    } else if (source === 'purchase' || (source === 'voucher' && c > 0 && (l.description?.includes('مورد') || jEntry?.description?.includes('مورد')))) {
-      supplier_payments += c
-    } else if (source === 'voucher' && c > 0) {
-      operating_expenses += c
-    } else {
-      // حركات أخرى
-      if (d > 0) customer_collections += d
-      if (c > 0) operating_expenses += c
-    }
-  }
-
+  const { data, error } = await supabase.rpc('cash_flow_report_atomic', {
+    p_store: storeId, p_from: fromDate, p_to: toDate,
+  })
+  if (error || !data) throw new Error(error?.message || 'التقرير غير مكتمل: تعذر حساب التدفقات')
+  const t = data.totals as Record<string, number>
+  const net = (category: string) => Number(t[`${category}_in`] || 0) - Number(t[`${category}_out`] || 0)
+  const customer_collections = net('customer')
+  const supplier_payments = -net('supplier')
+  const operating_expenses = -net('operating')
+  const fixed_assets_purchases = Number(t.fixed_asset_out || 0)
+  const fixed_assets_sales = Number(t.fixed_asset_in || 0)
+  const capital_injections = net('capital')
+  const loans_net = net('loan')
+  const drawings = -net('drawings')
   const net_operating_flow = customer_collections - supplier_payments - operating_expenses
   const net_investing_flow = fixed_assets_sales - fixed_assets_purchases
   const net_financing_flow = capital_injections + loans_net - drawings
-
   const net_change_in_cash = net_operating_flow + net_investing_flow + net_financing_flow
+  const opening_cash = Number(data.opening)
   const closing_cash = opening_cash + net_change_in_cash
-
-  // 4. مطابقة رصيد النقد مع الميزانية العمومية كما في toDate
-  const bs = await getBalanceSheet(storeId, toDate)
-  const bsCashItems = bs.current_assets.items.filter(i =>
-    ['1001', '1002', '1101', '1102', '1120'].includes(i.code)
-  )
-  const balance_sheet_cash = bsCashItems.reduce((sum, i) => sum + i.amount, 0)
-  const is_reconciled = Math.abs(closing_cash - balance_sheet_cash) < 0.05
+  const balance_sheet_cash = Number(data.closing)
+  const is_reconciled = Math.round(closing_cash * 100) === Math.round(balance_sheet_cash * 100)
 
   return {
     period: { from: fromDate, to: toDate },
@@ -614,17 +560,17 @@ export async function validateAccountingIntegrity(
   const checks: IntegrityCheckResult[] = []
 
   // الفحص 1: توازن جميع القيود المرحلة
-  const { data: entries } = await supabase
+  const { data: entries } = await financialRows(() => supabase
     .from('journal_entries')
     .select('id, entry_number, lines:journal_lines(debit, credit)')
     .eq('store_id', storeId)
-    .eq('status', 'posted')
+    .eq('status', 'posted'))
 
   let unbalancedCount = 0
   for (const e of (entries || [])) {
     const deb = (e.lines || []).reduce((s: number, l: any) => s + Number(l.debit || 0), 0)
     const cre = (e.lines || []).reduce((s: number, l: any) => s + Number(l.credit || 0), 0)
-    if (Math.abs(deb - cre) > 0.01) unbalancedCount++
+    if ((e.lines || []).length < 2 || deb <= 0 || Math.round(deb * 100) !== Math.round(cre * 100)) unbalancedCount++
   }
 
   checks.push({
@@ -635,10 +581,12 @@ export async function validateAccountingIntegrity(
   })
 
   // الفحص 2: سلامة أسطر القيود وعدم وجود حسابات محذوفة
-  const { data: orphanLines } = await supabase
+  const { data: orphanLines } = await financialRows(() => supabase
     .from('journal_lines')
-    .select('id, account:accounts(id)')
-    .is('account', null)
+    .select('id, account:accounts(id), journal_entry:journal_entries!inner(store_id,status)')
+    .eq('journal_entry.store_id', storeId)
+    .eq('journal_entry.status', 'posted')
+    .is('account', null))
 
   const hasOrphans = (orphanLines && orphanLines.length > 0) || false
   checks.push({
@@ -649,10 +597,12 @@ export async function validateAccountingIntegrity(
   })
 
   // الفحص 3: منع الترحيل على الحسابات التجميعية (Parent Accounts)
-  const { data: groupLines } = await supabase
+  const { data: groupLines } = await financialRows(() => supabase
     .from('journal_lines')
-    .select('id, account:accounts(is_group)')
-    .eq('account.is_group', true)
+    .select('id, account:accounts!inner(is_group), journal_entry:journal_entries!inner(store_id,status)')
+    .eq('journal_entry.store_id', storeId)
+    .eq('journal_entry.status', 'posted')
+    .eq('account.is_group', true))
 
   const hasGroupPostings = (groupLines && groupLines.length > 0) || false
   checks.push({
@@ -663,22 +613,24 @@ export async function validateAccountingIntegrity(
   })
 
   // الفحص 4: عدم وجود قيود في فترات مقفلة
-  const { data: closedPeriods } = await supabase
+  const { data: closedPeriods } = await financialRows(() => supabase
     .from('accounting_periods')
-    .select('start_date, end_date')
+    .select('start_date, end_date, closed_at')
     .eq('store_id', storeId)
-    .eq('is_closed', true)
+    .eq('is_closed', true))
 
   let closedViolations = 0
   if (closedPeriods && closedPeriods.length > 0) {
     for (const cp of closedPeriods) {
+      if (!cp.closed_at) throw new Error('التقرير غير مكتمل: وقت إقفال الفترة غير موثق')
       const { count } = await supabase
         .from('journal_entries')
         .select('id', { count: 'exact', head: true })
         .eq('store_id', storeId)
         .gte('date', cp.start_date)
         .lte('date', cp.end_date)
-        .gt('created_at', cp.end_date + 'T23:59:59')
+        .gt('created_at', cp.closed_at)
+        .throwOnError()
       if (count && count > 0) closedViolations += count
     }
   }
@@ -691,11 +643,11 @@ export async function validateAccountingIntegrity(
   })
 
   // الفحص 5: سلامة وصحة تواريخ العمليات
-  const { data: badDates } = await supabase
+  const { data: badDates } = await financialRows(() => supabase
     .from('journal_entries')
     .select('id')
     .eq('store_id', storeId)
-    .is('date', null)
+    .is('date', null))
 
   const datesOk = (!badDates || badDates.length === 0)
   checks.push({
@@ -706,11 +658,11 @@ export async function validateAccountingIntegrity(
   })
 
   // الفحص 6: تصنيف الحسابات المحاسبية
-  const { data: unclassified } = await supabase
+  const { data: unclassified } = await financialRows(() => supabase
     .from('accounts')
     .select('id, code, name')
     .eq('store_id', storeId)
-    .is('type', null)
+    .is('type', null))
 
   const unclassCount = unclassified?.length || 0
   checks.push({
@@ -763,10 +715,11 @@ export async function getAccountDrillDown(
     .select('id, code, name, type, normal_balance, balance')
     .eq('id', accountId)
     .eq('store_id', storeId)
-    .single()
+    .single().throwOnError()
 
   if (!account) return null
 
+  const makeQuery = () => {
   let query = supabase
     .from('journal_lines')
     .select(`
@@ -781,7 +734,9 @@ export async function getAccountDrillDown(
   if (fromDate) query = query.gte('journal_entry.date', fromDate)
   if (toDate) query = query.lte('journal_entry.date', toDate)
 
-  const { data: lines } = await query
+  return query
+  }
+  const { data: lines } = await financialRows(makeQuery)
 
   const rows = (lines || []).map((l: any) => ({
     line_id: l.id,

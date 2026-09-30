@@ -50,153 +50,16 @@ export async function previewCheckAccounting(
     const storeId = await getStoreForUser(supabase, user.id)
     if (!storeId) return { success: false, error: 'المتجر غير موجود' }
 
-    const { data: check } = await supabase
-      .from('checks')
-      .select('*, customer:customers(id, name), supplier:suppliers(id, name)')
-      .eq('id', input.checkId)
-      .eq('store_id', storeId)
-      .single()
-
-    if (!check) return { success: false, error: 'الشيك غير موجود' }
-
-    let debitName = ''
-    let debitCode = ''
-    let creditName = ''
-    let creditCode = ''
-    let toStatus = check.status
-    let desc = ''
-
-    const amount = Number(check.amount_ils || check.amount || 0)
-    const currency = check.currency || 'ILS'
-    const date = input.operationDate || new Date().toISOString().slice(0, 10)
-
-    if (input.operationType === 'deposit') {
-      toStatus = 'deposited'
-      let bankTitle = 'البنك'
-      if (input.targetBankAccountId) {
-        const { data: bank } = await supabase.from('bank_accounts').select('bank_name, account_number').eq('id', input.targetBankAccountId).single()
-        if (bank) bankTitle = `${bank.bank_name} (${bank.account_number})`
-      }
-      debitName = `شيكات برسم التحصيل — ${bankTitle}`
-      debitCode = '1320'
-      creditName = 'محفظة الشيكات الواردة (أوراق قبض)'
-      creditCode = '1110'
-      desc = `إيداع شيك رقم ${check.check_number} برسم التحصيل لدى ${bankTitle}`
-
-    } else if (input.operationType === 'collect') {
-      toStatus = 'collected'
-
-      if (input.targetCashBoxId) {
-        let boxTitle = 'الصندوق'
-        const { data: box } = await supabase.from('cash_boxes').select('name').eq('id', input.targetCashBoxId).single()
-        if (box) boxTitle = box.name
-        debitName = `حساب الصندوق النقدي — ${boxTitle}`
-        debitCode = '1100'
-        desc = `تحصيل نقدي بالصندوق (${boxTitle}) لشيك رقم ${check.check_number}`
-      } else {
-        let bankTitle = 'الحساب البنكي'
-        if (input.targetBankAccountId) {
-          const { data: bank } = await supabase.from('bank_accounts').select('bank_name, account_number').eq('id', input.targetBankAccountId).single()
-          if (bank) bankTitle = `${bank.bank_name} (${bank.account_number})`
-        }
-        debitName = `حساب البنك الجاري — ${bankTitle}`
-        debitCode = '1200'
-        desc = `تحصيل وقيد شيك رقم ${check.check_number} في ${bankTitle}`
-      }
-
-      if (check.status === 'deposited') {
-        creditName = 'شيكات برسم التحصيل'
-        creditCode = '1320'
-      } else {
-        creditName = 'محفظة الشيكات الواردة (أوراق قبض)'
-        creditCode = '1110'
-      }
-
-    } else if (input.operationType === 'bounce') {
-      toStatus = 'bounced'
-      debitName = 'محفظة الشيكات المرتجعة (شيكات راجعة ومرفوضة)'
-      debitCode = '1330'
-      if (check.status === 'deposited') {
-        creditName = 'شيكات برسم التحصيل'
-        creditCode = '1320'
-      } else {
-        creditName = 'محفظة الشيكات الواردة (أوراق قبض)'
-        creditCode = '1110'
-      }
-      desc = `ارتداد شيك راجع رقم ${check.check_number} من ${check.bank_name || 'البنك'}`
-
-    } else if (input.operationType === 'return_to_customer') {
-      toStatus = 'returned_to_customer'
-      debitName = `ذمم العملاء (الزبائن) — ${check.customer?.name || check.drawer_name || 'العميل'}`
-      debitCode = '1400'
-      creditName = 'محفظة الشيكات المرتجعة (شيكات راجعة ومرفوضة)'
-      creditCode = '1330'
-      desc = `إعادة الشيك الراجع رقم ${check.check_number} للعميل وإعادة قيد الذمة عليه`
-
-    } else if (input.operationType === 'recollect') {
-      toStatus = 'in_portfolio'
-      debitName = 'محفظة الشيكات الواردة (أوراق قبض)'
-      debitCode = '1110'
-      creditName = 'محفظة الشيكات المرتجعة'
-      creditCode = '1330'
-      desc = `إعادة استلام وقبض الشيك رقم ${check.check_number} في محفظة الشيكات بعد معالجة وضعه`
-
-    } else if (input.operationType === 'endorse') {
-      toStatus = 'endorsed'
-      let suppName = 'المورد'
-      if (input.targetSupplierId) {
-        const { data: supp } = await supabase.from('suppliers').select('name').eq('id', input.targetSupplierId).single()
-        if (supp) suppName = supp.name
-      }
-      debitName = `ذمم الموردين — تخفيض حساب ${suppName}`
-      debitCode = '2100'
-      creditName = 'محفظة الشيكات الواردة (أوراق قبض)'
-      creditCode = '1110'
-      desc = `تجيير شيك رقم ${check.check_number} لصالح المورد ${suppName}`
-
-    } else if (input.operationType === 'supplier_return') {
-      toStatus = 'supplier_returned'
-      let suppName = 'المورد'
-      if (check.endorsed_supplier_id) {
-        const { data: supp } = await supabase.from('suppliers').select('name').eq('id', check.endorsed_supplier_id).single()
-        if (supp) suppName = supp.name
-      }
-      debitName = 'محفظة الشيكات المرتجعة'
-      debitCode = '1330'
-      creditName = `ذمم الموردين — إعادة قيد الذمة لصالح ${suppName}`
-      creditCode = '2100'
-      desc = `استلام شيك مجير راجع رقم ${check.check_number} من المورد ${suppName}`
-
-    } else if (input.operationType === 'transfer_cashbox') {
-      toStatus = check.status
-      let boxTitle = 'الصندوق المستلم'
-      if (input.targetCashBoxId) {
-        const { data: box } = await supabase.from('cash_boxes').select('name').eq('id', input.targetCashBoxId).single()
-        if (box) boxTitle = box.name
-      }
-      debitName = `محفظة الشيكات — ${boxTitle}`
-      debitCode = '1110'
-      creditName = 'محفظة الشيكات — الصندوق الحالي'
-      creditCode = '1110'
-      desc = `نقل الشيك رقم ${check.check_number} إلى ${boxTitle}`
-    }
-
-    return {
-      success: true,
-      preview: {
-        debitAccountName: debitName,
-        debitAccountCode: debitCode,
-        creditAccountName: creditName,
-        creditAccountCode: creditCode,
-        amount,
-        currency,
-        date,
-        description: desc,
-        operationType: input.operationType,
-        fromStatus: check.status,
-        toStatus,
-      },
-    }
+    const { data: preview, error } = await supabase.rpc('preview_check_lifecycle_operation', {
+      p_check_id: input.checkId,
+      p_op_type: input.operationType,
+      p_date: input.operationDate || new Date().toISOString().slice(0, 10),
+      p_target_bank_id: input.targetBankAccountId || null,
+      p_target_cashbox_id: input.targetCashBoxId || null,
+      p_target_supplier_id: input.targetSupplierId || null,
+    })
+    if (error || !preview) return { success: false, error: error?.message || 'تعذر توليد المعاينة' }
+    return { success: true, preview }
   } catch (err: any) {
     return { success: false, error: err.message || 'فشل توليد معاينة القيد' }
   }
@@ -238,9 +101,9 @@ export async function executeCheckOperation(
       p_actor_id: user.id,
     })
 
-    if (rpcErr) {
+    if (rpcErr || !rpcRes?.success) {
       console.error('execute_check_lifecycle_operation RPC error:', rpcErr)
-      return { success: false, error: rpcErr.message || 'فشل تنفيذ عملية الشيك' }
+      return { success: false, error: rpcErr?.message || 'فشل تنفيذ عملية الشيك' }
     }
 
     revalidatePath('/dashboard/cheques')

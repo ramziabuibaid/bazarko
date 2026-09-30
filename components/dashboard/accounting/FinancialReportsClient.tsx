@@ -15,7 +15,6 @@ import {
   validateAccountingIntegrity,
   getAccountDrillDown,
 } from '@/lib/accounting/reports-engine'
-import { syncStoreGeneralLedger } from '@/lib/accounting/engine'
 import { generateAndPrintPdf } from '@/lib/pdf/printPdf'
 import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
 
@@ -46,8 +45,7 @@ export default function FinancialReportsClient({
   const [integrityReport, setIntegrityReport] = useState<SystemIntegrityReport | null>(null)
 
   const [loading, setLoading] = useState(true)
-  const [syncing, setSyncing] = useState(false)
-  const [syncMsg, setSyncMsg] = useState('')
+  const [reportError, setReportError] = useState<string | null>(null)
   const [showIntegrityDetails, setShowIntegrityDetails] = useState(false)
 
   // Drill-down Modal State
@@ -57,6 +55,7 @@ export default function FinancialReportsClient({
   // Fetch all reports
   const fetchReports = async (from = fromDate, to = toDate, asOf = asOfDate) => {
     setLoading(true)
+    setReportError(null)
     try {
       const [tb, pnl, bs, cf, val] = await Promise.all([
         getTrialBalance(storeId, from, to),
@@ -72,6 +71,12 @@ export default function FinancialReportsClient({
       setCashFlow(cf)
       setIntegrityReport(val)
     } catch (err) {
+      setTrialBalance(null)
+      setIncomeStatement(null)
+      setBalanceSheet(null)
+      setCashFlow(null)
+      setIntegrityReport(null)
+      setReportError(err instanceof Error ? err.message : 'تعذر إكمال قراءة التقارير')
       console.error('Error fetching financial reports:', err)
     } finally {
       setLoading(false)
@@ -112,23 +117,6 @@ export default function FinancialReportsClient({
     setToDate(newTo)
     setAsOfDate(newTo)
     fetchReports(newFrom, newTo, newTo)
-  }
-
-  // GL Sync Backfill
-  const handleSyncGL = async () => {
-    setSyncing(true)
-    setSyncMsg('')
-    try {
-      const res = await syncStoreGeneralLedger(storeId)
-      if (res.success) {
-        setSyncMsg(`تمت مزامنة وترحيل ${res.postedCount} عملية لدفتر الأستاذ العام بنجاح`)
-        await fetchReports()
-      }
-    } catch (err: any) {
-      setSyncMsg(err.message || 'فشلت المزامنة')
-    } finally {
-      setSyncing(false)
-    }
   }
 
   // Drill Down Handler
@@ -194,16 +182,6 @@ export default function FinancialReportsClient({
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2.5">
           <button
-            onClick={handleSyncGL}
-            disabled={syncing}
-            className="flex items-center gap-2 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3.5 py-2 text-xs font-bold text-sky-400 hover:bg-sky-500/20 transition disabled:opacity-50"
-            title="مزامنة العمليات السابقة وترحيلها لدفتر الأستاذ"
-          >
-            <span className={syncing ? 'animate-spin' : ''}>🔄</span>
-            {syncing ? 'جاري المزامنة...' : 'مزامنة دفتر الأستاذ (Sync GL)'}
-          </button>
-
-          <button
             onClick={handlePrint}
             className="flex items-center gap-2 rounded-xl bg-slate-800 border border-white/10 px-4 py-2 text-xs font-bold text-white hover:bg-slate-700 transition"
           >
@@ -211,13 +189,6 @@ export default function FinancialReportsClient({
           </button>
         </div>
       </div>
-
-      {syncMsg && (
-        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-xs font-bold text-emerald-400 flex items-center justify-between">
-          <span>✅ {syncMsg}</span>
-          <button onClick={() => setSyncMsg('')} className="text-slate-400 hover:text-white">✕</button>
-        </div>
-      )}
 
       {/* ── شريط فحص السلامة والرقابة المحاسبية (8 Health Checks) ── */}
       {integrityReport && (
@@ -399,7 +370,9 @@ export default function FinancialReportsClient({
 
       {/* ── محتوى التقارير القابل للطباعة ── */}
       <div id="printable-report-container" className="space-y-6 bg-slate-950 p-1 rounded-2xl">
-        {loading ? (
+        {reportError ? (
+          <div role="alert" className="rounded-xl border border-rose-500/40 bg-rose-950/30 p-5 text-rose-200">التقرير غير مكتمل: {reportError}</div>
+        ) : loading ? (
           <div className="p-16 text-center text-slate-400">
             <span className="text-3xl animate-spin inline-block mb-3">⌛</span>
             <p className="text-sm font-bold text-white">جاري احتساب وتوليد التقرير المالي من دفتر الأستاذ...</p>

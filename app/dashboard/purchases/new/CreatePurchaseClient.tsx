@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
-import { postPurchaseInvoiceEntry } from '@/lib/accounting/engine'
+import { requestKey, completeRequest } from '@/lib/client/idempotency'
 
 interface Supplier {
   id: string
@@ -41,7 +41,6 @@ export default function CreatePurchaseClient({ store, suppliers, products }: Pro
   const router = useRouter()
   const supabase = createClient()
 
-  const [invoiceNumber, setInvoiceNumber] = useState(`PUR-${Date.now().toString().slice(-6)}`)
   const [supplierInvoiceNumber, setSupplierInvoiceNumber] = useState('')
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10))
   const [supplierId, setSupplierId] = useState(suppliers[0]?.id || '')
@@ -133,87 +132,19 @@ export default function CreatePurchaseClient({ store, suppliers, products }: Pro
     setError('')
 
     try {
-      const selectedSupplier = suppliers.find(s => s.id === supplierId)
-
-      // 1. Insert Purchase Invoice
-      const { data: purchase, error: purchaseErr } = await supabase
-        .from('purchase_invoices')
-        .insert({
-          store_id: store.id,
-          invoice_number: invoiceNumber.trim(),
-          supplier_invoice_number: supplierInvoiceNumber.trim() || null,
-          supplier_id: supplierId || null,
-          payment_method: paymentMethod,
-          payment_status: paymentMethod === 'cash' ? 'paid' : 'unpaid',
-          subtotal: totalAmount,
-          total_amount: totalAmount,
-          paid_amount: paymentMethod === 'cash' ? totalAmount : 0,
-          currency: 'ILS',
-          invoice_date: invoiceDate,
-          notes: notes.trim() || null,
-          status: 'completed',
-        })
-        .select('id')
-        .single()
-
-      if (purchaseErr) throw purchaseErr
-
-      // 2. Insert Items
-      const itemPayloads = validItems.map(item => ({
-        purchase_invoice_id: purchase.id,
-        product_id: item.product_id || null,
-        product_name: item.product_name,
-        quantity: Number(item.quantity),
-        unit_price: Number(item.unit_price),
-        total_price: Number(item.quantity) * Number(item.unit_price),
-      }))
-
-      const { error: itemsErr } = await supabase.from('purchase_items').insert(itemPayloads)
-      if (itemsErr) throw itemsErr
-
-      // 3. Update Product Stock & Log Inventory Movements
-      for (const item of items) {
-        if (item.product_id) {
-          const prod = products.find(p => p.id === item.product_id)
-          const newQty = Number(prod?.stock_quantity || 0) + Number(item.quantity)
-
-          await supabase
-            .from('products')
-            .update({
-              stock_quantity: newQty,
-              cost_price: Number(item.unit_price),
-            })
-            .eq('id', item.product_id)
-
-          await supabase.from('inventory_movements').insert({
-            store_id: store.id,
-            product_id: item.product_id,
-            movement_type: 'purchase',
-            document_number: invoiceNumber,
-            document_type: 'فاتورة مشتريات',
-            ref_id: purchase.id,
-            entity_name: selectedSupplier?.name || 'مورد عام',
-            quantity_in: Number(item.quantity),
-            quantity_out: 0,
-            balance_after: newQty,
-            unit_price: Number(item.unit_price),
-            movement_date: invoiceDate,
-          })
-        }
+      const payload = {
+        supplierId,
+        supplierInvoiceNumber: supplierInvoiceNumber.trim(),
+        invoiceDate,
+        paymentMethod,
+        notes: notes.trim(),
+        items: validItems.map(item => ({ productId: item.product_id, quantity: Number(item.quantity), unitPrice: Number(item.unit_price) })),
       }
-
-      // 4. Update Supplier balance if credit
-      if (supplierId && paymentMethod === 'credit') {
-        const newBal = Number(selectedSupplier?.balance || 0) + totalAmount
-        await supabase.from('suppliers').update({ balance: newBal }).eq('id', supplierId)
-      }
-
-      // 4. الترحيل التلقائي لدفتر الأستاذ العام
-      try {
-        await postPurchaseInvoiceEntry(purchase.id)
-      } catch (glErr) {
-        console.error('Error posting purchase GL:', glErr)
-      }
+      const key = await requestKey(`purchase-invoice:${store.id}`, payload)
+      const { data, error: saveError } = await supabase.rpc('create_purchase_invoice_atomic', { p_store: store.id, p_payload: payload, p_key: key })
+      if (saveError) throw saveError
+      if (!data?.invoiceId) throw new Error('لم يرجع رقم فاتورة الشراء من الخادم')
+      await completeRequest(`purchase-invoice:${store.id}`, payload)
 
       router.push('/dashboard/purchases')
       router.refresh()
@@ -256,14 +187,8 @@ export default function CreatePurchaseClient({ store, suppliers, products }: Pro
         {/* Top Metadata */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-300">رقم الفاتورة بالنظام *</label>
-            <input
-              type="text"
-              required
-              value={invoiceNumber}
-              onChange={e => setInvoiceNumber(e.target.value)}
-              className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500 font-mono font-bold"
-            />
+            <label className="mb-1 block text-xs font-semibold text-slate-300">رقم الفاتورة بالنظام</label>
+            <div className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-slate-400">يولّد تلقائياً عند الحفظ</div>
           </div>
 
           <div>
@@ -297,7 +222,6 @@ export default function CreatePurchaseClient({ store, suppliers, products }: Pro
             >
               <option value="credit">آجل بالذمة (حساب المورد)</option>
               <option value="cash">نقداً من الصندوق</option>
-              <option value="check">شيك</option>
             </select>
           </div>
         </div>

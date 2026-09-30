@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createVoucher } from '@/app/dashboard/accounting/vouchers/voucher-actions'
+import { requestKey, completeRequest } from '@/lib/client/idempotency'
 
 interface LedgerEntry {
   id: string
@@ -99,7 +100,7 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
     setPayError('')
 
     try {
-      const res = await createVoucher({
+      const paymentPayload = {
         type: 'receipt',
         date: new Date().toISOString().split('T')[0],
         payment_method: 'cash',
@@ -109,13 +110,16 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
         party_name: customer.name,
         category: 'تحصيل ذمة عميل',
         description: payForm.notes?.trim() || `سند قبض / تحصيل دفعة من العميل ${customer.name}`,
-      })
+      } as const
+      const request_key = await requestKey(`customer-payment:${customer.id}`, paymentPayload)
+      const res = await createVoucher({ ...paymentPayload, request_key })
 
       if (!res.success) {
         setPayError(res.error || 'فشل تسجيل سند القبض')
         setSaving(false)
         return
       }
+      await completeRequest(`customer-payment:${customer.id}`, paymentPayload)
 
       setSaving(false)
       setShowPayment(false)

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { requestKey, completeRequest } from '@/lib/client/idempotency'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
@@ -23,6 +24,7 @@ interface InvoiceItem {
 }
 
 interface Invoice {
+  order_id?: string | null
   id: string
   invoice_number: string
   customer_name: string | null
@@ -84,6 +86,13 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, sto
   const [payMethod, setPayMethod] = useState<'cash' | 'bank' | 'card' | 'transfer'>('cash')
   const [paying, setPaying] = useState(false)
   const [payError, setPayError] = useState('')
+  const [paymentBankId, setPaymentBankId] = useState('')
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false)
+  const [banks, setBanks] = useState<{ id: string; bank_name: string }[]>([])
+  useEffect(() => {
+    supabase.from('bank_accounts').select('id,bank_name').eq('store_id', storeId).eq('is_active', true)
+      .then(({ data }) => setBanks(data || []))
+  }, [storeId])
 
   const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })
   const remaining = Math.max(0, invoice.total - invoice.amount_paid)
@@ -118,7 +127,10 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, sto
   async function submitPayment(e: React.FormEvent) {
     e.preventDefault()
     setPaying(true); setPayError('')
-    const res = await recordInvoicePayment(invoice.id, parseFloat(payAmount) || 0, payMethod)
+    const payload = { invoiceId: invoice.id, amount: Number(payAmount), method: payMethod, bankAccountId: paymentBankId, confirmed: paymentConfirmed }
+    const key = await requestKey('invoice-payment', payload)
+    const res = await recordInvoicePayment(invoice.id, payload.amount, payMethod, { bankAccountId: paymentBankId, confirmed: paymentConfirmed, requestKey: key })
+    if (res.ok) await completeRequest('invoice-payment', payload)
     setPaying(false)
     if (res.ok) { setShowPay(false); setPayAmount(''); toast('تم تسجيل الدفعة بنجاح'); router.refresh() }
     else { setPayError(res.error ?? 'فشل تسجيل الدفعة'); toast(res.error ?? 'فشل تسجيل الدفعة', 'error') }
@@ -136,92 +148,21 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, sto
   async function cancelInvoice() {
     const ok = await confirm({
       title: 'إلغاء الفاتورة',
-      message: `هل تريد إلغاء الفاتورة ${invoice.invoice_number}؟ سيُعكَس أثرها على كشف حساب الزبون.`,
-      confirmLabel: 'إلغاء الفاتورة',
-      cancelLabel: 'تراجع',
-      danger: true,
+      message: `إلغاء الفاتورة ${invoice.invoice_number} سيحفظ الأصل ويُنشئ قيداً عكسياً. يجب أن تكون غير مسددة وغير مرتبطة بطلب مُسلّم.`,
+      confirmLabel: 'إلغاء الفاتورة', cancelLabel: 'تراجع', danger: true,
     })
     if (!ok) return
     setCancelling(true)
-    await supabase.from('invoices').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', invoice.id)
-
-    // عكس تأثير الفاتورة على كشف حساب الزبون
-    if (invoice.customer_id) {
-      const { data: ledgerEntries } = await supabase
-        .from('customer_ledger')
-        .select('debit, credit')
-        .eq('reference_id', invoice.id)
-        .eq('reference_type', 'invoice')
-
-      const netDebit = (ledgerEntries ?? []).reduce(
-        (s: number, e: { debit: number; credit: number }) => s + e.debit - e.credit,
-        0
-      )
-
-      if (netDebit > 0) {
-        const { data: custData } = await supabase
-          .from('customers')
-          .select('balance, total_invoiced')
-          .eq('id', invoice.customer_id)
-          .single()
-
-        const newBalance = (custData?.balance ?? 0) - netDebit
-
-        await supabase.from('customer_ledger').insert({
-          store_id:       storeId,
-          customer_id:    invoice.customer_id,
-          type:           'credit_note',
-          date:           new Date().toISOString().slice(0, 10),
-          description:    `إلغاء فاتورة ${invoice.invoice_number}`,
-          debit:          0,
-          credit:         netDebit,
-          balance:        newBalance,
-          reference_id:   invoice.id,
-          reference_type: 'invoice',
-          created_by:     userId,
-        })
-
-        await supabase.from('customers').update({
-          balance:        newBalance,
-          total_invoiced: Math.max(0, (custData?.total_invoiced ?? 0) - invoice.total),
-        }).eq('id', invoice.customer_id)
-      }
-    }
-
-    await recordAuditEvent({
-      entityType: 'invoice', entityId: invoice.id, entityLabel: invoice.invoice_number,
-      action: 'cancel', details: { total: invoice.total },
-    })
-
-    setStatus('cancelled')
-    setCancelling(false)
-    toast(`تم إلغاء الفاتورة ${invoice.invoice_number}`)
-    router.refresh()
-  }
-
-  async function handleDeleteInvoice() {
-    const ok = await confirm({
-      title: 'حذف الفاتورة نهائياً',
-      message: `هل أنت متأكد من حذف الفاتورة ${invoice.invoice_number}؟ سيتم إعادة الكميات للمخزون وعكس أثر الفاتورة من كشف حساب العميل وحذف سندات القبض المرتبطة بها. لا يمكن التراجع عن هذا الإجراء!`,
-      confirmLabel: 'نعم، حذف الفاتورة',
-      cancelLabel: 'إلغاء',
-      danger: true,
-    })
-    if (!ok) return
-    setDeleting(true)
     try {
       const res = await deleteInvoice(invoice.id)
-      if (res.ok) {
-        toast('تم حذف الفاتورة بنجاح وإعادة المخزون')
-        router.push('/dashboard/accounting/invoices')
-        router.refresh()
-      } else {
-        toast(res.error || 'فشل حذف الفاتورة', 'error')
-      }
-    } catch (err: any) {
-      toast(err.message || 'خطأ أثناء حذف الفاتورة', 'error')
+      if (!res.ok) throw new Error(res.error || 'تعذر إلغاء الفاتورة')
+      setStatus('cancelled')
+      toast(`تم إلغاء الفاتورة ${invoice.invoice_number} مع حفظ تاريخها`)
+      router.refresh()
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : 'تعذر إلغاء الفاتورة', 'error')
     } finally {
-      setDeleting(false)
+      setCancelling(false)
     }
   }
 
@@ -276,23 +217,6 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, sto
         )}
         <div className="flex-1" />
 
-        {/* تعديل الفاتورة */}
-        <Link
-          href={`/dashboard/accounting/invoices/${invoice.id}/edit`}
-          className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3.5 py-2 text-sm font-medium text-sky-300 hover:bg-sky-500/20 transition"
-        >
-          ✏️ تعديل الفاتورة
-        </Link>
-
-        {/* حذف الفاتورة */}
-        <button
-          onClick={handleDeleteInvoice}
-          disabled={deleting}
-          className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2 text-sm font-medium text-rose-300 hover:bg-rose-500/20 disabled:opacity-50 transition"
-        >
-          🗑️ {deleting ? 'جارٍ الحذف...' : 'حذف'}
-        </button>
-
         {status === 'draft' && (
           <button onClick={advanceStatus} disabled={advancing}
             className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50">
@@ -311,7 +235,7 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, sto
             📨 إشعار دفع
           </a>
         )}
-        {status !== 'cancelled' && status !== 'paid' && (
+        {status !== 'cancelled' && status !== 'paid' && Number(invoice.amount_paid || 0) === 0 && !invoice.order_id && (
           <button onClick={cancelInvoice} disabled={cancelling}
             className="rounded-xl border border-red-500/20 px-4 py-2 text-sm text-red-400 hover:bg-red-500/10">
             إلغاء
@@ -384,6 +308,13 @@ export default function InvoiceView({ invoice, items, storeName, storePhone, sto
               <option value="transfer">تحويل</option>
             </select>
             {payError && <p className="mb-2 text-sm text-red-400">{payError}</p>}
+            {payMethod !== 'cash' && <>
+              <label className="mb-1 block text-xs text-slate-400">الحساب البنكي المستلم</label>
+              <select required value={paymentBankId} onChange={e => setPaymentBankId(e.target.value)} className="mb-3 w-full rounded-xl bg-slate-800 p-2 text-white">
+                <option value="">اختر البنك</option>{banks.map(b => <option key={b.id} value={b.id}>{b.bank_name}</option>)}
+              </select>
+              <label className="mb-3 block text-xs text-slate-300"><input type="checkbox" checked={paymentConfirmed} onChange={e => setPaymentConfirmed(e.target.checked)} /> تم التحقق من وصول الدفعة</label>
+            </>}
             <div className="flex gap-2">
               <button type="submit" disabled={paying}
                 className="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">

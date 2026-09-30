@@ -1,5 +1,7 @@
 'use server'
 
+import { financialRows } from './complete-read'
+
 import { createClient } from '@/lib/supabase/server'
 
 export type AuditSeverity = 'healthy' | 'notice' | 'warning' | 'critical'
@@ -44,30 +46,30 @@ export async function runFinancialAudit(storeId: string): Promise<FinancialAudit
   // ─────────────────────────────────────────────────────────────
   // 1. مطابقة أرصدة الزبائن مع حساب المدينون (Accounts Receivable / 1121)
   // ─────────────────────────────────────────────────────────────
-  const { data: customers } = await supabase
+  const { data: customers } = await financialRows(() => supabase
     .from('customers')
     .select('id, name, balance')
-    .eq('store_id', storeId)
+    .eq('store_id', storeId))
 
   const customersTotal = (customers || []).reduce((s, c) => s + Number(c.balance || 0), 0)
 
   // البحث عن حساب العملاء/المدينون
-  const { data: recAccounts } = await supabase
+  const { data: recAccounts } = await financialRows(() => supabase
     .from('accounts')
     .select('id, code, name')
     .eq('store_id', storeId)
-    .or('code.ilike.112%,code.eq.1121,name.ilike.%عملاء%,name.ilike.%مدينون%')
+    .eq('account_tag', 'CUSTOMER_RECEIVABLE'))
 
   const recAccountIds = (recAccounts || []).map(a => a.id)
 
   let recLedgerBalance = 0
   if (recAccountIds.length > 0) {
-    const { data: recLines } = await supabase
+    const { data: recLines } = await financialRows(() => supabase
       .from('journal_lines')
       .select('debit, credit, journal_entry:journal_entries!inner(status, store_id)')
       .in('account_id', recAccountIds)
       .eq('journal_entry.store_id', storeId)
-      .eq('journal_entry.status', 'posted')
+      .eq('journal_entry.status', 'posted'))
 
     recLedgerBalance = (recLines || []).reduce((s: number, l: any) => {
       return s + (Number(l.debit || 0) - Number(l.credit || 0))
@@ -81,7 +83,7 @@ export async function runFinancialAudit(storeId: string): Promise<FinancialAudit
   if (recAccountIds.length === 0) {
     custSeverity = 'warning'
     custRecommendations.push('لم يتم العثور على حساب ذمم مدينون (1121) في شجرة الحسابات. يرجى تهيئة الدليل.')
-  } else if (custDiff > 1.0) {
+  } else if (custDiff >= 0.01) {
     custSeverity = custDiff > 1000 ? 'critical' : 'warning'
     custRecommendations.push(
       `يوجد فارق قدره ${custDiff.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })} بين مجموع كشوفات الزبائن وحساب الأستاذ العام (1121).`,
@@ -115,29 +117,29 @@ export async function runFinancialAudit(storeId: string): Promise<FinancialAudit
   // ─────────────────────────────────────────────────────────────
   // 2. مطابقة أرصدة الموردين مع حساب الدائنون (Accounts Payable / 2110)
   // ─────────────────────────────────────────────────────────────
-  const { data: suppliers } = await supabase
+  const { data: suppliers } = await financialRows(() => supabase
     .from('suppliers')
     .select('id, name, balance')
-    .eq('store_id', storeId)
+    .eq('store_id', storeId))
 
   const suppliersTotal = (suppliers || []).reduce((s, sup) => s + Number(sup.balance || 0), 0)
 
-  const { data: payAccounts } = await supabase
+  const { data: payAccounts } = await financialRows(() => supabase
     .from('accounts')
     .select('id, code, name')
     .eq('store_id', storeId)
-    .or('code.ilike.211%,code.eq.2110,name.ilike.%موردون%,name.ilike.%دائنون%')
+    .or('code.ilike.211%,code.eq.2110,name.ilike.%موردون%,name.ilike.%دائنون%'))
 
   const payAccountIds = (payAccounts || []).map(a => a.id)
 
   let payLedgerBalance = 0
   if (payAccountIds.length > 0) {
-    const { data: payLines } = await supabase
+    const { data: payLines } = await financialRows(() => supabase
       .from('journal_lines')
       .select('debit, credit, journal_entry:journal_entries!inner(status, store_id)')
       .in('account_id', payAccountIds)
       .eq('journal_entry.store_id', storeId)
-      .eq('journal_entry.status', 'posted')
+      .eq('journal_entry.status', 'posted'))
 
     payLedgerBalance = (payLines || []).reduce((s: number, l: any) => {
       return s + (Number(l.credit || 0) - Number(l.debit || 0))
@@ -151,7 +153,7 @@ export async function runFinancialAudit(storeId: string): Promise<FinancialAudit
   if (payAccountIds.length === 0) {
     suppSeverity = 'warning'
     suppRecommendations.push('لم يتم العثور على حساب ذمم دائنون (2110) في شجرة الحسابات.')
-  } else if (suppDiff > 1.0) {
+  } else if (suppDiff >= 0.01) {
     suppSeverity = suppDiff > 1000 ? 'critical' : 'warning'
     suppRecommendations.push(
       `يوجد فارق قدره ${suppDiff.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })} بين مجموع أرصدة الموردين وحساب الأستاذ العام (2110).`,
@@ -183,14 +185,14 @@ export async function runFinancialAudit(storeId: string): Promise<FinancialAudit
   // ─────────────────────────────────────────────────────────────
   // 3. فحص اتزان القيود المحاسبية (Debit == Credit)
   // ─────────────────────────────────────────────────────────────
-  const { data: journalEntries } = await supabase
+  const { data: journalEntries } = await financialRows(() => supabase
     .from('journal_entries')
     .select(`
       id, entry_number, date, description, status,
       journal_lines ( id, debit, credit )
     `)
     .eq('store_id', storeId)
-    .eq('status', 'posted')
+    .eq('status', 'posted'))
 
   const unbalancedEntries: Array<{
     id: string
@@ -247,10 +249,10 @@ export async function runFinancialAudit(storeId: string): Promise<FinancialAudit
   // ─────────────────────────────────────────────────────────────
   // 4. فحص محفظة الشيكات (الشيكات المستحقة، المتأخرة، وغير المربوطة)
   // ─────────────────────────────────────────────────────────────
-  const { data: checks } = await supabase
+  const { data: checks } = await financialRows(() => supabase
     .from('checks')
     .select('id, check_number, bank_name, amount, amount_ils, due_date, status, type, customer_id, supplier_id')
-    .eq('store_id', storeId)
+    .eq('store_id', storeId))
 
   const rawChecks = checks || []
   const overdueChecks = rawChecks.filter(c => {
@@ -314,10 +316,10 @@ export async function runFinancialAudit(storeId: string): Promise<FinancialAudit
   // ─────────────────────────────────────────────────────────────
   // 5. فحص سلامة المخزون وحركاته
   // ─────────────────────────────────────────────────────────────
-  const { data: products } = await supabase
+  const { data: products } = await financialRows(() => supabase
     .from('products')
     .select('id, name, sku, stock_quantity')
-    .eq('store_id', storeId)
+    .eq('store_id', storeId))
 
   const rawProducts = products || []
   const negativeStockProducts = rawProducts.filter(p => Number(p.stock_quantity || 0) < 0)

@@ -6,6 +6,7 @@ export interface ReconciliationResult {
   difference: number
   isBalanced: boolean
   reconciledCustomers: number
+  customerReconciliationComplete: boolean
   totalCustomerCount: number
 }
 
@@ -41,9 +42,10 @@ export function reconcileShamelData(
   totalDebit = Math.round(totalDebit * 100) / 100
   totalCredit = Math.round(totalCredit * 100) / 100
   const difference = Math.round(Math.abs(totalDebit - totalCredit) * 100) / 100
-  const isBalanced = difference <= 1.0 // Tolerance of 1 currency unit for rounding
+  const isBalanced = difference === 0 // Values are rounded to the currency minor unit above.
 
-  const reconciledCustomers = customers.filter(c => c.balance !== 0).length
+  // Opening balances alone cannot prove reconciliation against source movements.
+  const reconciledCustomers = 0
 
   return {
     totalDebit,
@@ -51,6 +53,7 @@ export function reconcileShamelData(
     difference,
     isBalanced,
     reconciledCustomers,
+    customerReconciliationComplete: false,
     totalCustomerCount: customers.length,
   }
 }
