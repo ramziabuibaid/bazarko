@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation'
 import { recordInvoicePayment } from '@/app/dashboard/accounting/invoices/invoice-actions'
 import { useToast } from '@/components/ui/Toast'
 import { useConfirm } from '@/components/ui/Confirm'
-import { requestKey, completeRequest } from '@/lib/client/idempotency'
 
 interface Props {
   id: string
@@ -47,10 +46,7 @@ export default function InvoiceRowActions({
     })
     if (!ok) return
     setBusy(true)
-    const payload = { id, remaining, method: 'cash' }
-    const key = await requestKey('invoice-payment', payload)
-    const res = await recordInvoicePayment(id, remaining, 'cash', { requestKey: key })
-    if (res.ok) await completeRequest('invoice-payment', payload)
+    const res = await recordInvoicePayment(id, remaining, 'cash')
     setBusy(false)
     if (res.ok) { toast(`تم تسجيل دفع الفاتورة ${invoiceNumber}`); router.refresh() }
     else toast(res.error ?? 'فشل تسجيل الدفعة', 'error')

@@ -25,24 +25,22 @@ export interface AccountingPeriod {
 export async function checkIsPeriodClosed(storeId: string, dateStr: string): Promise<{ isClosed: boolean; periodName?: string }> {
   try {
     const supabase = createClient()
-    const { data: period, error } = await supabase
+    const { data: period } = await supabase
       .from('accounting_periods')
       .select('period_name')
       .eq('store_id', storeId)
       .eq('is_closed', true)
       .lte('start_date', dateStr)
       .gte('end_date', dateStr)
-      .limit(1)
       .maybeSingle()
 
-    if (error) throw error
     if (period) {
       return { isClosed: true, periodName: period.period_name }
     }
     return { isClosed: false }
   } catch (err) {
     console.error('Error checking closed period:', err)
-    throw new Error('تعذر التحقق من إقفال الفترة؛ تم إيقاف العملية')
+    return { isClosed: false }
   }
 }
 
@@ -185,7 +183,7 @@ export async function closePeriod(periodId: string, notes?: string) {
 /**
  * إعادة فتح فترة محاسبية مغلقة (خاص بصلاحية الإدارة)
  */
-export async function reopenPeriod(periodId: string, reason?: string) {
+export async function reopenPeriod(periodId: string) {
   try {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -203,11 +201,9 @@ export async function reopenPeriod(periodId: string, reason?: string) {
 
     if (findErr || !period) return { success: false, error: 'الفترة غير موجودة' }
 
-    if (!reason?.trim()) return { success: false, error: 'سبب إعادة الفتح مطلوب' }
     const { error: updErr } = await supabase
       .from('accounting_periods')
       .update({
-        notes: `${period.notes || ''} | إعادة فتح: ${reason.trim()}`,
         is_closed: false,
         closed_at: null,
         closed_by: null,

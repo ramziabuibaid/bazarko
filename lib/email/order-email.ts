@@ -127,20 +127,18 @@ function buildEmailHtml(p: SendOrderEmailParams): string {
 </html>`
 }
 
-export async function sendOrderEmail(params: SendOrderEmailParams & { idempotencyKey?: string }): Promise<boolean> {
-  if (!resend || !params.to) return false
+export async function sendOrderEmail(params: SendOrderEmailParams): Promise<void> {
+  if (!resend || !params.to) return
 
   try {
-    const result = await resend.emails.send({
+    await resend.emails.send({
       from: `${params.storeName} <orders@bazarko.app>`,
       to: params.to,
       subject: `✅ تأكيد طلبيتك ${params.orderNumber} — ${params.storeName}`,
       html: buildEmailHtml(params),
-    }, { idempotencyKey: params.idempotencyKey })
-    return !result.error
+    })
   } catch {
     // لا نوقف العملية إذا فشل الإيميل
     console.error('[email] failed to send order email')
-    return false
   }
 }

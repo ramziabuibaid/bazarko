@@ -1,7 +1,5 @@
 'use client'
 
-import { requestKey, completeRequest } from '@/lib/client/idempotency'
-
 import { useCart } from '@/lib/store/cart'
 import { createClient } from '@/lib/supabase/client'
 import { useParams, useRouter } from 'next/navigation'
@@ -158,7 +156,12 @@ export default function CheckoutPage() {
 
     setLoading(true)
     try {
-      const payload = {
+      const response = await fetch('/api/storefront/checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
           storeId: store.id,
           items: items.map(item => ({
             productId: item.productId,
@@ -172,11 +175,7 @@ export default function CheckoutPage() {
           selectedZoneName: selectedZone?.name,
           selectedMethodName: selectedMethod?.name,
           shippingCost,
-        }
-      const response = await fetch('/api/storefront/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': await requestKey('checkout', payload) },
-        body: JSON.stringify(payload),
+        }),
       })
 
       if (!response.ok) {
@@ -188,8 +187,6 @@ export default function CheckoutPage() {
       if (error) {
         throw new Error(error)
       }
-
-      await completeRequest('checkout', payload)
 
       clearCart()
       setSuccessOrderId(orderId)

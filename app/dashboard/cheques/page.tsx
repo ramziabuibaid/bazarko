@@ -28,7 +28,7 @@ export default async function ChequesPage() {
     supabase.from('stores').select('id, name, currency_code, plan').eq('id', storeId).single(),
     supabase
       .from('checks')
-      .select('*, customer:customers(id, name, phone), supplier:suppliers(id, name, phone), deposit_bank:bank_accounts(id, bank_name, account_number), voucher:vouchers(id, voucher_number, type, date)')
+      .select('*, customer:customers(id, name, phone), supplier:suppliers(id, name, phone), deposit_bank:bank_accounts(id, bank_name, account_number), voucher:vouchers!checks_voucher_id_fkey(id, voucher_number, type, date)')
       .eq('store_id', storeId)
       .order('due_date', { ascending: true }),
     supabase

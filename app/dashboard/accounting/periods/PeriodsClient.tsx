@@ -144,9 +144,7 @@ export default function PeriodsClient({ storeId, storeName, initialPeriods }: Pr
     setSuccessMsg('')
 
     try {
-      const reason = window.prompt('سبب إعادة فتح الفترة المحاسبية:')
-      if (!reason?.trim()) return
-      const res = await reopenPeriod(p.id, reason)
+      const res = await reopenPeriod(p.id)
       if (!res.success) {
         setError(res.error || 'فشل إعادة فتح الفترة')
       } else {

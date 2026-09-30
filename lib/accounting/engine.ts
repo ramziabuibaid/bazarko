@@ -1,7 +1,8 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
-import { getStoreForUser } from '@/lib/supabase/getStore'
+import { logFinancialEvent } from '@/lib/accounting/audit'
+import { checkIsPeriodClosed } from '@/app/dashboard/accounting/periods/period-actions'
 import {
   resolveAccount,
   validateAccountForOperation,
@@ -15,8 +16,6 @@ export interface JournalLineInput {
   credit: number
   currency?: string
   exchange_rate?: number
-  original_debit?: number
-  original_credit?: number
   description?: string
   account_tag_used?: string | null
   source_rule?: string | null
@@ -36,7 +35,6 @@ export interface PostJournalEntryParams {
   sourceModule?: string | null
   lines: JournalLineInput[]
   actorId?: string | null
-  idempotencyKey?: string | null
 }
 
 /**
@@ -50,6 +48,64 @@ export interface PostJournalEntryParams {
  */
 export async function postJournalEntry(params: PostJournalEntryParams) {
   const supabase = createClient()
+
+  // 1. التحقق من قفل الفترة
+  const periodCheck = await checkIsPeriodClosed(params.storeId, params.date)
+  if (periodCheck.isClosed) {
+    return {
+      success: false,
+      error: `لا يمكن ترحيل القيد في فترة محاسبية مقفلة (${periodCheck.periodName})`,
+    }
+  }
+
+  // 2. التحقق من التوازن الحسابي الصارم
+  const totalDebit = params.lines.reduce((sum, l) => sum + (Number(l.debit) || 0), 0)
+  const totalCredit = params.lines.reduce((sum, l) => sum + (Number(l.credit) || 0), 0)
+  const diff = Math.abs(totalDebit - totalCredit)
+
+  if (diff > 0.01 || totalDebit <= 0) {
+    return {
+      success: false,
+      error: `القيد المحاسبي غير متوازن! إجمالي المدين (${totalDebit.toFixed(2)}) لا يتطابق مع إجمالي الدائن (${totalCredit.toFixed(2)})`,
+    }
+  }
+
+  // 3. التحقق من الحسابات ومنع الترحيل على الحسابات التجميعية
+  const accountIds = params.lines.map(l => l.account_id)
+  const { data: accounts, error: accErr } = await supabase
+    .from('accounts')
+    .select('id, name, code, is_group, is_active, normal_balance, balance, account_tag')
+    .in('id', accountIds)
+
+  if (accErr || !accounts || accounts.length === 0) {
+    return { success: false, error: 'تعذر التحقق من الحسابات المحاسبية' }
+  }
+
+  const accMap = new Map<string, any>()
+  for (const acc of accounts) {
+    accMap.set(acc.id, acc)
+    if (acc.is_group) {
+      return {
+        success: false,
+        error: `لا يجوز الترحيل المباشر على الحساب التجميعي (${acc.name} - ${acc.code})، يجب اختيار حساب فرعي تحليلي`,
+      }
+    }
+    if (acc.is_active === false) {
+      return {
+        success: false,
+        error: `الحساب المحاسبي (${acc.name} - ${acc.code}) معطل ولا يقبل قيوداً جديدة`,
+      }
+    }
+  }
+
+  // 4. توليد رقم القيد التسلسلي
+  const { count } = await supabase
+    .from('journal_entries')
+    .select('id', { count: 'exact', head: true })
+    .eq('store_id', params.storeId)
+
+  const datePrefix = params.date.replace(/-/g, '').slice(0, 6)
+  const entryNumber = `JV-${datePrefix}-${String((count ?? 0) + 1).padStart(4, '0')}`
 
   // استنتاج القاعدة المحاسبية والوحدة المرجعية في حال لم تُمرر
   const effectiveRule = params.accountingRule || (
@@ -76,17 +132,105 @@ export async function postJournalEntry(params: PostJournalEntryParams) {
     'MANUAL'
   )
 
-  const { data, error } = await supabase.rpc('post_journal_entry_atomic', {
-    p_payload: {
-      ...params,
-      accountingRule: effectiveRule,
-      sourceModule: effectiveModule,
-    },
-  })
-  if (error || !data?.success) {
-    return { success: false, error: error?.message || 'فشل ترحيل القيد المحاسبي' }
+  // 5. إدراج رأس القيد في journal_entries بالحالة POSTED مع الربط الوثيق بالحركة الأصلية ووسوم التتبع
+  const effectiveSourceId = params.sourceId || params.refId || null
+  const { data: entry, error: entryErr } = await supabase
+    .from('journal_entries')
+    .insert({
+      store_id: params.storeId,
+      entry_number: entryNumber,
+      date: params.date,
+      description: params.description.trim(),
+      source: params.source,
+      ref_id: effectiveSourceId,
+      source_id: effectiveSourceId,
+      source_type: params.sourceType || params.source,
+      source_number: params.sourceNumber || null,
+      source_url: params.sourceUrl || null,
+      accounting_rule: effectiveRule,
+      source_module: effectiveModule,
+      status: 'posted',
+      created_by: params.actorId || null,
+    })
+    .select('id')
+    .single()
+
+  if (entryErr) {
+    console.error('Error inserting journal entry:', entryErr)
+    return { success: false, error: entryErr.message || 'فشل إدراج القيد' }
   }
-  return { success: true, entryId: data.entryId as string, entryNumber: data.entryNumber as string }
+
+  // تحديث العلاقة العكسية journal_entry_id في الجدول المصدري
+  if (effectiveSourceId) {
+    if (params.source === 'voucher') {
+      await supabase.from('vouchers').update({ journal_entry_id: entry.id }).eq('id', effectiveSourceId)
+    } else if (params.source === 'invoice') {
+      await supabase.from('invoices').update({ journal_entry_id: entry.id }).eq('id', effectiveSourceId)
+    } else if (params.source === 'purchase') {
+      await supabase.from('purchase_invoices').update({ journal_entry_id: entry.id }).eq('id', effectiveSourceId)
+    } else if (params.source === 'sales_return') {
+      await supabase.from('sales_returns').update({ journal_entry_id: entry.id }).eq('id', effectiveSourceId)
+    } else if (params.source === 'purchase_return') {
+      await supabase.from('purchase_returns').update({ journal_entry_id: entry.id }).eq('id', effectiveSourceId)
+    }
+  }
+
+  // 6. إدراج بنود القيد في journal_lines مع حفظ الوسم المستخدم
+  const linePayloads = params.lines.map((l, idx) => ({
+    journal_entry_id: entry.id,
+    account_id: l.account_id,
+    debit: Number(l.debit) || 0,
+    credit: Number(l.credit) || 0,
+    currency: l.currency || 'ILS',
+    exchange_rate: l.exchange_rate || 1.0,
+    description: l.description?.trim() || params.description.trim(),
+    sort_order: idx + 1,
+    account_tag_used: l.account_tag_used || accMap.get(l.account_id)?.account_tag || null,
+    source_rule: l.source_rule || effectiveRule,
+  }))
+
+  const { error: linesErr } = await supabase.from('journal_lines').insert(linePayloads)
+  if (linesErr) {
+    console.error('Error inserting journal lines:', linesErr)
+    await supabase.from('journal_entries').delete().eq('id', entry.id)
+    return { success: false, error: linesErr.message || 'فشل إدراج سطور القيد' }
+  }
+
+  // 7. تحديث رصيد الحسابات
+  for (const line of params.lines) {
+    const acc = accMap.get(line.account_id)
+    if (acc) {
+      const curBal = Number(acc.balance || 0)
+      const d = Number(line.debit || 0)
+      const c = Number(line.credit || 0)
+      const delta = acc.normal_balance === 'credit' ? (c - d) : (d - c)
+      await supabase
+        .from('accounts')
+        .update({ balance: curBal + delta })
+        .eq('id', acc.id)
+    }
+  }
+
+  // 8. توثيق في سجل التدقيق المالي
+  if (params.actorId) {
+    await logFinancialEvent({
+      storeId: params.storeId,
+      entityType: 'voucher',
+      entityId: entry.id,
+      entityLabel: entryNumber,
+      action: 'create',
+      actorId: params.actorId,
+      details: {
+        action: 'post_journal_entry',
+        source: params.source,
+        accountingRule: effectiveRule,
+        totalDebit,
+        linesCount: params.lines.length,
+      },
+    })
+  }
+
+  return { success: true, entryId: entry.id, entryNumber }
 }
 
 /**
@@ -100,73 +244,148 @@ export async function postJournalEntry(params: PostJournalEntryParams) {
  */
 export async function postSalesInvoiceEntry(invoiceId: string, actorId?: string | null) {
   const supabase = createClient()
-  const { data: invoice, error: invoiceError } = await supabase.from('invoices')
-    .select('*, items:invoice_items(*)').eq('id', invoiceId).single()
-  if (invoiceError || !invoice || invoice.status === 'cancelled') {
-    return { success: false, error: invoiceError?.message || 'الفاتورة غير موجودة أو ملغاة' }
+
+  const { data: inv } = await supabase
+    .from('invoices')
+    .select('*, items:invoice_items(*, product:products(cost_price))')
+    .eq('id', invoiceId)
+    .single()
+
+  if (!inv || inv.status === 'cancelled') return { success: false, error: 'الفاتورة غير موجودة أو ملغاة' }
+
+  // فحص هل تم ترحيلها مسبقاً
+  const { data: existing } = await supabase
+    .from('journal_entries')
+    .select('id')
+    .eq('store_id', inv.store_id)
+    .eq('ref_id', invoiceId)
+    .eq('source', 'invoice')
+    .eq('status', 'posted')
+    .maybeSingle()
+
+  if (existing) return { success: true, entryId: existing.id }
+
+  const storeId = inv.store_id
+  const total = Number(inv.total || 0)
+  if (total <= 0) return { success: false, error: 'مبلغ الفاتورة صفر أو سالب' }
+
+  const date = inv.issue_date || new Date().toISOString().slice(0, 10)
+
+  // احتساب تكلفة البضاعة المباعة COGS إن وجدت
+  let totalCost = 0
+  if (inv.items && inv.items.length > 0) {
+    for (const item of inv.items) {
+      const cost = Number(item.product?.cost_price || 0)
+      if (cost > 0) {
+        totalCost += cost * Number(item.quantity || 1)
+      }
+    }
   }
-  const { data: existing, error: existingError } = await supabase.from('journal_entries')
-    .select('id,accounting_rule').eq('store_id', invoice.store_id).eq('ref_id', invoiceId)
-    .eq('source', 'invoice').eq('status', 'posted')
-  if (existingError) return { success: false, error: existingError.message }
-  if (existing?.length) {
-    const sales = existing.filter(e => ['SALE_POSTED','SALE_CASH_POSTED','SALE_CREDIT_POSTED'].includes(e.accounting_rule))
-    const cogs = existing.filter(e => e.accounting_rule === 'SALE_COGS_INVENTORY_OUT')
-    if (sales.length !== 1 || cogs.length > 1 || existing.length !== sales.length + cogs.length) {
-      return { success: false, error: 'قيود الفاتورة التاريخية ناقصة أو مكررة؛ يلزم مراجعتها قبل إعادة الترحيل' }
-    }
-    return { success: true, entryId: sales[0].id }
-  }
-  const total = Number(invoice.total ?? invoice.total_amount)
-  if (!Number.isFinite(total) || total <= 0) return { success: false, error: 'إجمالي الفاتورة غير صالح' }
-  const storeId = invoice.store_id
-  const isCash = invoice.payment_method === 'cash'
-  if (!isCash && invoice.payment_method !== 'credit') return { success: false, error: 'وسيلة التسديد تتطلب سندًا محاسبيًا مستقلاً' }
-  if (isCash && Number(invoice.amount_paid || 0) !== total) return { success: false, error: 'المبلغ النقدي لا يطابق إجمالي الفاتورة' }
-  if (!isCash && Number(invoice.amount_paid || 0) !== 0) return { success: false, error: 'الدفعة الجزئية تتطلب سند قبض منفصلًا' }
-  let cost = 0
-  for (const item of invoice.items || []) {
-    if (!item.product_id) continue
-    if (!item.cost_snapshot_at || item.cost_price == null) {
-      return { success: false, error: 'تكلفة الصرف التاريخية غير موثقة؛ يلزم مراجعة الفاتورة قبل ترحيلها' }
-    }
-    cost += Number(item.quantity) * Number(item.cost_price)
-  }
-  cost = Math.round(cost * 100) / 100
-  try {
-    const revenue = await resolveAccount(supabase, 'SALES_REVENUE', { storeId })
-    let debit: AccountResolutionResult
-    if (isCash) {
-      const { data: movement, error } = await supabase.from('cash_movements').select('cash_box_id')
-        .eq('store_id', storeId).or(`ref_id.eq.${invoice.id}${invoice.order_id ? `,ref_id.eq.${invoice.order_id}` : ''}`)
-        .limit(2)
-      if (error) return { success: false, error: error.message }
-      if (!movement?.length || movement.length !== 1) return { success: false, error: 'حركة الصندوق النقدي غير محددة على نحو وحيد' }
-      debit = await resolveAccount(supabase, 'CASH', { storeId, cashBoxId: movement[0].cash_box_id })
-    } else {
-      debit = await resolveAccount(supabase, 'CUSTOMER_RECEIVABLE', { storeId, customerId: invoice.customer_id })
-    }
-    const lines: JournalLineInput[] = [
-      { account_id: debit.accountId, debit: total, credit: 0, account_tag_used: debit.accountTag },
-      { account_id: revenue.accountId, debit: 0, credit: total, account_tag_used: revenue.accountTag },
-    ]
-    if (cost > 0) {
-      const cogs = await resolveAccount(supabase, 'COGS', { storeId })
-      const inventory = await resolveAccount(supabase, 'INVENTORY', { storeId })
-      lines.push(
-        { account_id: cogs.accountId, debit: cost, credit: 0, account_tag_used: cogs.accountTag },
-        { account_id: inventory.accountId, debit: 0, credit: cost, account_tag_used: inventory.accountTag },
-      )
-    }
-    return await postJournalEntry({
-      storeId, date: invoice.issue_date, description: `ترحيل فاتورة ${invoice.invoice_number}`,
-      source: 'invoice', refId: invoice.id, sourceType: 'sales_invoice',
-      sourceNumber: invoice.invoice_number, accountingRule: 'SALE_POSTED', sourceModule: 'SALES',
-      lines, actorId,
+
+  // 1. قيد تكلفة المبيعات عبر الـ Account Resolver
+  if (totalCost > 0) {
+    const cogsAcc = await resolveAccount(supabase, 'COGS', { storeId })
+    const invAcc = await resolveAccount(supabase, 'INVENTORY', { storeId })
+
+    await postJournalEntry({
+      storeId,
+      date,
+      description: `قيد تكلفة البضاعة والمخزون - فاتورة مبيعات #${inv.invoice_number}`,
+      source: 'invoice',
+      refId: inv.id,
+      sourceType: 'sales_invoice',
+      sourceId: inv.id,
+      sourceNumber: inv.invoice_number,
+      sourceUrl: `/dashboard/accounting/invoices/${inv.id}`,
+      accountingRule: 'SALE_COGS_INVENTORY_OUT',
+      sourceModule: 'SALES',
+      lines: [
+        {
+          account_id: cogsAcc.accountId,
+          debit: totalCost,
+          credit: 0,
+          description: `تكلفة بضاعة مباعة فاتورة #${inv.invoice_number}`,
+          account_tag_used: 'COGS',
+          source_rule: 'SALE_COGS',
+        },
+        {
+          account_id: invAcc.accountId,
+          debit: 0,
+          credit: totalCost,
+          description: `إخراج مخزون بضاعة مباعة فاتورة #${inv.invoice_number}`,
+          account_tag_used: 'INVENTORY',
+          source_rule: 'INVENTORY_OUT',
+        },
+      ],
+      actorId,
     })
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'فشل ترحيل الفاتورة' }
   }
+
+  // 2. قيد البيع والتحصيل (نقدي) أو قيد البيع الآجل (آجل) عبر الـ Account Resolver
+  const salesAcc = await resolveAccount(supabase, 'SALES_REVENUE', { storeId })
+  let debitAccResult: AccountResolutionResult
+
+  const isCash = inv.payment_method === 'cash'
+
+  if (isCash) {
+    let cashBoxId: string | null = null
+    const { data: cm } = await supabase
+      .from('cash_movements')
+      .select('cash_box_id')
+      .or(`ref_id.eq.${inv.id}${inv.order_id ? `,ref_id.eq.${inv.order_id}` : ''}`)
+      .limit(1)
+      .maybeSingle()
+    if (cm?.cash_box_id) {
+      cashBoxId = cm.cash_box_id
+    }
+    debitAccResult = await resolveAccount(supabase, 'CASH', { storeId, cashBoxId })
+  } else {
+    debitAccResult = await resolveAccount(supabase, 'CUSTOMER_RECEIVABLE', {
+      storeId,
+      customerId: inv.customer_id,
+      customerName: inv.customer_name,
+    })
+  }
+
+  const salesRule = isCash ? 'SALE_CASH_POSTED' : 'SALE_CREDIT_POSTED'
+  const salesLines: JournalLineInput[] = [
+    {
+      account_id: debitAccResult.accountId,
+      debit: total,
+      credit: 0,
+      description: isCash
+        ? `قبض مبيعات نقدية فاتورة #${inv.invoice_number}`
+        : `استحقاق مبيعات آجلة فاتورة #${inv.invoice_number} - ${inv.customer_name || 'عميل آجل'}`,
+      account_tag_used: debitAccResult.accountTag,
+      source_rule: salesRule,
+    },
+    {
+      account_id: salesAcc.accountId,
+      debit: 0,
+      credit: total,
+      description: `إيرادات مبيعات فاتورة #${inv.invoice_number}`,
+      account_tag_used: 'SALES_REVENUE',
+      source_rule: salesRule,
+    },
+  ]
+
+  return await postJournalEntry({
+    storeId,
+    date,
+    description: isCash
+      ? `قيد البيع والتحصيل النقدي - فاتورة مبيعات #${inv.invoice_number}`
+      : `قيد البيع الآجل - فاتورة مبيعات #${inv.invoice_number} - ${inv.customer_name || 'عميل آجل'}`,
+    source: 'invoice',
+    refId: inv.id,
+    sourceType: 'sales_invoice',
+    sourceId: inv.id,
+    sourceNumber: inv.invoice_number,
+    sourceUrl: `/dashboard/accounting/invoices/${inv.id}`,
+    accountingRule: salesRule,
+    sourceModule: 'SALES',
+    lines: salesLines,
+    actorId,
+  })
 }
 
 export interface PostPosSaleJournalEntriesParams {
@@ -830,35 +1049,72 @@ export async function deleteJournalEntryForRef(
   source: string,
   actorId?: string | null
 ) {
-  const { data, error } = await supabase.rpc('reverse_journals_for_source', {
-    p_store: storeId, p_ref: refId, p_source: source,
-    p_reason: 'عكس آثار المستند الأصلي: ' + refId,
-    p_date: new Date().toISOString().slice(0, 10),
-  })
-  if (error || !data?.success) return { success: false, error: error?.message || 'فشل العكس' }
+  const { data: entries, error } = await supabase
+    .from('journal_entries')
+    .select('id, entry_number, store_id, lines:journal_lines(id, account_id, debit, credit)')
+    .eq('store_id', storeId)
+    .eq('ref_id', refId)
+    .eq('source', source)
+
+  if (error || !entries || entries.length === 0) return { success: true }
+
+  for (const entry of entries) {
+    // عكس أثر سطور القيد على أرصدة شجرة الحسابات
+    for (const line of entry.lines || []) {
+      const { data: acc } = await supabase
+        .from('accounts')
+        .select('id, balance, normal_balance')
+        .eq('id', line.account_id)
+        .single()
+
+      if (acc) {
+        const d = Number(line.debit || 0)
+        const c = Number(line.credit || 0)
+        const delta = acc.normal_balance === 'credit' ? (c - d) : (d - c)
+        await supabase
+          .from('accounts')
+          .update({ balance: Number(acc.balance || 0) - delta })
+          .eq('id', acc.id)
+      }
+    }
+
+    // حذف سطور القيد ثم رأس القيد
+    await supabase.from('journal_lines').delete().eq('journal_entry_id', entry.id)
+    const { error: delErr } = await supabase.from('journal_entries').delete().eq('id', entry.id)
+    if (delErr) {
+      await supabase.from('journal_entries').update({ status: 'voided' }).eq('id', entry.id)
+    }
+
+    if (actorId) {
+      await logFinancialEvent({
+        storeId,
+        entityType: 'voucher',
+        entityId: entry.id,
+        entityLabel: entry.entry_number,
+        action: 'delete',
+        actorId,
+        details: { action: 'delete_journal_entry', refId, source },
+      })
+    }
+  }
+
   return { success: true }
 }
 
-/** Preserve the posted originals and record the supplied reversal reason. */
+/**
+ * إلغاء وعكس قيد محاسبي عبر حذف أثره وإرجاع رصيد الحسابات
+ */
 export async function reverseJournalEntry(refId: string, reason: string, actorId?: string | null) {
   const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { success: false, error: 'يجب تسجيل الدخول' }
-  const storeId = await getStoreForUser(supabase, user.id)
-  if (!storeId) return { success: false, error: 'المتجر غير موجود' }
-  const { data: entries, error } = await supabase.from('journal_entries')
-    .select('source').eq('store_id', storeId).eq('ref_id', refId)
-  if (error) return { success: false, error: error.message }
-  const sources = Array.from(new Set((entries || []).map(e => e.source as string)))
-  // A reference must identify one source type; ambiguous imported data needs review.
-  if (sources.length > 1) return { success: false, error: 'مرجع المستند مرتبط بأنواع متعددة؛ يلزم مراجعته' }
-  if (!sources.length) return { success: true }
-  const { data, error: reverseError } = await supabase.rpc('reverse_journals_for_source', {
-    p_store: storeId, p_ref: refId, p_source: sources[0], p_reason: reason,
-    p_date: new Date().toISOString().slice(0, 10),
-  })
-  if (reverseError || !data?.success) return { success: false, error: reverseError?.message || 'فشل العكس' }
-  return { success: true }
+  const { data: original } = await supabase
+    .from('journal_entries')
+    .select('id, store_id, source')
+    .eq('ref_id', refId)
+    .maybeSingle()
+
+  if (!original) return { success: true }
+
+  return await deleteJournalEntryForRef(supabase, original.store_id, refId, original.source, actorId)
 }
 
 /**

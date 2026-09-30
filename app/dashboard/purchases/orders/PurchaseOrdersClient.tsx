@@ -70,9 +70,9 @@ export default function PurchaseOrdersClient({ store, initialOrders }: Props) {
   // تحويل أمر الشراء إلى فاتورة مشتريات
   const handleConvert = async (po: PurchaseOrder) => {
     const isConfirmed = await confirm({
-      title: 'تأكيد الاستلام الفعلي وإنشاء فاتورة المشتريات',
+      title: 'تحويل أمر الشراء إلى فاتورة مشتريات',
       message: `هل أنت متأكد من رغبتك في تحويل أمر الشراء رقم #${po.order_number} إلى فاتورة مشتريات فعلية؟ سيتم إدخال الكميات للمخزن وتسجيل الذمة على حساب المورد.`,
-      confirmLabel: 'أؤكد استلام الأصناف',
+      confirmLabel: 'نعم، قم بالتحويل الآن',
       cancelLabel: 'إلغاء',
     })
 

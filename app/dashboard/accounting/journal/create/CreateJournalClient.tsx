@@ -1,7 +1,5 @@
 'use client'
 
-import { postJournalEntry } from '@/lib/accounting/engine'
-
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -136,8 +134,6 @@ export default function CreateJournalClient({ store, accounts }: Props) {
 
   const fmt = (n: number) => Number(n || 0).toLocaleString('ar-u-nu-latn', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-  const [submissionKey] = useState(() => crypto.randomUUID())
-
   // Submit
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -154,18 +150,62 @@ export default function CreateJournalClient({ store, accounts }: Props) {
     setError('')
 
     try {
-      const result = await postJournalEntry({
-        storeId: store.id, date, description: description.trim(), source: 'manual',
-        accountingRule: 'MANUAL_JOURNAL', sourceModule: 'MANUAL',
-        idempotencyKey: submissionKey,
-        lines: lines.map(line => ({
-          account_id: line.account_id, debit: line.debit, credit: line.credit,
-          currency: line.currency, exchange_rate: Number(line.exchange_rate),
-          original_debit: Number(line.original_debit), original_credit: Number(line.original_credit),
+      // التحقق من قفل الفترة المحاسبية
+      const { data: closedPeriod } = await supabase
+        .from('accounting_periods')
+        .select('period_name')
+        .eq('store_id', store.id)
+        .eq('is_closed', true)
+        .lte('start_date', date)
+        .gte('end_date', date)
+        .maybeSingle()
+
+      if (closedPeriod) {
+        setError(`لا يمكن تسجيل قيد يومية في فترة محاسبية مقفلة (${closedPeriod.period_name})`)
+        setLoading(false)
+        return
+      }
+
+      // 1. Insert Journal Entry
+      const { data: entry, error: entryErr } = await supabase
+        .from('journal_entries')
+        .insert({
+          store_id: store.id,
+          entry_number: entryNumber.trim(),
+          date,
+          description: description.trim(),
+          source: 'manual',
+          source_type: 'manual',
+          accounting_rule: 'MANUAL_JOURNAL',
+          source_module: 'MANUAL',
+          status: 'posted',
+        })
+        .select('id')
+        .single()
+
+      if (entryErr) throw entryErr
+
+      // 2. Insert Lines with multi-currency tracking (Item 13)
+      const linePayloads = lines.map((line, idx) => {
+        const matchingAcc = accounts.find(a => a.id === line.account_id)
+        return {
+          journal_entry_id: entry.id,
+          account_id: line.account_id,
+          debit: line.debit,
+          credit: line.credit,
+          original_debit: parseFloat(line.original_debit) || 0,
+          original_credit: parseFloat(line.original_credit) || 0,
+          currency: line.currency,
+          exchange_rate: Number(line.exchange_rate) || 1.0,
           description: line.description.trim() || description.trim(),
-        })),
+          sort_order: idx + 1,
+          account_tag_used: (matchingAcc as any)?.account_tag || null,
+          source_rule: 'MANUAL_JOURNAL',
+        }
       })
-      if (!result.success) throw new Error(result.error)
+
+      const { error: linesErr } = await supabase.from('journal_lines').insert(linePayloads)
+      if (linesErr) throw linesErr
 
       router.push('/dashboard/accounting/journal')
       router.refresh()

@@ -3,7 +3,8 @@
 import { useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { requestKey, completeRequest } from '@/lib/client/idempotency'
+import { recordAuditEvent } from '@/app/dashboard/accounting/audit-actions'
+import { postSalesInvoiceEntry } from '@/lib/accounting/engine'
 
 interface Product {
   id: string
@@ -104,7 +105,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
   )
 
   // ── طريقة الدفع ──────────────────────────────────────────────
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'credit'>('cash')
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'credit' | 'bank' | 'check' | 'card'>('cash')
 
   // ── الخصم: نوعين (مبلغ ثابت ₪ / نسبة مئوية %) ────────────────
   const [discountType, setDiscountType]   = useState<'amount' | 'percent'>('amount')
@@ -114,6 +115,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
   const [issueDate, setIssueDate]           = useState(new Date().toISOString().slice(0, 10))
   const [dueDate, setDueDate]               = useState('')
   const [notes, setNotes]                   = useState(prefill?.notes || '')
+  const [amountPaid, setAmountPaid]         = useState(0)
   const [saving, setSaving]                 = useState(false)
   const [error, setError]                   = useState('')
 
@@ -204,34 +206,198 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
       return
     }
 
-    const payload = {
-      customerId: selectedCustomer?.id ?? null,
-      customerName: selectedCustomer?.name ?? (customerMode === 'manual' ? customerName.trim() : ''),
-      customerPhone: activePhone,
-      customerAddress: customerAddress.trim(),
-      orderId: prefill?.orderId ?? null,
-      quotationId: prefill?.quotationId ?? null,
-      issueDate,
-      dueDate: dueDate || null,
-      paymentMethod,
-      discountType,
-      discountValue: Number(discountValue) || 0,
-      notes: notes.trim(),
-      items: items.map(({ product_id, name, sku, quantity, unit_price }) => ({ product_id, name: name.trim(), sku, quantity: Number(quantity), unit_price: Number(unit_price) })),
-    }
     setSaving(true)
-    try {
-      const key = await requestKey(`manual-invoice:${storeId}`, payload)
-      const { data, error: saveError } = await supabase.rpc('create_sales_invoice_atomic', { p_store: storeId, p_payload: payload, p_key: key })
-      if (saveError) throw saveError
-      if (!data?.invoiceId) throw new Error('لم يرجع رقم الفاتورة من الخادم')
-      await completeRequest(`manual-invoice:${storeId}`, payload)
-      router.push(`/dashboard/accounting/invoices/${data.invoiceId}`)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'تعذر إنشاء الفاتورة')
-    } finally {
+
+    // التحقق من قفل الفترة المحاسبية لتاريخ الفاتورة
+    const { data: closedPeriod } = await supabase
+      .from('accounting_periods')
+      .select('period_name')
+      .eq('store_id', storeId)
+      .eq('is_closed', true)
+      .lte('start_date', issueDate)
+      .gte('end_date', issueDate)
+      .maybeSingle()
+
+    if (closedPeriod) {
       setSaving(false)
+      setError(`لا يمكن إنشاء فاتورة تقع ضمن فترة محاسبية مقفلة (${closedPeriod.period_name})`)
+      return
     }
+
+    const { data: lastInv } = await supabase
+      .from('invoices')
+      .select('invoice_number')
+      .eq('store_id', storeId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    let nextNum = 1
+    if (lastInv?.invoice_number) {
+      const match = lastInv.invoice_number.match(/INV-(\d+)/)
+      if (match) {
+        nextNum = parseInt(match[1], 10) + 1
+      }
+    }
+
+    const invoiceNumber = `INV-${String(nextNum).padStart(4, '0')}`
+
+    // ضبط حالة السداد والمبلغ المدفوع
+    let effectivePaid = amountPaid
+    let effectiveStatus = 'draft'
+
+    if (paymentMethod === 'credit') {
+      effectivePaid = 0
+      effectiveStatus = 'draft'
+    } else if (paymentMethod === 'cash') {
+      effectivePaid = total
+      effectiveStatus = 'paid'
+    } else {
+      effectiveStatus = effectivePaid >= total ? 'paid' : effectivePaid > 0 ? 'partial' : 'draft'
+    }
+
+    const { data: inv, error: invErr } = await supabase
+      .from('invoices')
+      .insert({
+        store_id:         storeId,
+        invoice_number:   invoiceNumber,
+        order_id:         prefill?.orderId ?? null,
+        quotation_id:     prefill?.quotationId ?? null,
+        customer_id:      selectedCustomer?.id ?? null,
+        customer_name:    (selectedCustomer?.name ?? (customerMode === 'manual' ? customerName.trim() : null)) || null,
+        customer_phone:   activePhone || null,
+        customer_address: customerAddress.trim() || null,
+        issue_date:       issueDate,
+        due_date:         dueDate || null,
+        payment_method:   paymentMethod,
+        status:           effectiveStatus,
+        subtotal,
+        discount_type:    discountType,
+        discount_value:   Number(discountValue) || 0,
+        discount_amount:  discountAmount,
+        total,
+        amount_paid:      effectivePaid,
+        notes:            notes.trim() || null,
+        created_by:       userId,
+      })
+      .select('id')
+      .single()
+
+    if (invErr || !inv) {
+      setSaving(false)
+      setError(`حدث خطأ أثناء الحفظ: ${invErr?.message || 'Unknown Error'}`)
+      console.error(invErr)
+      return
+    }
+
+    // إدراج بنود الفاتورة
+    await supabase.from('invoice_items').insert(
+      items.map(i => ({
+        invoice_id: inv.id,
+        product_id: i.product_id,
+        name:       i.name,
+        sku:        i.sku || null,
+        quantity:   i.quantity,
+        unit_price: i.unit_price,
+        total:      i.quantity * i.unit_price,
+        cost_price: Number(i.cost_price || 0),
+      }))
+    )
+
+    // خصم الكميات من المخزون وتسجيل حركات المخزون
+    for (const item of items) {
+      if (item.product_id) {
+        const { data: p } = await supabase.from('products').select('stock_quantity').eq('id', item.product_id).single()
+        if (p) {
+          const newStock = Math.max(0, Number(p.stock_quantity || 0) - Number(item.quantity))
+          await supabase.from('products').update({ stock_quantity: newStock }).eq('id', item.product_id)
+
+          await supabase.from('inventory_movements').insert({
+            store_id: storeId,
+            product_id: item.product_id,
+            movement_type: 'sale',
+            document_number: invoiceNumber,
+            document_type: 'فاتورة مبيعات',
+            ref_id: inv.id,
+            entity_name: selectedCustomer?.name || customerName || 'عميل نقدي',
+            quantity_in: 0,
+            quantity_out: Number(item.quantity),
+            balance_after: newStock,
+            unit_price: Number(item.unit_price),
+            movement_date: issueDate,
+          })
+        }
+      }
+    }
+
+    // إذا تم التحويل من عرض سعر — تحديث حالة عرض السعر إلى "تم تحويله لفاتورة"
+    if (prefill?.quotationId) {
+      await supabase
+        .from('quotations')
+        .update({
+          status: 'converted',
+          converted_invoice_id: inv.id,
+        })
+        .eq('id', prefill.quotationId)
+    }
+
+    // كشف حساب العميل والذمم
+    if (selectedCustomer) {
+      const { data: custData } = await supabase
+        .from('customers')
+        .select('balance, total_invoiced, total_paid')
+        .eq('id', selectedCustomer.id)
+        .single()
+
+      const currentBalance  = custData?.balance ?? 0
+      const currentInvoiced = custData?.total_invoiced ?? 0
+      const currentPaid     = custData?.total_paid ?? 0
+      const balanceAfter    = currentBalance + total
+
+      await supabase.from('customer_ledger').insert({
+        store_id: storeId, customer_id: selectedCustomer.id,
+        type: 'invoice', date: issueDate,
+        description: `فاتورة ${invoiceNumber}`,
+        debit: total, credit: 0, balance: balanceAfter,
+        reference_id: inv.id, reference_type: 'invoice', created_by: userId,
+      })
+
+      let finalBalance = balanceAfter
+      let finalPaid    = currentPaid
+
+      if (effectivePaid > 0) {
+        finalBalance = balanceAfter - effectivePaid
+        finalPaid    = currentPaid + effectivePaid
+        await supabase.from('customer_ledger').insert({
+          store_id: storeId, customer_id: selectedCustomer.id,
+          type: 'payment', date: issueDate,
+          description: `دفعة على فاتورة ${invoiceNumber}`,
+          debit: 0, credit: effectivePaid, balance: finalBalance,
+          reference_id: inv.id, reference_type: 'invoice', created_by: userId,
+        })
+      }
+
+      await supabase.from('customers').update({
+        balance:        finalBalance,
+        total_invoiced: currentInvoiced + total,
+        total_paid:     finalPaid,
+      }).eq('id', selectedCustomer.id)
+    }
+
+    await recordAuditEvent({
+      entityType: 'invoice', entityId: inv.id, entityLabel: invoiceNumber,
+      action: 'create',
+      details: { total, amountPaid: effectivePaid, paymentMethod, items: items.length, customer: selectedCustomer?.name ?? null },
+    })
+
+    // الترحيل التلقائي إلى دفتر الأستاذ العام
+    try {
+      await postSalesInvoiceEntry(inv.id, userId)
+    } catch (glErr) {
+      console.error('Error posting GL for invoice:', glErr)
+    }
+
+    router.push(`/dashboard/accounting/invoices/${inv.id}`)
   }
 
   // ── Render ────────────────────────────────────────────────────
@@ -608,6 +774,9 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
           >
             <option value="cash">نقداً (دفع فوري بالكامل)</option>
             <option value="credit">على الحساب (بيع آجل / ذمة عميل)</option>
+            <option value="bank">تحويل بنكي</option>
+            <option value="check">شيك بنكي</option>
+            <option value="card">بطاقة دفع</option>
           </select>
         </div>
 
@@ -689,6 +858,25 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
             ⚠️ بيع آجل (على الدين): لن يتم تسجيل قبض بالصندوق، وسيتم تسجيل كامل المبلغ {fmt(total)} {currencyCode} كذمم مدينة على العميل.
           </div>
         ) : (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate-400">المبلغ المدفوع فوراً</span>
+            <input
+              type="number" min="0" step="0.01"
+              value={amountPaid || ''}
+              onChange={e => setAmountPaid(Math.max(0, parseFloat(e.target.value) || 0))}
+              placeholder="0"
+              dir="ltr"
+              className="w-28 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-left text-sm text-white font-mono outline-none focus:border-sky-500/50"
+            />
+          </div>
+        )}
+        {amountPaid > 0 && amountPaid < total && (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-yellow-400">متبقي</span>
+            <span className="font-semibold text-yellow-400" dir="ltr">{fmt(total - amountPaid)} {currencyCode}</span>
+          </div>
+        )}
+        {amountPaid >= total && total > 0 && (
           <p className="text-xs text-emerald-400">✓ الفاتورة مدفوعة بالكامل</p>
         )}
       </div>
