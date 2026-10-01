@@ -5,8 +5,11 @@ import { getDefaultCashBox, getCashBalance } from '@/lib/accounting/treasury'
 import Link from 'next/link'
 import DashboardRefresh from '@/components/dashboard/DashboardRefresh'
 import ExchangeRateWidget from '@/components/dashboard/ExchangeRateWidget'
+import SimpleDashboard from '@/components/dashboard/simple/SimpleDashboard'
+import { useSimpleDashboard } from '@/lib/dashboard/simple-metrics'
+import { loadSimpleDashboard } from '@/lib/dashboard/load-simple-dashboard'
 
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }: { searchParams: { view?: string } }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
@@ -16,10 +19,15 @@ export default async function DashboardPage() {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, name, currency_code, secondary_currency_code, exchange_rate, is_active, suspended_at, logo_url, phone, whatsapp, subdomain, country_code, plan')
+    .select('id, name, currency_code, secondary_currency_code, exchange_rate, is_active, suspended_at, logo_url, phone, whatsapp, subdomain, country_code, plan, settings')
     .eq('id', storeId)
     .single()
   if (!store) redirect('/onboarding')
+
+  if (useSimpleDashboard(store.plan, store.settings) && searchParams.view !== 'advanced') {
+    const data = await loadSimpleDashboard(supabase, storeId)
+    return <SimpleDashboard store={{ ...store, settings: store.settings || {} }} data={data} />
+  }
 
   const now = new Date()
   const todayDateStr = now.toISOString().slice(0, 10)

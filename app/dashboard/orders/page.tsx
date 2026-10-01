@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import OrdersTable from '@/components/dashboard/orders/OrdersTable'
 import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
+import { businessDay } from '@/lib/dashboard/simple-metrics'
 
 interface Props {
   searchParams: {
@@ -56,13 +57,15 @@ export default async function OrdersPage({ searchParams }: Props) {
     )
   }
 
-  if (searchParams.dateFrom) {
-    query = query.gte('created_at', searchParams.dateFrom)
+  function dateBounds(value: string | undefined) {
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+    const date = new Date(`${value}T12:00:00Z`)
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? businessDay(date) : null
   }
-
-  if (searchParams.dateTo) {
-    query = query.lte('created_at', searchParams.dateTo + 'T23:59:59.999')
-  }
+  const fromDay = dateBounds(searchParams.dateFrom)
+  const toDay = dateBounds(searchParams.dateTo)
+  if (fromDay) query = query.gte('created_at', fromDay.start)
+  if (toDay) query = query.lt('created_at', toDay.end)
 
   const { data: orders, count } = await query
 

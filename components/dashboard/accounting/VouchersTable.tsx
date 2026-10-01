@@ -1,5 +1,7 @@
 'use client'
 
+import { businessDay } from '@/lib/dashboard/simple-metrics'
+
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -108,8 +110,15 @@ export default function VouchersTable({
   useEffect(() => {
     if (searchParams?.get('new') === '1') {
       setShowModal(true)
+      if (!isReceipt && searchParams.get('purpose') === 'expense') {
+        setCategory('مصاريف تشغيل')
+        setPartyMode('manual')
+        const today = businessDay().date
+        setDate(today)
+        setDateTextInput(today)
+      }
     }
-  }, [searchParams])
+  }, [searchParams, isReceipt])
 
   // Editing State
   const [editingVoucher, setEditingVoucher] = useState<Voucher | null>(null)

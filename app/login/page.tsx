@@ -12,6 +12,9 @@ export default function LoginPage() {
   const supabase = createClient()
 
   const [mode, setMode] = useState<Mode>('login')
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('mode') === 'signup') setMode('signup')
+  }, [])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [successMsg, setSuccessMsg] = useState('')

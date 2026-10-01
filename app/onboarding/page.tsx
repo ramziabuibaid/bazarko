@@ -1,303 +1,144 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import BazarkoLogo from '@/components/ui/BazarkoLogo'
+import { BUSINESS_TYPES, isBusinessType, initialStoreSettings, ONBOARDING_DRAFT_KEY, type BusinessType } from '@/lib/onboarding/business-types'
+import styles from './onboarding.module.css'
 
 type Step = 1 | 2 | 3
-
-interface FormData {
-  country_code: string
-  currency_code: string
-  currency_symbol: string
-  store_name: string
-  subdomain: string
-}
-
-const COUNTRIES = [
-  { code: 'PS', name: 'فلسطين', flag: '🇵🇸', currency_code: 'ILS', currency_symbol: '₪' },
-]
+const validSlug = (value: string) => /^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$/.test(value)
+const RESERVED = ['www', 'api', 'admin', 'marketplace', 'dashboard', 'mail', 'smtp', 'ps', 'sy', 'jo', 'lb']
 
 export default function OnboardingPage() {
   const router = useRouter()
   const [step, setStep] = useState<Step>(1)
+  const [businessType, setBusinessType] = useState<BusinessType>('home')
+  const [name, setName] = useState('')
+  const [slug, setSlug] = useState('')
+  const [userId, setUserId] = useState<string | null>(null)
+  const [authReady, setAuthReady] = useState(false)
+  const [ready, setReady] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [checking, setChecking] = useState(false)
+  const [availability, setAvailability] = useState<'available' | 'taken' | null>(null)
   const [error, setError] = useState('')
-  const [subdomainAvailable, setSubdomainAvailable] = useState<boolean | null>(null)
-  const [checkingSubdomain, setCheckingSubdomain] = useState(false)
+  const checkVersion = useRef(0)
+  const selection = BUSINESS_TYPES.find(item => item.id === businessType)!
 
-  const [form, setForm] = useState<FormData>({
-    country_code: '',
-    currency_code: '',
-    currency_symbol: '',
-    store_name: '',
-    subdomain: '',
-  })
-
-  // حماية: من لديه متجر بالفعل لا يجب أن يُنشئ متجراً ثانياً بالخطأ
   useEffect(() => {
+    try {
+      const draft = JSON.parse(sessionStorage.getItem(ONBOARDING_DRAFT_KEY) || 'null')
+      if (draft && isBusinessType(draft.businessType)) {
+        setBusinessType(draft.businessType)
+        if (typeof draft.name === 'string') setName(draft.name.slice(0, 60))
+        if (typeof draft.slug === 'string') setSlug(draft.slug.replace(/[^a-z0-9-]/g, '').slice(0, 30))
+        if (typeof draft.name === 'string' && draft.name.trim().length >= 2 && typeof draft.slug === 'string' && validSlug(draft.slug)) setStep(2)
+      }
+    } catch { /* Storage is optional; setup still works when unavailable. */ }
+    setReady(true)
+    let active = true
     const supabase = createClient()
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return
-      supabase
-        .from('store_members')
-        .select('store_id')
-        .eq('profile_id', user.id)
-        .eq('is_active', true)
-        .limit(1)
-        .maybeSingle()
-        .then(({ data }: { data: { store_id: string } | null }) => {
-          if (data) router.replace('/dashboard')
-        })
-    })
+    void (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!active) return
+        setUserId(user?.id || null)
+        if (user) {
+          const { data } = await supabase.from('store_members').select('store_id').eq('profile_id', user.id).eq('is_active', true).limit(1).maybeSingle()
+          if (active && data) router.replace('/dashboard')
+        }
+      } finally { if (active) setAuthReady(true) }
+    })().catch(() => { if (active) setError('تعذر التحقق من الجلسة. أعد تحميل الصفحة وحاول مجدداً.') })
+    return () => { active = false }
   }, [router])
 
-  function selectCountry(country: typeof COUNTRIES[0]) {
-    setForm(f => ({
-      ...f,
-      country_code: country.code,
-      currency_code: country.currency_code,
-      currency_symbol: country.currency_symbol,
-    }))
-    setStep(2)
+  useEffect(() => {
+    if (!ready) return
+    try { sessionStorage.setItem(ONBOARDING_DRAFT_KEY, JSON.stringify({ businessType, name, slug })) } catch { /* Optional draft */ }
+  }, [businessType, name, slug, ready])
+
+  function changeSlug(value: string) {
+    checkVersion.current++
+    setSlug(value.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 30))
+    setAvailability(null)
+    setChecking(false)
+    setError('')
   }
 
-  function handleStoreName(name: string) {
-    const slug = name
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, '-')
-      .replace(/[^a-z0-9-]/g, '')
-      .slice(0, 30)
-
-    setForm(f => ({ ...f, store_name: name, subdomain: slug }))
-    setSubdomainAvailable(null)
+  async function checkSlug(): Promise<boolean> {
+    const version = ++checkVersion.current
+    if (!validSlug(slug) || RESERVED.includes(slug)) {
+      setError('استخدم 3 إلى 30 حرفاً إنجليزياً أو رقماً، ويمكن وضع شرطة بين الأحرف. اختر اسماً غير محجوز.')
+      return false
+    }
+    setChecking(true)
+    setError('')
+    try {
+      const { data, error: queryError } = await createClient().from('stores').select('id').eq('subdomain', slug).eq('country_code', 'PS').maybeSingle()
+      if (version !== checkVersion.current) return false
+      if (queryError) throw queryError
+      setAvailability(data ? 'taken' : 'available')
+      if (data) setError('هذا الرابط مستخدم. اختر رابطاً آخر.')
+      return !data
+    } catch {
+      if (version === checkVersion.current) { setAvailability(null); setError('تعذر التحقق من الرابط. حاول مجدداً.') }
+      return false
+    } finally { if (version === checkVersion.current) setChecking(false) }
   }
 
-  function handleSubdomain(val: string) {
-    const slug = val.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 30)
-    setForm(f => ({ ...f, subdomain: slug }))
-    setSubdomainAvailable(null)
+  async function nextDetails(e: React.FormEvent) {
+    e.preventDefault()
+    if (name.trim().length < 2) { setError('أدخل اسماً من حرفين على الأقل.'); return }
+    if (await checkSlug()) setStep(3)
   }
 
-  async function checkSubdomain() {
-    if (!form.subdomain || form.subdomain.length < 3) return
-    setCheckingSubdomain(true)
-    const supabase = createClient()
-    const { data } = await supabase
-      .from('stores')
-      .select('id')
-      .eq('subdomain', form.subdomain)
-      .eq('country_code', form.country_code)
-      .maybeSingle()
-    setSubdomainAvailable(!data)
-    setCheckingSubdomain(false)
-  }
-
-  async function createStore() {
-    if (!form.subdomain || !subdomainAvailable) return
+  async function createWorkspace() {
     setLoading(true)
     setError('')
-
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { router.push('/login'); return }
-
-    const { error: err } = await supabase.from('stores').insert({
-      owner_id: user.id,
-      country_code: form.country_code,
-      name: form.store_name,
-      subdomain: form.subdomain,
-      currency_code: form.currency_code,
-    })
-
-    if (err) {
-      setError(err.message)
-      setLoading(false)
-      return
-    }
-
-    router.push('/dashboard')
+    try {
+      const supabase = createClient()
+      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      if (authError && authError.name !== 'AuthSessionMissingError') throw authError
+      if (!user) { router.push('/login?mode=signup'); return }
+      // Revalidate before insertion; the database unique constraint remains authoritative.
+      if (!(await checkSlug())) return
+      const { data: existing, error: memberError } = await supabase.from('store_members').select('store_id').eq('profile_id', user.id).eq('is_active', true).limit(1).maybeSingle()
+      if (memberError) throw memberError
+      if (existing) { router.replace('/dashboard'); return }
+      const { error: insertError } = await supabase.from('stores').insert({ owner_id: user.id, country_code: 'PS', currency_code: 'ILS', name: name.trim(), subdomain: slug, settings: initialStoreSettings(businessType) })
+      if (insertError) { setError(insertError.code === '23505' ? 'الرابط أصبح مستخدماً. ارجع واختر رابطاً آخر.' : 'تعذر إنشاء مساحة العمل. حاول مجدداً.'); return }
+      try { sessionStorage.removeItem(ONBOARDING_DRAFT_KEY) } catch { /* Optional draft */ }
+      router.replace('/dashboard')
+    } catch { setError('تعذر الاتصال. تحقق من اتصالك وحاول مجدداً.') }
+    finally { setLoading(false) }
   }
 
-  const selectedCountry = COUNTRIES.find(c => c.code === form.country_code)
-
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-8">
-      <div className="w-full max-w-lg">
-        {/* Brand Logo Header */}
-        <div className="mb-6 text-center flex flex-col items-center">
-          <BazarkoLogo size="lg" variant="image" subtitle="معالج إعداد المتجر والـ ERP" href="/" />
-        </div>
-
-        {/* Progress bar */}
-        <div className="mb-8">
-          <div className="flex items-center gap-2">
-            {[1, 2, 3].map(s => (
-              <div key={s} className="flex items-center gap-2">
-                <div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium transition-colors ${
-                  s < step ? 'bg-sky-500 text-white' :
-                  s === step ? 'border-2 border-sky-500 text-sky-400' :
-                  'border border-slate-700 text-slate-600'
-                }`}>
-                  {s < step ? '✓' : s}
-                </div>
-                {s < 3 && (
-                  <div className={`h-px flex-1 ${s < step ? 'bg-sky-500' : 'bg-slate-700'}`} style={{ width: 60 }} />
-                )}
-              </div>
-            ))}
-          </div>
-          <p className="mt-3 text-xs text-slate-500">
-            الخطوة {step} من 3
-          </p>
-        </div>
-
-        {/* Step 1: اختيار البلد */}
-        {step === 1 && (
-          <div className="rounded-2xl border border-white/10 bg-slate-900 p-8 text-right">
-            <h2 className="text-xl font-semibold text-white">اختر بلدك</h2>
-            <p className="mt-2 text-sm text-slate-400">يحدد هذا العملة ورابط متجرك</p>
-            <div className="mt-6 grid gap-3">
-              {COUNTRIES.map(country => (
-                <button
-                  key={country.code}
-                  onClick={() => selectCountry(country)}
-                  className="flex items-center gap-4 rounded-xl border border-white/10 bg-slate-800 p-4 text-right transition hover:border-sky-500 hover:bg-slate-700"
-                >
-                  <span className="text-3xl">{country.flag}</span>
-                  <div>
-                    <p className="font-medium text-white">{country.name}</p>
-                    <p className="text-xs text-slate-400">{country.currency_symbol} — {country.currency_code}</p>
-                  </div>
-                </button>
-              ))}
-              <button
-                disabled
-                className="flex items-center gap-4 rounded-xl border border-white/5 bg-slate-800/50 p-4 text-right opacity-40"
-              >
-                <span className="text-3xl">🌍</span>
-                <div>
-                  <p className="font-medium text-slate-400">دول أخرى</p>
-                  <p className="text-xs text-slate-500">قريباً</p>
-                </div>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 2: اسم المتجر */}
-        {step === 2 && (
-          <div className="rounded-2xl border border-white/10 bg-slate-900 p-8 text-right">
-            <div className="mb-1 flex items-center gap-2">
-              <span className="text-xl">{selectedCountry?.flag}</span>
-              <span className="text-sm text-slate-400">{selectedCountry?.name}</span>
-            </div>
-            <h2 className="text-xl font-semibold text-white">اسم متجرك</h2>
-            <p className="mt-1 text-sm text-slate-400">يظهر هذا الاسم للزبائن</p>
-
-            <div className="mt-6">
-              <label className="mb-2 block text-sm text-slate-300">اسم المتجر</label>
-              <input
-                type="text"
-                value={form.store_name}
-                onChange={e => handleStoreName(e.target.value)}
-                placeholder="مثال: متجر هادية للعطور"
-                maxLength={60}
-                className="w-full rounded-xl border border-white/10 bg-slate-800 px-4 py-3 text-right text-white placeholder-slate-500 outline-none focus:border-sky-500"
-              />
-            </div>
-
-            <div className="mt-4 flex gap-3">
-              <button
-                onClick={() => setStep(1)}
-                className="rounded-xl border border-white/10 px-5 py-2.5 text-sm text-slate-400 hover:border-white/20"
-              >
-                رجوع
-              </button>
-              <button
-                onClick={() => form.store_name.length >= 2 && setStep(3)}
-                disabled={form.store_name.length < 2}
-                className="flex-1 rounded-xl bg-sky-500 py-2.5 text-sm font-medium text-slate-950 transition hover:bg-sky-400 disabled:opacity-40"
-              >
-                التالي
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 3: Subdomain */}
-        {step === 3 && (
-          <div className="rounded-2xl border border-white/10 bg-slate-900 p-8 text-right">
-            <h2 className="text-xl font-semibold text-white">رابط متجرك</h2>
-            <p className="mt-1 text-sm text-slate-400">
-              هذا هو العنوان الذي يصل منه الزبائن لمتجرك
-            </p>
-
-            <div className="mt-6">
-              <label className="mb-2 block text-sm text-slate-300">الرابط المخصص</label>
-              <div className="flex items-center rounded-xl border border-white/10 bg-slate-800 focus-within:border-sky-500">
-                <input
-                  type="text"
-                  value={form.subdomain}
-                  onChange={e => handleSubdomain(e.target.value)}
-                  onBlur={checkSubdomain}
-                  placeholder="store-name"
-                  className="min-w-0 flex-1 bg-transparent px-4 py-3 text-white placeholder-slate-500 outline-none"
-                  dir="ltr"
-                />
-                <span className="whitespace-nowrap px-3 text-sm text-slate-400">
-                  .{selectedCountry?.code.toLowerCase()}.bazarko.app
-                </span>
-              </div>
-
-              {/* حالة التحقق */}
-              <div className="mt-2 h-5 text-xs">
-                {checkingSubdomain && (
-                  <span className="text-slate-400">جاري التحقق...</span>
-                )}
-                {!checkingSubdomain && subdomainAvailable === true && (
-                  <span className="text-green-400">✓ متاح</span>
-                )}
-                {!checkingSubdomain && subdomainAvailable === false && (
-                  <span className="text-red-400">✗ مأخوذ، جرّب اسماً آخر</span>
-                )}
-                {form.subdomain.length > 0 && form.subdomain.length < 3 && (
-                  <span className="text-yellow-400">يجب أن يكون 3 أحرف على الأقل</span>
-                )}
-              </div>
-
-              {/* معاينة الرابط */}
-              {form.subdomain.length >= 3 && (
-                <div className="mt-3 rounded-lg bg-slate-800/50 px-4 py-2 text-sm text-slate-400" dir="ltr">
-                  {form.subdomain}.{selectedCountry?.code.toLowerCase()}.bazarko.app
-                </div>
-              )}
-            </div>
-
-            {error && (
-              <p className="mt-3 text-sm text-red-400">{error}</p>
-            )}
-
-            <div className="mt-6 flex gap-3">
-              <button
-                onClick={() => { setStep(2); setSubdomainAvailable(null) }}
-                className="rounded-xl border border-white/10 px-5 py-2.5 text-sm text-slate-400 hover:border-white/20"
-              >
-                رجوع
-              </button>
-              <button
-                onClick={createStore}
-                disabled={loading || !subdomainAvailable || form.subdomain.length < 3}
-                className="flex-1 rounded-xl bg-sky-500 py-2.5 text-sm font-medium text-slate-950 transition hover:bg-sky-400 disabled:opacity-40"
-              >
-                {loading ? 'جاري الإنشاء...' : 'إنشاء المتجر'}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </main>
-  )
+  return <main className={styles.page} dir="rtl">
+    <header className={styles.header}><BazarkoLogo size="lg" variant="vector" /><Link href="/">رجوع إلى الرئيسية ←</Link></header>
+    <div className={styles.content}>
+      <ol className={styles.progress} aria-label="خطوات إعداد الحساب">{['نوع النشاط', 'تفاصيل مشروعك', 'جاهز للبداية'].map((label, index) => <li key={label} aria-current={step === index + 1 ? 'step' : undefined} className={step >= index + 1 ? styles.activeStep : ''}><span>{step > index + 1 ? '✓' : index + 1}</span>{label}</li>)}</ol>
+      {step === 1 ? <>
+        <div className={styles.heading}><span>بداية تناسب نشاطك</span><h1>خلّينا نجهّز لك البداية المناسبة</h1><p>اختر الأقرب لطبيعة شغلك. نرتّب لك خطوات البداية على هذا الأساس.</p></div>
+        <fieldset className={styles.choices}><legend className={styles.srOnly}>اختر نوع نشاطك</legend>{BUSINESS_TYPES.map((item, i) => <label key={item.id} className={`${styles.choice} ${businessType === item.id ? styles.selected : ''}`}><input type="radio" name="business-type" value={item.id} checked={businessType === item.id} onChange={() => setBusinessType(item.id)} /><span className={styles.radio} aria-hidden="true">{businessType === item.id ? '✓' : ''}</span><span className={styles.art} style={{ backgroundPosition: `${i * 50}% center` }} role="img" aria-label={item.title} /><strong>{item.title}</strong><span className={styles.description}>{item.description}</span></label>)}</fieldset>
+        <section className={styles.tools} aria-live="polite"><h2>{selection.intro}</h2><div>{selection.tools.map((tool, i) => <span key={tool}><span aria-hidden="true">{['◇', '▤', '◫', '▱'][i]}</span>{tool}</span>)}</div><p>{selection.detail}</p></section>
+        <button className={styles.primary} onClick={() => { setError(''); setStep(2) }}>متابعة <span aria-hidden="true">←</span></button>
+        <p className={styles.note}>ابدأ بالأساسيات، وأضف الأدوات عندما تحتاجها.</p>
+      </> : <>
+        <div className={styles.heading}><span>{selection.title}</span><h1>{step === 2 ? 'نتعرّف على مشروعك' : 'بدايتك جاهزة'}</h1><p>{step === 2 ? 'اسم واضح ورابط يسهل مشاركته مع زبائنك.' : 'راجع التفاصيل، ثم أنشئ مساحة عملك.'}</p></div>
+        {step === 2 ? <form className={styles.form} onSubmit={nextDetails}>
+          <label htmlFor="business-name">{selection.nameLabel}</label><input id="business-name" value={name} onChange={e => { setName(e.target.value); setError('') }} placeholder={selection.placeholder} maxLength={60} required minLength={2} autoComplete="organization" />
+          <label htmlFor="business-country">البلد والعملة</label><select id="business-country" value="PS" onChange={() => {}}><option value="PS">فلسطين — شيكل ₪</option></select><p className={styles.hint}>التسجيل متاح حالياً في فلسطين.</p>
+          <label htmlFor="business-slug">رابط مشروعك</label><input id="business-slug" dir="ltr" value={slug} onChange={e => changeSlug(e.target.value)} placeholder="sara-bakery" minLength={3} maxLength={30} required autoCapitalize="none" spellCheck={false} aria-describedby="slug-help" />
+          <p id="slug-help" className={styles.hint}>حروف إنجليزية وأرقام، ويمكن استخدام شرطة بين الأحرف.</p><div className={styles.linkPreview} dir="ltr">{slug || 'your-project'}.ps.{process.env.NEXT_PUBLIC_DOMAIN || 'bazarko.app'}</div>
+          <div className={styles.status} aria-live="polite">{checking ? 'جارٍ التحقق من الرابط…' : availability === 'available' ? '✓ الرابط متاح' : availability === 'taken' ? 'الرابط مستخدم' : ''}</div>
+          {error && <p className={styles.error} role="alert">{error}</p>}
+          <div className={styles.actions}><button type="button" className={styles.back} onClick={() => { setError(''); setStep(1) }}>رجوع</button><button className={styles.primary} type="submit" disabled={checking}> {checking ? 'جارٍ التحقق…' : 'مراجعة التفاصيل ←'}</button></div>
+        </form> : <section className={styles.form}><dl className={styles.review}><div><dt>نوع النشاط</dt><dd>{selection.title}</dd></div><div><dt>{selection.nameLabel}</dt><dd>{name}</dd></div><div><dt>البلد والعملة</dt><dd>فلسطين · شيكل ₪</dd></div><div><dt>الرابط</dt><dd dir="ltr">{slug}.ps.{process.env.NEXT_PUBLIC_DOMAIN || 'bazarko.app'}</dd></div></dl><p className={styles.hint}>{selection.detail}</p>{!userId && <p className={styles.authNote}>بعد المتابعة، أنشئ حسابك أو سجّل الدخول. سنحتفظ بتفاصيل مشروعك في هذا المتصفح لتكمل الإعداد.</p>}{error && <p className={styles.error} role="alert">{error}</p>}<div className={styles.actions}><button className={styles.back} disabled={loading} onClick={() => { setError(''); setStep(2) }}>تعديل التفاصيل</button><button className={styles.primary} onClick={createWorkspace} disabled={loading || checking || !authReady}>{loading ? 'جارٍ الإنشاء…' : userId ? 'إنشاء مساحة العمل ←' : 'إنشاء حساب ومتابعة ←'}</button></div></section>}
+      </>}
+      <p className={styles.login}>لديك حساب؟ <Link href="/login">تسجيل الدخول</Link></p>
+    </div>
+  </main>
 }

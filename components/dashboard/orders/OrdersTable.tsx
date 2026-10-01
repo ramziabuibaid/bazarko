@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { businessDay, BUSINESS_TIME_ZONE } from '@/lib/dashboard/simple-metrics'
 
 interface Order {
   id: string
@@ -68,29 +69,29 @@ const DATE_PRESETS = [
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('ar-u-nu-latn', {
+    timeZone: BUSINESS_TIME_ZONE,
     month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
 }
 
 function getPresetDates(preset: string): { from: string; to: string } {
-  const now   = new Date()
-  const today = now.toISOString().split('T')[0]
+  const today = businessDay().date
+  const now = new Date(`${today}T12:00:00Z`)
   switch (preset) {
     case 'today':
       return { from: today, to: today }
     case 'yesterday': {
-      const d = new Date(now); d.setDate(d.getDate() - 1)
+      const d = new Date(now); d.setUTCDate(d.getUTCDate() - 1)
       const s = d.toISOString().split('T')[0]
       return { from: s, to: s }
     }
     case 'week': {
-      const d = new Date(now); d.setDate(d.getDate() - 6)
+      const d = new Date(now); d.setUTCDate(d.getUTCDate() - 6)
       return { from: d.toISOString().split('T')[0], to: today }
     }
     case 'month': {
-      const d = new Date(now.getFullYear(), now.getMonth(), 1)
-      return { from: d.toISOString().split('T')[0], to: today }
+      return { from: `${today.slice(0, 7)}-01`, to: today }
     }
     default:
       return { from: '', to: '' }
