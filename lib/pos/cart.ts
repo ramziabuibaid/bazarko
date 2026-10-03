@@ -1,0 +1,3 @@
+export function allowedQuantity(quantity:number,max:number|null){return Number.isFinite(quantity)&&Number.isInteger(quantity)&&quantity>=0&&(max===null||quantity<=max)}
+export function cashChange(total:number,tender:string){const received=tender===''?total:Number(tender);return {received,valid:Number.isFinite(received)&&received>=total,change:Number.isFinite(received)?Math.max(0,received-total):0}}
+export function matchesProduct(p:{name:string;sku:string|null;barcode?:string|null},query:string){const target=`${p.name} ${p.sku||''} ${p.barcode||''}`.toLowerCase();return query.toLowerCase().trim().split(/\s+/).every(token=>target.includes(token))}

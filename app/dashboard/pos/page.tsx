@@ -44,6 +44,7 @@ export default async function PosPage() {
       </div>
 
       <NewOrderForm
+        posPresentation
         storeId={store.id}
         currencyCode={store.currency_code}
         storeInfo={{

@@ -6,7 +6,7 @@ import ProductForm from '@/components/dashboard/products/ProductForm'
 export default async function NewProductPage({
   searchParams,
 }: {
-  searchParams: { category_id?: string }
+  searchParams: { category_id?: string;brand_id?:string }
 }) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -23,17 +23,21 @@ export default async function NewProductPage({
 
   if (!store) redirect('/onboarding')
 
-  const { data: categories } = await supabase
+  const {data:brands,error:brandError}=await supabase.from('brands').select('id,name,is_active').eq('store_id',store.id).order('name')
+  if(brandError)throw new Error('تعذر تحميل الماركات')
+
+  const { data: categories,error:categoryError } = await supabase
     .from('categories')
     .select('id, name')
     .eq('store_id', store.id)
     .eq('is_active', true)
     .order('name')
 
-  const [{ data: attrDefs }, { data: attrValues }] = await Promise.all([
+  const [{ data: attrDefs,error:defsError }, { data: attrValues,error:valuesError }] = await Promise.all([
     supabase.from('product_attributes').select('id, name, sort_order').eq('store_id', store.id).order('sort_order'),
     supabase.from('product_attribute_values').select('id, attribute_id, value, sort_order').eq('store_id', store.id).order('sort_order'),
   ])
+  if(categoryError||defsError||valuesError) throw new Error('تعذر تحميل فئات أو خصائص المنتج')
   const attributes = (attrDefs ?? []).map(a => ({
     id: a.id, name: a.name,
     values: (attrValues ?? []).filter(v => v.attribute_id === a.id).map(v => ({ id: v.id, value: v.value })),
@@ -52,9 +56,10 @@ export default async function NewProductPage({
         currencyCode={store.currency_code}
         secondaryCurrencyCode={store.secondary_currency_code}
         exchangeRate={store.exchange_rate}
+        brands={brands ?? []}
         categories={categories ?? []}
         attributes={attributes}
-        initialData={preselectedCategory ? { category_id: preselectedCategory } : undefined}
+        initialData={{category_id:preselectedCategory,brand_id:(brands||[]).find(b=>b.id===searchParams.brand_id&&b.is_active)?.id||''}}
       />
     </div>
   )

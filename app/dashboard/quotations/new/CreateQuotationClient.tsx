@@ -1,6 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import styles from '@/components/dashboard/quotations/quotations.module.css'
+import {validQuote} from '@/lib/quotations/presentation'
+import {businessDay} from '@/lib/dashboard/simple-metrics'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -33,27 +36,32 @@ interface Props {
   store: { id: string; name: string; currency_code: string }
   customers: Customer[]
   products: Product[]
+  preview?: boolean
 }
 
-export default function CreateQuotationClient({ store, customers, products }: Props) {
+export default function CreateQuotationClient({ store, customers, products, preview=false }: Props) {
   const router = useRouter()
   const supabase = createClient()
 
+  const submitMode=useRef<'sent'|'draft'>('sent')
+  const submitting=useRef(false)
+  const [showReview,setShowReview]=useState(false)
+  const [savedId,setSavedId]=useState<string|null>(null)
   const [quoteNumber, setQuoteNumber] = useState(`QT-${Date.now().toString().slice(-6)}`)
-  const [issueDate, setIssueDate] = useState(new Date().toISOString().slice(0, 10))
+  const [issueDate, setIssueDate] = useState(businessDay().date)
   const [validUntil, setValidUntil] = useState(() => {
-    const d = new Date()
-    d.setDate(d.getDate() + 14)
+    const d = new Date(`${businessDay().date}T12:00:00Z`)
+    d.setUTCDate(d.getUTCDate() + 14)
     return d.toISOString().slice(0, 10)
   })
 
   // Customer Autocomplete Search State
-  const [customerId, setCustomerId] = useState(customers[0]?.id || '')
+  const [customerId, setCustomerId] = useState('')
   const [customerSearch, setCustomerSearch] = useState('')
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false)
 
   const [notes, setNotes] = useState('')
-  const [terms, setTerms] = useState('الأسعار شاملة ضريبة القيمة المضافة. العرض ساري لمدة 14 يوماً من تاريخه.')
+  const [terms, setTerms] = useState('الأسعار حسب البنود الموضحة في العرض. يسري العرض حتى تاريخ الصلاحية المحدد.')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -63,7 +71,7 @@ export default function CreateQuotationClient({ store, customers, products }: Pr
       product_name: products[0]?.name || '',
       quantity: 1,
       unit_price: products[0]?.price || 0,
-      is_custom: false,
+      is_custom: products.length===0,
       save_to_products: false,
     },
   ])
@@ -98,7 +106,7 @@ export default function CreateQuotationClient({ store, customers, products }: Pr
             ...item,
             product_id: val,
             product_name: selected?.name || item.product_name,
-            unit_price: selected?.price || item.unit_price,
+            unit_price: selected?.price ?? item.unit_price,
           }
         }
         return { ...item, [field]: val }
@@ -117,22 +125,18 @@ export default function CreateQuotationClient({ store, customers, products }: Pr
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (totalAmount <= 0) {
-      setError('يرجى إضافة أصناف ومبالغ صحيحة أكبر من الصفر')
-      return
-    }
-
-    if (items.some(i => !i.product_name.trim())) {
-      setError('يرجى تحديد اسم أو وصف لكافة البنود في عرض السعر')
-      return
-    }
-
+    if(submitting.current || savedId) return
+    const validation=validQuote(items,issueDate,validUntil)
+    if(validation){setError(validation);return}
+    if(!quoteNumber.trim()){setError('أدخل رقم عرض السعر');return}
+    if(preview){setError('معاينة فقط: تم التحقق من البنود، ولم تُحفظ بيانات.');return}
+    submitting.current=true
     setLoading(true)
     setError('')
 
     try {
       // 1. معالجة البنود الحرة المطلوب حفظها كمنتجات جديدة في الدليل
-      const preparedItems = [...items]
+      const preparedItems = items.map(item=>({...item}))
       for (let i = 0; i < preparedItems.length; i++) {
         const item = preparedItems[i]
         if (item.is_custom && item.save_to_products && item.product_name.trim()) {
@@ -147,7 +151,8 @@ export default function CreateQuotationClient({ store, customers, products }: Pr
             .select('id')
             .single()
 
-          if (!prodErr && newProd) {
+          if (prodErr) throw prodErr
+          if (newProd) {
             preparedItems[i].product_id = newProd.id
           }
         }
@@ -167,12 +172,13 @@ export default function CreateQuotationClient({ store, customers, products }: Pr
           currency: store.currency_code || 'ILS',
           notes: notes.trim() || null,
           terms: terms.trim() || null,
-          status: 'sent',
+          status: 'draft',
         })
         .select('id')
         .single()
 
       if (quoteErr) throw quoteErr
+      setSavedId(quote.id)
 
       // 3. إدراج بنود عرض السعر
       const itemPayloads = preparedItems.map((item, idx) => ({
@@ -188,11 +194,16 @@ export default function CreateQuotationClient({ store, customers, products }: Pr
       const { error: itemsErr } = await supabase.from('quotation_items').insert(itemPayloads)
       if (itemsErr) throw itemsErr
 
+      if(submitMode.current==='sent') {
+        const {data:issued,error:issueError}=await supabase.from('quotations').update({status:'sent'}).eq('id',quote.id).eq('store_id',store.id).select('id').single()
+        if(issueError || !issued) throw issueError || new Error('تعذر إصدار العرض؛ بقي محفوظاً كمسودة')
+      }
       router.push('/dashboard/quotations')
       router.refresh()
     } catch (err: any) {
       setError(err.message || 'فشل حفظ عرض السعر')
     } finally {
+      submitting.current=false
       setLoading(false)
     }
   }
@@ -200,14 +211,14 @@ export default function CreateQuotationClient({ store, customers, products }: Pr
   const fmt = (n: number) => Number(n || 0).toLocaleString('ar-u-nu-latn', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
   return (
-    <div className="space-y-6 max-w-5xl" dir="rtl">
+    <div className={`${styles.page} space-y-6`} dir="rtl">
       {/* ── العودة للمبيعات ── */}
       <div>
         <BackToDashboardButton href="/dashboard/sales" label="العودة إلى لوحة إدارة المبيعات" />
       </div>
 
       {/* ── الترويسة ── */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-black text-white flex items-center gap-2">
             <span>✍️</span> إنشاء عرض سعر جديد
@@ -226,18 +237,22 @@ export default function CreateQuotationClient({ store, customers, products }: Pr
       </div>
 
       {error && (
-        <div className="rounded-xl bg-rose-500/10 border border-rose-500/20 p-4 text-xs font-bold text-rose-300">
+        <div role="alert" className="rounded-xl bg-rose-500/10 border border-rose-500/20 p-4 text-xs font-bold text-rose-300">
           ⚠️ {error}
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6 rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-xl">
+      <nav className={styles.steps} aria-label="أقسام عرض السعر"><a href="#quote-info">١ معلومات العرض</a><a href="#quote-items">٢ الأصناف</a><button type="button" onClick={()=>setShowReview(v=>!v)}>٣ المراجعة</button></nav>
+      <form id="quote-form" onSubmit={handleSubmit} className={styles.formGrid}>
+      <div className={styles.formMain}>
+      <div className="space-y-6 rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-xl">
         
         {/* بيانات العرض الأساسية */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div id="quote-info" className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-300">رقم عرض السعر *</label>
+            <label htmlFor="quote-number" className="mb-1 block text-xs font-semibold text-slate-300">رقم عرض السعر *</label>
             <input
+              id="quote-number"
               type="text"
               required
               value={quoteNumber}
@@ -250,6 +265,7 @@ export default function CreateQuotationClient({ store, customers, products }: Pr
             <label className="mb-1 block text-xs font-semibold text-slate-300">تاريخ الإصدار *</label>
             <input
               type="date"
+              aria-label="تاريخ الإصدار"
               required
               value={issueDate}
               onChange={e => setIssueDate(e.target.value)}
@@ -261,6 +277,8 @@ export default function CreateQuotationClient({ store, customers, products }: Pr
             <label className="mb-1 block text-xs font-semibold text-slate-300">ساري حتى تاريخ *</label>
             <input
               type="date"
+              aria-label="ساري حتى تاريخ"
+              min={issueDate}
               required
               value={validUntil}
               onChange={e => setValidUntil(e.target.value)}
@@ -271,7 +289,7 @@ export default function CreateQuotationClient({ store, customers, products }: Pr
 
         {/* اختيار العميل بالبحث الذكي (Autocomplete) */}
         <div className="relative">
-          <label className="mb-1 block text-xs font-semibold text-slate-300">العميل المستهدف *</label>
+          <label className="mb-1 block text-xs font-semibold text-slate-300">العميل المستهدف (اختياري)</label>
           {customerId && selectedCustomer ? (
             <div className="flex items-center justify-between rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-xs text-white">
               <div className="flex items-center gap-3">
@@ -344,8 +362,8 @@ export default function CreateQuotationClient({ store, customers, products }: Pr
         </div>
 
         {/* ── جدول الأصناف والبنود (تشمل البنود الحرة والخدمات) ── */}
-        <div className="space-y-3 border-t border-white/10 pt-4">
-          <div className="flex items-center justify-between">
+        <div id="quote-items" className="space-y-3 border-t border-white/10 pt-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <label className="text-xs font-bold text-white block">الأصناف والخدمات في عرض السعر</label>
               <span className="text-[11px] text-slate-400">يمكنك اختيار منتجات من الدليل أو إدخال خدمات وبنود حرة</span>
@@ -405,7 +423,9 @@ export default function CreateQuotationClient({ store, customers, products }: Pr
                   <div className="w-24">
                     <input
                       type="number"
-                      min="1"
+                      min="0.001"
+                      step="any"
+                      aria-label={`كمية البند ${idx+1}`}
                       placeholder="الكمية"
                       value={item.quantity}
                       onChange={e => updateItemRow(idx, 'quantity', Number(e.target.value))}
@@ -419,6 +439,7 @@ export default function CreateQuotationClient({ store, customers, products }: Pr
                       type="number"
                       step="any"
                       min="0"
+                      aria-label={`سعر البند ${idx+1}`}
                       placeholder="السعر"
                       value={item.unit_price}
                       onChange={e => updateItemRow(idx, 'unit_price', Number(e.target.value))}
@@ -495,16 +516,15 @@ export default function CreateQuotationClient({ store, customers, products }: Pr
           </div>
         </div>
 
-        {/* زر الحفظ */}
-        <div className="flex justify-end pt-2">
-          <button
-            type="submit"
-            disabled={loading}
-            className="rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 px-6 py-3 text-xs font-black text-slate-950 hover:from-sky-400 hover:to-blue-500 transition shadow-lg shadow-sky-500/10 cursor-pointer disabled:opacity-40"
-          >
-            {loading ? 'جاري حفظ عرض السعر...' : '💾 حفظ وإصدار عرض السعر'}
-          </button>
-        </div>
+      </div>
+      {showReview&&<section className={styles.review}><h2>مراجعة العرض</h2><p>{selectedCustomer?.name||'عميل عام'} · {quoteNumber} · {issueDate} — {validUntil}</p><ul>{items.map((item,i)=><li key={i}>{item.product_name||'بند غير محدد'} — {item.quantity} × {fmt(item.unit_price)} = {fmt(item.quantity*item.unit_price)} {store.currency_code}</li>)}</ul></section>}
+      </div>
+      <aside className={styles.summary}><h2>ملخص عرض السعر</h2><p>الإجمالي الكلي</p><strong dir="ltr">{store.currency_code} {fmt(totalAmount)}</strong><p>عدد البنود: {items.length}<br/>العميل: {selectedCustomer?.name||'عميل عام'}<br/>ساري حتى: {validUntil}</p><p>الإجمالي هو مجموع البنود. لا تُضاف ضريبة أو خصم تلقائي. حدّد شروط الأسعار بوضوح.</p>
+      <button type="submit" disabled={loading||!!savedId} onClick={()=>{submitMode.current='sent'}}>{loading?'جارٍ الحفظ…':'✓ حفظ وإصدار عرض السعر'}</button>
+      <button type="submit" disabled={loading||!!savedId} onClick={()=>{submitMode.current='draft'}}>حفظ كمسودة</button>
+      <button type="button" onClick={()=>setShowReview(v=>!v)}>{showReview?'إخفاء المعاينة':'معاينة العرض'}</button>
+      {savedId&&<p role="status">تم إنشاء سجل العرض. إذا تعذر إكمال البنود، راجع المسودة في القائمة قبل إصدار عرض آخر. <Link href="/dashboard/quotations">العودة للقائمة</Link></p>}
+      </aside>
       </form>
     </div>
   )

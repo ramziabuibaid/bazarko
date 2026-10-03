@@ -1,16 +1,21 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import Link from 'next/link'
+import styles from './pos.module.css'
+import {allowedQuantity,cashChange,matchesProduct} from '@/lib/pos/cart'
+import {allRows} from '@/lib/dashboard/load-simple-dashboard'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import PosReceiptModal, { ReceiptData } from './PosReceiptModal'
 
-interface Product {
+export interface Product {
   id: string
   name: string
   price: number
   cost_price?: number | null
   compare_price?: number | null
+  barcode?: string | null
   sku: string | null
   stock_available: number | null
   track_stock: boolean
@@ -18,7 +23,7 @@ interface Product {
   category_id?: string | null
 }
 
-interface Category {
+export interface Category {
   id: string
   name: string
 }
@@ -53,6 +58,8 @@ const PAYMENT_METHODS = [
 interface Props {
   storeId: string
   currencyCode: string
+  posPresentation?: boolean
+  previewCatalog?: {products:Product[];categories:Category[]}
   storeInfo?: {
     name?: string
     phone?: string | null
@@ -71,10 +78,12 @@ function useDebounce<T>(value: T, delay: number): T {
   return debounced
 }
 
-export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props) {
+export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPresentation=false, previewCatalog }: Props) {
   const router = useRouter()
   const supabase = createClient()
 
+  const lock=useRef(false),searchField=useRef<HTMLInputElement>(null)
+  const [tender,setTender]=useState(''),[held,setHeld]=useState<string|null>(null),[holdNotice,setHoldNotice]=useState(''),[catalogError,setCatalogError]=useState('')
   const [mode, setMode] = useState<OrderMode>('pos')
   const [items, setItems] = useState<LineItem[]>([])
   const [submitting, setSubmitting] = useState(false)
@@ -121,6 +130,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
   const totalCost = items.reduce((s, i) => s + (i.costPrice || 0) * i.quantity, 0)
   const totalAmount = subtotal
   const effectiveAmountPaid = mode === 'pos' ? totalAmount : (parseFloat(amountPaid) || 0)
+  const cash=cashChange(totalAmount,tender)
   const amountRemaining = Math.max(0, totalAmount - effectiveAmountPaid)
 
   // تحميل كافة الأصناف والتصنيفات فور فتح الشاشة
@@ -128,27 +138,17 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
     let isMounted = true
     async function fetchCatalog() {
       setLoadingCatalog(true)
-      const [prodRes, catRes] = await Promise.all([
-        supabase
-          .from('products')
-          .select('id, name, price, cost_price, compare_price, sku, stock_available, track_stock, thumbnail_url, category_id')
-          .eq('store_id', storeId)
-          .eq('is_active', true)
-          .order('name', { ascending: true }),
-        supabase
-          .from('categories')
-          .select('id, name, sort_order')
-          .eq('store_id', storeId)
-          .eq('is_active', true)
-          .order('sort_order', { ascending: true })
-      ])
-
-      if (isMounted) {
-        setAllProducts((prodRes.data as Product[]) ?? [])
-        setCategories((catRes.data as Category[]) ?? [])
-        setLoadingCatalog(false)
-      }
+      if(previewCatalog){setAllProducts(previewCatalog.products);setCategories(previewCatalog.categories);setLoadingCatalog(false);return}
+      try {
+        const [products,cats]=await Promise.all([
+          allRows<Product>((from,to)=>supabase.from('products').select('id, name, price, cost_price, compare_price, sku, barcode, stock_available, track_stock, thumbnail_url, category_id').eq('store_id',storeId).eq('is_active',true).order('name').order('id').range(from,to)),
+          allRows<Category>((from,to)=>supabase.from('categories').select('id, name, sort_order').eq('store_id',storeId).eq('is_active',true).order('sort_order').order('id').range(from,to)),
+        ])
+        if(isMounted){setAllProducts(products);setCategories(cats);setCatalogError('')}
+      } catch {if(isMounted)setCatalogError('تعذر تحميل دليل المنتجات. أعد تحميل الصفحة.')}
+      finally {if(isMounted)setLoadingCatalog(false)}
     }
+
     fetchCatalog()
     return () => { isMounted = false }
   }, [storeId])
@@ -160,15 +160,25 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
     }
     if (!productQuery.trim()) return true
 
-    const queryTokens = productQuery.toLowerCase().trim().split(/\s+/).filter(Boolean)
-    const targetName = (p.name || '').toLowerCase()
-    const targetSku = (p.sku || '').toLowerCase()
-
-    return queryTokens.every(token => targetName.includes(token) || targetSku.includes(token))
+    return matchesProduct(p,productQuery)
   })
+
+  useEffect(()=>{function key(e:KeyboardEvent){if(e.key==='F2'){e.preventDefault();searchField.current?.focus()}}window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key)},[])
+  useEffect(()=>{try{setHeld(sessionStorage.getItem(`bazarko.pos.held.${storeId}`))}catch{}},[storeId])
+  function holdSale(){
+    if(!items.length)return
+    if(held){setHoldNotice('استعد السلة المعلقة قبل تعليق سلة أخرى.');return}
+    try{const snapshot=JSON.stringify({items,mode,selectedCustomer,posName,posPhone,amountPaid,notes});sessionStorage.setItem(`bazarko.pos.held.${storeId}`,snapshot);setHeld(snapshot);setItems([]);setTender('');setHoldNotice('عُلقت السلة في هذا المتصفح؛ لم تسجل عملية بيع.')}catch{setHoldNotice('تعذر حفظ السلة المعلقة.')}
+  }
+  function resumeSale(){
+    if(items.length){setHoldNotice('أفرغ السلة الحالية قبل استعادة المعلقة.');return}
+    try{const value=JSON.parse(held||'{}');if(!Array.isArray(value.items))throw Error();const restored:LineItem[]=value.items.map((item:LineItem)=>{const product=allProducts.find(p=>p.id===item.productId);if(!product)throw Error();const max=product.track_stock?product.stock_available:null;if(!allowedQuantity(item.quantity,max))throw Error();return {...item,max}});setItems(restored);setMode(value.mode==='account'?'account':'pos');setSelectedCustomer(value.selectedCustomer||null);setPosName(value.posName||'عميل نقدي');setPosPhone(value.posPhone||'');setAmountPaid(value.amountPaid||'');setNotes(value.notes||'');sessionStorage.removeItem(`bazarko.pos.held.${storeId}`);setHeld(null);setHoldNotice('استُعيدت السلة. راجع الأسعار والمخزون قبل الإتمام.')}catch{setHoldNotice('تعذر الاستعادة؛ تحقق من المنتجات والكميات الحالية.')} 
+  }
+  function scanProduct(){const code=productQuery.trim();const matches=allProducts.filter(p=>p.sku===code||p.barcode===code);if(matches.length===1){addProduct(matches[0]);setProductQuery('')}else setError(matches.length?'الرمز يطابق أكثر من صنف؛ اختر الصنف يدوياً.':'لم يُعثر على باركود مطابق.')}
 
   // Search customers (loads recent customers on open, filters on typing)
   useEffect(() => {
+    if(previewCatalog){setCustomerResults([{id:'demo-customer',name:'عميل توضيحي',phone:null,email:null,balance:0}]);return}
     if (mode !== 'account') {
       setCustomerResults([])
       return
@@ -181,7 +191,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
       .eq('is_active', true)
 
     if (debouncedCustomer.trim()) {
-      query = query.or(`name.ilike.%${debouncedCustomer}%,phone.ilike.%${debouncedCustomer}%`)
+      query = query.or(`name.ilike.%${debouncedCustomer.replace(/[,()%]/g,'')}%,phone.ilike.%${debouncedCustomer.replace(/[,()%]/g,'')}%`)
     }
 
     query
@@ -191,6 +201,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
   }, [debouncedCustomer, mode, storeId])
 
   function addProduct(product: Product) {
+    if(product.track_stock&&(product.stock_available??0)<=0){setError('هذا المنتج غير متوفر حالياً');return}
     setItems(prev => {
       const existing = prev.find(i => i.productId === product.id)
       if (existing) {
@@ -211,6 +222,8 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
   }
 
   function updateQty(productId: string, qty: number) {
+    const item=items.find(i=>i.productId===productId)
+    if(!item||!allowedQuantity(qty,item.max)){setError('الكمية تتجاوز المخزون المتاح');return}
     if (qty <= 0) {
       setItems(prev => prev.filter(i => i.productId !== productId))
     } else {
@@ -234,7 +247,8 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
 
   async function handleQuickAddCustomer(e: React.FormEvent) {
     e.preventDefault()
-    if (!newCustName.trim()) return
+    if (!newCustName.trim()||addingCustomer) return
+    if(previewCatalog){setError('معاينة فقط؛ لا تُضاف بيانات عملاء.');return}
     setAddingCustomer(true)
     setError('')
     try {
@@ -303,11 +317,18 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if(lock.current||receiptData)return
     setError('')
+    if(items.some(i=>!allowedQuantity(i.quantity,i.max)||!Number.isFinite(i.unitPrice)||i.unitPrice<0)||totalAmount<=0){setError('تحقق من الكميات والأسعار');return}
+    if(mode==='pos'&&!cash.valid){setError('المبلغ المستلم أقل من إجمالي البيع');return}
+    if(mode==='account'&&(!Number.isFinite(Number(amountPaid||0))||Number(amountPaid)<0||Number(amountPaid)>totalAmount)){setError('الدفعة يجب أن تكون بين صفر والإجمالي');return}
 
     if (!items.length) { setError('أضف منتجاً واحداً على الأقل للسلة'); return }
     if (mode === 'account' && !selectedCustomer) { setError('يرجى اختيار اسم العميل من دليل الحسابات في حالة البيع الآجل'); return }
 
+    if(previewCatalog){setError('معاينة فقط؛ لم تسجل فاتورة أو دفعة.');return}
+
+    lock.current=true
     setSubmitting(true)
     try {
       const activePayMethod = mode === 'pos' ? 'cash' : (paymentMethod || 'credit')
@@ -369,12 +390,14 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
     } catch {
       setError('حدث خطأ في الاتصال بالخادم')
     } finally {
+      lock.current=false
       setSubmitting(false)
     }
   }
 
   function handleNewSale() {
     setItems([])
+    setTender('')
     setPosName('عميل نقدي')
     setPosPhone('')
     setPosEmail('')
@@ -390,7 +413,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
   const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })
 
   return (
-    <div className="space-y-4" dir="rtl">
+    <div className={`${posPresentation?styles.page:''} space-y-4`} dir="rtl">
       {/* ── Mode Selection Header ── */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900 border border-white/10 p-2.5 rounded-2xl shadow-sm">
         <div className="flex rounded-xl bg-slate-950 p-1 border border-white/5">
@@ -438,27 +461,30 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
       </div>
 
       {error && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3.5 text-xs font-bold text-red-300 flex items-center justify-between">
+        <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-3.5 text-xs font-bold text-red-300 flex items-center justify-between">
           <span>⚠️ {error}</span>
           <button type="button" onClick={() => setError('')} className="text-red-400 hover:text-white text-xs mr-2">✕</button>
         </div>
       )}
 
       {/* ── التقسيم الرئيسي (كتالوج الأصناف يميناً / السلة يساراً) ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      <div className={posPresentation?styles.workspace:"grid grid-cols-1 lg:grid-cols-12 gap-5"}>
 
         {/* ── كتالوج الأصناف المباشر (7 أعمدة على الشاشات الكبيرة) ── */}
-        <div className="lg:col-span-7 xl:col-span-8 space-y-4">
+        <div className={posPresentation?styles.catalog:"lg:col-span-7 xl:col-span-8 space-y-4"}>
 
           {/* شريط البحث اللحظي التراكمي وتصنيفات المنتجات */}
           <div className="rounded-2xl border border-white/10 bg-slate-900/90 p-4 space-y-3">
             {/* حقل البحث اللحظي */}
             <div className="relative">
               <input
+                ref={searchField}
+                aria-label="البحث أو مسح الباركود"
+                onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();scanProduct()}}}
                 type="text"
                 value={productQuery}
                 onChange={e => setProductQuery(e.target.value)}
-                placeholder="🔍 ابحث لحظياً باسم الصنف، الباركود، أو SKU..."
+                placeholder="امسح الباركود أو ابحث عن منتج… F2"
                 className="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:border-sky-500 transition shadow-inner"
               />
               {productQuery && (
@@ -512,7 +538,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
           </div>
 
           {/* شبكة بطاقات الأصناف (Card Grid) */}
-          {loadingCatalog ? (
+          {catalogError?<p role="alert" className="p-5 text-rose-300">{catalogError}</p>:loadingCatalog ? (
             <div className="rounded-2xl border border-white/5 bg-slate-900/50 p-12 text-center">
               <span className="text-3xl animate-spin inline-block">⏳</span>
               <p className="mt-3 text-sm text-slate-400 font-bold">جاري تحميل دليل الأصناف والمخزون...</p>
@@ -533,7 +559,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
+            <div className={posPresentation?styles.products:"grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 max-h-[calc(100vh-280px)] overflow-y-auto pr-1"}>
               {filteredProducts.map(product => {
                 const inCartItem = items.find(i => i.productId === product.id)
                 const inCartQty = inCartItem?.quantity ?? 0
@@ -544,10 +570,13 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
                   : 0
 
                 return (
-                  <div
+                  <button
+                    type="button"
+                    disabled={isOutOfStock||submitting||!!receiptData}
+                    aria-label={`إضافة ${product.name}`}
                     key={product.id}
                     onClick={() => !isOutOfStock && addProduct(product)}
-                    className={`group relative flex flex-col justify-between p-3 rounded-2xl border text-right transition duration-150 select-none cursor-pointer ${
+                    className={`${posPresentation?styles.product:''} group relative flex flex-col justify-between p-3 rounded-2xl border text-right transition duration-150 select-none cursor-pointer ${
                       isOutOfStock
                         ? 'border-white/5 bg-slate-900/40 opacity-50 cursor-not-allowed'
                         : inCartQty > 0
@@ -623,15 +652,17 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
                         )}
                       </div>
                     </div>
-                  </div>
+                    {posPresentation&&<span className={styles.plus} aria-hidden="true">＋</span>}
+                  </button>
                 )
               })}
             </div>
           )}
+          {posPresentation&&<div className={styles.footer}><span>لم تجد المنتج؟</span><Link href="/dashboard/products/new">＋ إضافة منتج</Link><button onClick={()=>{setProductQuery('');setSelectedCategory('all')}}>مسح الفلاتر</button></div>}
         </div>
 
         {/* ── العمود الجانبي (سلة الطلب والدفع الفوري) - 5 أعمدة ── */}
-        <div className="lg:col-span-5 xl:col-span-4 space-y-4">
+        <div className={posPresentation?styles.cart:"lg:col-span-5 xl:col-span-4 space-y-4"}>
 
           {/* كرت السلة وبنود الفاتورة */}
           <div className="rounded-2xl border border-white/10 bg-slate-900/95 p-4 shadow-xl space-y-4">
@@ -668,6 +699,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
                           <span className="text-[10px] text-slate-400">البيع:</span>
                           <input
                             type="number"
+                            aria-label={`سعر ${item.name}`}
                             value={item.unitPrice}
                             onChange={e => updatePrice(item.productId, e.target.value)}
                             min="0"
@@ -688,6 +720,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
+                        aria-label={`تقليل كمية ${item.name}`}
                         onClick={() => updateQty(item.productId, item.quantity - 1)}
                         className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white font-bold transition"
                       >
@@ -698,8 +731,9 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
                       </span>
                       <button
                         type="button"
+                        aria-label={`زيادة كمية ${item.name}`}
                         onClick={() => updateQty(item.productId, item.quantity + 1)}
-                        disabled={!!item.max && item.quantity >= item.max}
+                        disabled={item.max!==null && item.quantity >= item.max}
                         className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white font-bold transition disabled:opacity-30"
                       >
                         +
@@ -738,13 +772,8 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
                       <span>💵</span>
                       <span>بيع نقدي مباشر (الصندوق)</span>
                     </span>
-                    <span className="text-[10px] bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                      حساب 1001
-                    </span>
+
                   </div>
-                  <p className="text-[11px] text-slate-300 leading-relaxed">
-                    يتم تسجيل العملية مباشرةً على حساب <strong className="text-emerald-300">الصندوق (1001)</strong> وحساب <strong className="text-emerald-300">المبيعات النقدية (4001)</strong> دون الحاجة لاختيار عميل.
-                  </p>
                   <div className="pt-2 border-t border-emerald-500/10 grid grid-cols-2 gap-2">
                     <div>
                       <label className="text-[10px] text-slate-400 mb-1 block">اسم العميل (اختياري)</label>
@@ -866,8 +895,9 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
               )}
             </div>
 
+            {posPresentation&&<><div className={styles.methods}><button type="button" aria-pressed={mode==='pos'} onClick={()=>{setMode('pos');setPaymentMethod('cash')}}>نقد</button><button type="button" aria-pressed={mode==='account'} onClick={()=>{setMode('account');setPaymentMethod('credit')}}>على الحساب</button><button disabled title="تسجل عبر مسار سندات القبض">شيك</button><button disabled title="تسجل عبر مسار سندات القبض">مختلط</button><button disabled title="تسجل عبر مسار سندات القبض">تحويل بنكي</button></div>{mode==='pos'&&<div className={styles.tender}><label>المبلغ المستلم<input aria-label="المبلغ المستلم نقداً" type="number" min="0" step="0.01" value={tender} placeholder={String(totalAmount)} onChange={e=>setTender(e.target.value)}/></label><label>الباقي للزبون<strong>{fmt(cash.change)} {currencyCode}</strong></label></div>}<div className={styles.hold}><button type="button" disabled={submitting||!!receiptData||!items.length} onClick={holdSale}>تعليق البيع</button>{held&&<button type="button" disabled={loadingCatalog} onClick={resumeSale}>استعادة السلة المعلقة</button>}{held&&<button type="button" onClick={()=>{try{sessionStorage.removeItem(`bazarko.pos.held.${storeId}`);setHeld(null);setHoldNotice('حُذفت السلة المعلقة.')}catch{setHoldNotice('تعذر حذف السلة المعلقة.')}}}>حذف المعلقة</button>}</div><p role="status" className={styles.notice}>{holdNotice}</p></>}
             {/* ── الأثر المحاسبي والقيود الآلية ── */}
-            <div className="rounded-xl border border-sky-500/20 bg-sky-950/20 p-3 text-[11px] space-y-2">
+            <details className="rounded-xl border border-sky-500/20 bg-sky-950/20 p-3 text-[11px] space-y-2"><summary>عرض الأثر المحاسبي التقديري</summary>
               <div className="flex items-center justify-between text-sky-300 font-bold border-b border-sky-500/20 pb-1">
                 <span className="flex items-center gap-1.5">
                   <span>⚖️</span> الأثر المحاسبي التلقائي:
@@ -909,8 +939,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
                   )}
                 </div>
               </div>
-            </div>
-
+            </details>
             {/* ملخص الإجمالي وزر الحفظ */}
             <div className="pt-3 border-t border-white/10 space-y-3">
               <div className="flex items-center justify-between text-slate-400 text-xs">
@@ -944,7 +973,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting || items.length === 0}
+                disabled={submitting || items.length === 0 || !!receiptData}
                 className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-sm shadow-lg shadow-emerald-500/10 transition duration-150 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
                 {submitting ? (
@@ -967,6 +996,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo }: Props
 
       </div>
 
+      {receiptData&&!showReceipt&&<div className={styles.hold}><button onClick={()=>setShowReceipt(true)}>عرض الإيصال المحفوظ</button><button onClick={handleNewSale}>بدء بيع جديد</button></div>}
       {/* مودال الإيصال الفوري والطباعة الحرارية */}
       {showReceipt && receiptData && (
         <PosReceiptModal

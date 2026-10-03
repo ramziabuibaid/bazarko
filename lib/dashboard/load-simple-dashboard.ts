@@ -8,7 +8,7 @@ export interface SimpleDashboardData {
   orders:TodayOrder[]; orderError:boolean; productsCount:number|null; errors:boolean;
 }
 
-async function allRows<T>(query:(from:number,to:number)=>PromiseLike<{data:unknown[]|null;error:unknown}>) {
+export async function allRows<T>(query:(from:number,to:number)=>PromiseLike<{data:unknown[]|null;error:unknown}>) {
   const rows:T[]=[]
   for (let from=0;;from+=1000) {
     const result=await query(from,from+999)

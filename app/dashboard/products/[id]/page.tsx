@@ -19,27 +19,32 @@ export default async function EditProductPage({ params }: { params: { id: string
 
   if (!store) redirect('/onboarding')
 
-  const { data: product } = await supabase
+  const { data: product,error:productError } = await supabase
     .from('products')
     .select('*')
     .eq('id', params.id)
     .eq('store_id', store.id)
-    .single()
+    .maybeSingle()
 
+  if(productError)throw new Error('تعذر تحميل المنتج')
   if (!product) notFound()
 
-  const { data: categories } = await supabase
+  const {data:brands,error:brandError}=await supabase.from('brands').select('id,name,is_active').eq('store_id',store.id).order('name')
+  if(brandError)throw new Error('تعذر تحميل الماركات')
+
+  const { data: categories,error:categoryError } = await supabase
     .from('categories')
     .select('id, name')
     .eq('store_id', store.id)
     .eq('is_active', true)
     .order('name')
 
-  const [{ data: attrDefs }, { data: attrValues }, { data: links }] = await Promise.all([
+  const [{ data: attrDefs,error:defsError }, { data: attrValues,error:valuesError }, { data: links,error:linksError }] = await Promise.all([
     supabase.from('product_attributes').select('id, name, sort_order').eq('store_id', store.id).order('sort_order'),
     supabase.from('product_attribute_values').select('id, attribute_id, value, sort_order').eq('store_id', store.id).order('sort_order'),
-    supabase.from('product_attribute_links').select('value_id').eq('product_id', product.id),
+    supabase.from('product_attribute_links').select('value_id').eq('product_id', product.id).eq('store_id',store.id),
   ])
+  if(categoryError||defsError||valuesError||linksError) throw new Error('تعذر تحميل فئات أو خصائص المنتج')
   const attributes = (attrDefs ?? []).map(a => ({
     id: a.id, name: a.name,
     values: (attrValues ?? []).filter(v => v.attribute_id === a.id).map(v => ({ id: v.id, value: v.value })),
@@ -53,6 +58,7 @@ export default async function EditProductPage({ params }: { params: { id: string
     description: product.description ?? '',
     sku: product.sku ?? '',
     barcode: product.barcode ?? '',
+    brand_id: product.brand_id ?? '',
     category_id: product.category_id ?? '',
     price: product.price?.toString() ?? '',
     compare_price: product.compare_price?.toString() ?? '',
@@ -64,7 +70,7 @@ export default async function EditProductPage({ params }: { params: { id: string
     allow_backorder: product.allow_backorder ?? false,
     status: product.status ?? 'active',
     is_featured: product.is_featured ?? false,
-    images: product.images ?? [],
+    images: product.images?.length ? product.images : product.thumbnail_url ? [product.thumbnail_url] : [],
     tags: (product.tags ?? []).join(', '),
     video_url: product.video_url ?? '',
     specifications: (product.specifications as Array<{ name: string; value: string }> | null) ?? [],
@@ -82,6 +88,7 @@ export default async function EditProductPage({ params }: { params: { id: string
         currencyCode={store.currency_code}
         secondaryCurrencyCode={store.secondary_currency_code}
         exchangeRate={store.exchange_rate}
+        brands={brands ?? []}
         categories={categories ?? []}
         attributes={attributes}
         initialData={initialData}

@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
+import {allRows} from '@/lib/dashboard/load-simple-dashboard'
 import CreatePurchaseClient from './CreatePurchaseClient'
 
 export const metadata = {
@@ -17,16 +18,21 @@ export default async function NewPurchasePage() {
 
   const [
     { data: store },
-    { data: suppliers },
-    { data: products }
+    suppliers,
+    products
   ] = await Promise.all([
     supabase.from('stores').select('id, name, currency_code').eq('id', storeId).single(),
-    supabase.from('suppliers').select('id, name, phone, balance').eq('store_id', storeId).order('name'),
-    supabase.from('products').select('id, name, sku, barcode, price, cost_price, stock_quantity').eq('store_id', storeId).order('name')
+    allRows<any>((a,b)=>supabase.from('suppliers').select('id,name,phone,balance').eq('store_id',storeId).order('id').range(a,b)),
+    allRows<any>((a,b)=>supabase.from('products').select('id,name,sku,barcode,price,cost_price,stock_quantity').eq('store_id',storeId).order('id').range(a,b))
   ])
 
+  if(!store)throw new Error('تعذر تحميل المتجر')
+  suppliers.sort((a,b)=>a.name.localeCompare(b.name,'ar'));products.sort((a,b)=>a.name.localeCompare(b.name,'ar'))
+  const {data:boxes,error:boxesError}=await supabase.from('cash_boxes').select('id,name').eq('store_id',storeId).eq('type','cash').eq('is_active',true).order('name')
+  if(boxesError)throw new Error('تعذر تحميل الصناديق')
   return (
     <CreatePurchaseClient
+      cashBoxes={boxes||[]}
       store={store!}
       suppliers={suppliers || []}
       products={products || []}

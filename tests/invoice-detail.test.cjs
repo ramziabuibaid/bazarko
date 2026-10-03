@@ -1,0 +1,6 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),ts=require('typescript')
+const m={exports:{}};new Function('module','exports',ts.transpileModule(fs.readFileSync('lib/invoices/detail-presentation.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(m,m.exports)
+const {detailPayment,customerInvoiceItem}=m.exports
+ test('draft and cancelled cannot become paid from amounts',()=>{assert.equal(detailPayment({status:'draft',total:100,amount_paid:100}).status,'مسودة');assert.equal(detailPayment({status:'cancelled',total:100,amount_paid:100}).status,'ملغاة')})
+ test('payment status uses amounts and bounds progress',()=>{assert.equal(detailPayment({status:'paid',total:100,amount_paid:20}).status,'مدفوعة جزئياً');assert.equal(detailPayment({status:'sent',total:100,amount_paid:120}).percent,100);assert.equal(detailPayment({status:'sent',total:100,amount_paid:0}).remaining,100)})
+ test('customer item projection strips private fields',()=>{const i=customerInvoiceItem({id:'1',name:'a',sku:null,quantity:1,unit_price:20,total:20,cost_price:10,internal_notes:'secret'});assert.equal('cost_price' in i,false);assert.equal('internal_notes' in i,false)})

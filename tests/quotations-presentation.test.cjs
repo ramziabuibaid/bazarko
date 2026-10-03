@@ -1,0 +1,6 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),ts=require('typescript')
+const source=ts.transpileModule(fs.readFileSync('lib/quotations/presentation.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,m={exports:{}};new Function('exports','module',source)(m.exports,m)
+const {quoteExpired,validQuote}=m.exports
+const row={product_name:'خدمة',quantity:1,unit_price:35}
+test('expiry respects end date and terminal states',()=>{assert.equal(quoteExpired({status:'sent',valid_until:'2026-10-01'},'2026-10-01'),false);assert.equal(quoteExpired({status:'sent',valid_until:'2026-09-30'},'2026-10-01'),true);for(const status of ['draft','converted','rejected'])assert.equal(quoteExpired({status,valid_until:'2026-09-30'},'2026-10-01'),false)})
+test('rejects invalid quantities, prices, dates and totals',()=>{assert.equal(validQuote([row],'2026-10-01','2026-10-15'),'');for(const item of [{...row,quantity:-1},{...row,quantity:Infinity},{...row,unit_price:NaN},{...row,unit_price:-2},{...row,product_name:''}])assert.ok(validQuote([item],'2026-10-01','2026-10-15'));assert.ok(validQuote([row],'2026-10-15','2026-10-01'));assert.ok(validQuote([{...row,unit_price:0}],'2026-10-01','2026-10-15'))})

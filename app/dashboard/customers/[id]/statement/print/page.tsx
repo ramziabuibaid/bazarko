@@ -1,3 +1,4 @@
+import {getCustomerStatement} from '@/app/dashboard/customers/ledger/customer-statement-actions'
 import PrintButton from "@/components/dashboard/PrintButton"
 import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
@@ -24,109 +25,21 @@ export default async function PrintCustomerStatementPage({ params, searchParams 
   const fromDate = searchParams?.from || ''
   const toDate = searchParams?.to || ''
 
-  const [
-    { data: store },
-    { data: customer },
-    { data: invoices },
-    { data: returns },
-    { data: receipts },
-    { data: ledger }
-  ] = await Promise.all([
-    supabase.from('stores').select('*').eq('id', storeId).single(),
-    supabase.from('customers').select('*').eq('id', params.id).eq('store_id', storeId).single(),
-    supabase.from('invoices').select('id, invoice_number, issue_date, total, status, notes').eq('customer_id', params.id).eq('store_id', storeId).neq('status', 'cancelled'),
-    supabase.from('sales_returns').select('id, return_number, return_date, total_amount, reason').eq('customer_id', params.id).eq('store_id', storeId),
-    supabase.from('vouchers').select('id, voucher_number, date, amount, payment_method, type, description').eq('customer_id', params.id).eq('store_id', storeId).eq('type', 'receipt'),
-    supabase.from('customer_ledger').select('*').eq('customer_id', params.id).eq('store_id', storeId).order('date', { ascending: true })
-  ])
-
-  if (!store || !customer) notFound()
-
-  const currency = store.currency_code || 'ILS'
-  const fmt = (n: number) => Number(n || 0).toLocaleString('ar-u-nu-latn', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-
-  // تجميع كافة الحركات وتوحيدها
-  const allTxs: {
-    date: string
-    type: string
-    doc_no: string
-    debit: number
-    credit: number
-    notes: string
-  }[] = []
-
-  // الفواتير (مدين -> ذمة على العميل)
-  for (const inv of invoices || []) {
-    allTxs.push({
-      date: inv.issue_date,
-      type: 'فاتورة مبيعات',
-      doc_no: inv.invoice_number,
-      debit: Number(inv.total || 0),
-      credit: 0,
-      notes: inv.notes || `فاتورة مبيعات (${inv.status === 'paid' ? 'مسددة' : 'آجلة'})`,
-    })
-  }
-
-  // المردودات (دائن -> تخفيض ذمة العميل)
-  for (const ret of returns || []) {
-    allTxs.push({
-      date: ret.return_date,
-      type: 'مردود مبيعات',
-      doc_no: ret.return_number,
-      debit: 0,
-      credit: Number(ret.total_amount || 0),
-      notes: ret.reason || 'إرجاع بضاعة ومردود',
-    })
-  }
-
-  // سندات القبض (دائن -> تخفيض ذمة العميل)
-  for (const rcp of receipts || []) {
-    allTxs.push({
-      date: rcp.date,
-      type: 'سند قبض',
-      doc_no: rcp.voucher_number,
-      debit: 0,
-      credit: Number(rcp.amount || 0),
-      notes: rcp.description || `سند قبض (${rcp.payment_method || 'نقدي'})`,
-    })
-  }
-
-  // الترتيب الزمني التصاعدي
-  allTxs.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-
-  // حساب الرصيد الافتتاحي والحركات ضمن الفترة المحددة
-  let openingBalance = 0
-  const periodTxs: typeof allTxs = []
-
-  for (const tx of allTxs) {
-    if (fromDate && tx.date < fromDate) {
-      openingBalance += (tx.debit - tx.credit)
-    } else if (toDate && tx.date > toDate) {
-      // بعد الفترة المحددة
-      continue
-    } else {
-      periodTxs.push(tx)
-    }
-  }
-
-  let runningBalance = openingBalance
-  const rows = periodTxs.map(t => {
-    runningBalance = runningBalance + t.debit - t.credit
-    return { ...t, balance: runningBalance }
-  })
-
-  const totalPeriodDebit = periodTxs.reduce((s, t) => s + t.debit, 0)
-  const totalPeriodCredit = periodTxs.reduce((s, t) => s + t.credit, 0)
-  const finalBalance = runningBalance
-
+  const result=await getCustomerStatement(params.id,fromDate||undefined,toDate||undefined)
+  if(!result.success||!result.store||!result.customer)return <div role="alert" className="rounded-xl border border-rose-500/30 p-6 text-rose-300">{result.error||'تعذر تحميل كشف الحساب'} <Link href="/dashboard/customers/ledger">العودة لحسابات العملاء</Link></div>
+  const store=result.store,customer=result.customer
+  const currency=store.currency_code||'ILS'
+  const fmt=(n:number)=>Number(n||0).toLocaleString('ar-u-nu-latn',{minimumFractionDigits:2,maximumFractionDigits:2})
+  const {openingBalance,totalDebit:totalPeriodDebit,totalCredit:totalPeriodCredit,closingBalance:finalBalance}=result
+  const rows=result.rows.map(row=>({...row,notes:row.description}))
   const cleanPhone = customer.phone ? customer.phone.replace(/\D/g, '') : ''
   const waText = encodeURIComponent(
     `مرحباً ${customer.name} المحترم،\n` +
     `مرفق ملخص كشف الحساب المالي لدى ${store.name}:\n` +
     (fromDate || toDate ? `📅 الفترة: من ${fromDate || 'البداية'} إلى ${toDate || 'تاريخه'}\n` : '') +
     `📌 الرصيد الافتتاحي: ${fmt(openingBalance)} ${currency}\n` +
-    `➕ إجمالي المبيعات (مدين): ${fmt(totalPeriodDebit)} ${currency}\n` +
-    `➖ إجمالي المسدد (دائن): ${fmt(totalPeriodCredit)} ${currency}\n` +
+    `➕ إجمالي الحركات المدينة: ${fmt(totalPeriodDebit)} ${currency}\n` +
+    `➖ إجمالي الحركات الدائنة: ${fmt(totalPeriodCredit)} ${currency}\n` +
     `⚖️ صافي الرصيد المستحق: ${fmt(finalBalance)} ${currency}\n\n` +
     `شاكرين حسن تعاونكم معنا 🙏`
   )
@@ -153,6 +66,7 @@ export default async function PrintCustomerStatementPage({ params, searchParams 
         }
       `}} />
 
+      {!fromDate&&!toDate&&Math.abs(finalBalance-customer.balance)>0.01&&<p role="alert" className="mx-auto mb-4 max-w-4xl rounded-xl border border-amber-500 bg-amber-50 p-4 text-amber-950">رصيد الحركات {fmt(finalBalance)} {currency} يختلف عن رصيد العميل المسجل {fmt(customer.balance)} {currency}. راجع الأرصدة والحركات قبل اعتماد هذا الكشف.</p>}
       {/* ── شريط الأدوات العلوي ── */}
       <div className="mx-auto mb-6 flex max-w-4xl flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-900 p-4 text-white shadow-xl print:hidden">
         <div className="flex items-center gap-3">

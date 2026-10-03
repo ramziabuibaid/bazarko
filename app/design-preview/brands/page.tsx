@@ -1,0 +1,3 @@
+import {notFound} from 'next/navigation'
+import BrandsClient from '@/app/dashboard/inventory/brands/BrandsClient'
+export default function Preview({searchParams}:{searchParams:Record<string,string>}){if(process.env.NODE_ENV!=='development')notFound();return <main className="p-4 sm:p-6 bg-slate-950 min-h-screen"><p className="text-xs text-slate-400 mb-5">معاينة · بيانات توضيحية فقط</p><BrandsClient preview store={{id:'demo',name:'متجر توضيحي',currency_code:'ILS'}} loadError={searchParams.state==='error'} initialBrands={searchParams.state==='list'?[{id:'demo-brand',store_id:'demo',name:'ماركة توضيحية',slug:'demo-brand',description:'منتجات مصنفة حسب الماركة',logo_url:null,is_active:true,sort_order:0}]:[]} counts={{'demo-brand':3}}/></main>}

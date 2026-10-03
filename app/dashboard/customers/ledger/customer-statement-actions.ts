@@ -1,5 +1,7 @@
 'use server'
 
+import {allRows} from '@/lib/dashboard/load-simple-dashboard'
+import {calculateStatement,validStatementRange} from '@/lib/customers/accounts'
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
 
@@ -49,6 +51,7 @@ export async function getCustomerStatement(
   toDate?: string
 ): Promise<CustomerStatementResult> {
   try {
+    if(!validStatementRange(fromDate||'',toDate||''))throw new Error('تحقق من الفترة؛ تاريخ البداية يجب ألا يتجاوز النهاية')
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { success: false, error: 'غير مصرح', openingBalance: 0, rows: [], totalDebit: 0, totalCredit: 0, closingBalance: 0 }
@@ -66,12 +69,7 @@ export async function getCustomerStatement(
     }
 
     // تحقق أولاً من جدول customer_ledger
-    const { data: ledgerEntries } = await supabase
-      .from('customer_ledger')
-      .select('*')
-      .eq('customer_id', customerId)
-      .eq('store_id', storeId)
-      .order('date', { ascending: true })
+    const ledgerEntries=await allRows<any>((from,to)=>supabase.from('customer_ledger').select('*').eq('customer_id',customerId).eq('store_id',storeId).order('date').order('id').range(from,to))
 
     interface RawTx {
       id: string
@@ -109,27 +107,29 @@ export async function getCustomerStatement(
     } else {
       // جلب الفواتير والسندات والمردودات مباشرة
       const [
-        { data: invoices },
-        { data: returns },
-        { data: receipts }
+        { data: invoices, error: invoiceError },
+        { data: returns, error: returnError },
+        { data: receipts, error: receiptError }
       ] = await Promise.all([
-        supabase
+        allRows<any>((from,to)=>supabase
           .from('invoices')
           .select('id, invoice_number, issue_date, total, status, notes, created_at')
           .eq('customer_id', customerId)
           .eq('store_id', storeId)
-          .neq('status', 'cancelled'),
-        supabase
+          .not('status','in','(draft,cancelled)').order('id').range(from,to)).then(data=>({data,error:null})).catch(error=>({data:null,error})),
+        allRows<any>((from,to)=>supabase
           .from('sales_returns')
           .select('id, return_number, return_date, total_amount, reason, created_at')
           .eq('customer_id', customerId)
-          .eq('store_id', storeId),
-        supabase
+          .eq('store_id', storeId).order('id').range(from,to)).then(data=>({data,error:null})).catch(error=>({data:null,error})),
+        allRows<any>((from,to)=>supabase
           .from('vouchers')
           .select('id, voucher_number, date, amount, payment_method, type, description, created_at')
           .eq('customer_id', customerId)
-          .eq('store_id', storeId)
+          .eq('store_id', storeId).order('id').range(from,to)).then(data=>({data,error:null})).catch(error=>({data:null,error}))
       ])
+
+      if(invoiceError||returnError||receiptError)throw new Error('تعذر تحميل كامل حركات الحساب')
 
       for (const inv of invoices || []) {
         allTxs.push({
@@ -172,47 +172,7 @@ export async function getCustomerStatement(
       }
     }
 
-    // فرز تصاعدي زمني
-    allTxs.sort((a, b) => {
-      const cmp = new Date(a.date).getTime() - new Date(b.date).getTime()
-      if (cmp !== 0) return cmp
-      if (a.created_at && b.created_at) {
-        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-      }
-      return 0
-    })
-
-    let openingBalance = 0
-    const periodRows: CustomerStatementRow[] = []
-
-    for (const tx of allTxs) {
-      if (fromDate && tx.date < fromDate) {
-        openingBalance += (tx.debit - tx.credit)
-      } else if (toDate && tx.date > toDate) {
-        continue
-      } else {
-        periodRows.push({
-          id: tx.id,
-          date: tx.date,
-          type: tx.type,
-          doc_no: tx.doc_no,
-          description: tx.description,
-          debit: tx.debit,
-          credit: tx.credit,
-          balance: 0,
-        })
-      }
-    }
-
-    let running = openingBalance
-    for (const r of periodRows) {
-      running += (r.debit - r.credit)
-      r.balance = running
-    }
-
-    const totalDebit = periodRows.reduce((s, r) => s + r.debit, 0)
-    const totalCredit = periodRows.reduce((s, r) => s + r.credit, 0)
-    const closingBalance = running
+    const {openingBalance,rows:periodRows,totalDebit,totalCredit,closingBalance}=calculateStatement(allTxs,fromDate,toDate)
 
     return {
       success: true,
@@ -242,7 +202,7 @@ export async function getCustomerStatement(
       closingBalance,
     }
   } catch (error: any) {
-    console.error('getCustomerStatement error:', error)
+    console.error('Customer statement load failed')
     return {
       success: false,
       error: error.message || 'حدث خطأ أثناء تحميل كشف الحساب',

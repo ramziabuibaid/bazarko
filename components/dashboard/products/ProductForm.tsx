@@ -1,10 +1,13 @@
 'use client'
 
 import { useState, useRef } from 'react'
+import Link from 'next/link'
+import {validateProductForm} from '@/lib/products/form-validation'
+import styles from './product-form.module.css'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { generateSlug } from '@/lib/utils/slug'
-import { uploadProductImage, deleteProductImage } from '@/lib/supabase/storage'
+import { uploadProductImage } from '@/lib/supabase/storage'
 import { trackAction, diffFields } from '@/lib/activity/track'
 
 interface Category { id: string; name: string }
@@ -19,6 +22,7 @@ interface ProductData {
   description: string
   sku: string
   barcode: string
+  brand_id: string
   category_id: string
   price: string
   compare_price: string
@@ -44,13 +48,15 @@ interface Props {
   secondaryCurrencyCode?: string | null
   exchangeRate?: number | null
   categories: Category[]
+  brands?: {id:string;name:string;is_active:boolean}[]
   attributes?: AttributeDef[]
+  preview?:boolean
   initialData?: Partial<ProductData> & { id?: string; attributeValueIds?: string[] }
 }
 
 const EMPTY: ProductData = {
   name: '', slug: '', description: '', sku: '', barcode: '',
-  category_id: '', price: '', compare_price: '', cost_price: '',
+  brand_id: '', category_id: '', price: '', compare_price: '', cost_price: '',
   price_secondary: '',
   stock_quantity: '0', low_stock_alert: '5',
   track_stock: true, allow_backorder: false,
@@ -59,10 +65,13 @@ const EMPTY: ProductData = {
   specifications: [],
 }
 
-export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCode, exchangeRate, categories, attributes = [], initialData }: Props) {
+export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCode, exchangeRate, categories, brands = [], attributes = [], initialData, preview=false }: Props) {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
   const isEditing = !!initialData?.id
+  const persistedId = useRef(initialData?.id || null)
+  const submitLock = useRef(false)
+  const [uncertain,setUncertain]=useState(false)
 
   const [form, setForm] = useState<ProductData>({ ...EMPTY, ...initialData })
   const [selectedValues, setSelectedValues] = useState<Set<string>>(new Set(initialData?.attributeValueIds ?? []))
@@ -110,6 +119,7 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
   async function handleAddCategory() {
     const trimmed = newCatName.trim()
     if (!trimmed) return
+    if(preview){setError('إضافة الفئة معطلة في المعاينة');return}
     setAddingCatLoading(true)
     setError('')
     const supabase = createClient()
@@ -132,10 +142,11 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
 
   async function handleImageUpload(files: FileList | null) {
     if (!files?.length) return
+    if(preview){setError('رفع الصور معطل في المعاينة');return}
     setUploading(true)
     const urls: string[] = []
     for (const file of Array.from(files)) {
-      if (!file.type.startsWith('image/')) continue
+      if (!['image/jpeg','image/png','image/webp','image/gif'].includes(file.type)){setError('اختر صورة JPG أو PNG أو WebP أو GIF');continue}
       if (file.size > 5 * 1024 * 1024) {
         setError(`الصورة ${file.name} أكبر من 5MB`)
         continue
@@ -144,7 +155,7 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
         const url = await uploadProductImage(storeId, file)
         urls.push(url)
       } catch {
-        setError('فشل رفع الصورة، تأكد من إنشاء bucket بسم product-images في Supabase Storage')
+        setError('تعذر رفع الصورة. حاول مرة أخرى.')
       }
     }
     if (urls.length) {
@@ -158,7 +169,7 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
   }
 
   async function removeImage(url: string) {
-    await deleteProductImage(url)
+    // إزالة الصورة من النموذج فقط؛ لا نحذف ملفاً قد يستخدمه منتج آخر.
     setForm(f => ({ ...f, images: f.images.filter(i => i !== url) }))
   }
 
@@ -176,14 +187,20 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
     setForm(f => ({ ...f, specifications: f.specifications.filter((_, i) => i !== idx) }))
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent,statusOverride?:string) {
     e.preventDefault()
-    if (!form.name.trim()) { setError('اسم المنتج مطلوب'); return }
-    if (!form.price) { setError('السعر مطلوب'); return }
+    if(submitLock.current||uploading||uncertain)return
+    const validation=validateProductForm({...form,status:statusOverride||form.status},!!persistedId.current)
+    if(validation){setError(validation);return}
+    if(preview){setError('الحفظ معطل في المعاينة؛ لم تُعدّل بيانات.');return}
+    submitLock.current=true
+    try {
 
     setSaving(true)
     setError('')
     const supabase = createClient()
+
+    if(form.brand_id){const {data:brand,error:brandError}=await supabase.from('brands').select('id,is_active').eq('id',form.brand_id).eq('store_id',storeId).maybeSingle();if(brandError||!brand||(!brand.is_active&&form.brand_id!==initialData?.brand_id)){setError('اختر ماركة مفعلة من هذا المتجر، أو أزل الربط.');return}}
 
     const payload = {
       store_id: storeId,
@@ -192,16 +209,18 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
       description: form.description || null,
       sku: form.sku || null,
       barcode: form.barcode || null,
+      brand_id: form.brand_id || null,
       category_id: form.category_id || null,
       price: parseFloat(form.price),
       compare_price: form.compare_price ? parseFloat(form.compare_price) : null,
       cost_price: form.cost_price ? parseFloat(form.cost_price) : null,
       price_secondary: form.price_secondary ? parseFloat(form.price_secondary) : null,
-      stock_quantity: parseInt(form.stock_quantity) || 0,
-      low_stock_alert: parseInt(form.low_stock_alert) || 5,
+      ...(!persistedId.current ? {stock_quantity:Number(form.stock_quantity)} : {}),
+      low_stock_alert: Number(form.low_stock_alert),
       track_stock: form.track_stock,
       allow_backorder: form.allow_backorder,
-      status: form.status,
+      status: statusOverride||form.status,
+      is_active: (statusOverride||form.status)==='active',
       is_featured: form.is_featured,
       images: form.images,
       thumbnail_url: form.images[0] ?? null,
@@ -210,49 +229,54 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
       specifications: form.specifications.filter(s => s.name.trim()),
     }
 
-    let productId = initialData?.id ?? null
+    let productId = persistedId.current
 
-    if (isEditing) {
-      const { error: err } = await supabase
-        .from('products')
-        .update(payload)
-        .eq('id', initialData!.id!)
-      if (err) { setError(err.message); setSaving(false); return }
-      const changed = diffFields(initialData as unknown as Record<string, unknown>, payload)
+    if (productId) {
+      const {data:updated,error:err}=await supabase.from('products').update(payload)
+        .eq('id', productId).eq('store_id',storeId).select('id').maybeSingle()
+      if (err||!updated) { setError(err?.message || 'تعذر حفظ المنتج'); setSaving(false); return }
+      const changed = diffFields((initialData||{}) as unknown as Record<string, unknown>, payload)
       trackAction(storeId, {
         action: 'update', entityType: 'product',
-        entityId: initialData!.id!, entityLabel: payload.name,
+        entityId: productId, entityLabel: payload.name,
         details: { changed, changedCount: changed.length },
       })
     } else {
       const { data: created, error: err } = await supabase
         .from('products').insert(payload).select('id').single()
       if (err) {
+        if(!err.code||!/^\d{5}$/.test(err.code)){setUncertain(true);setError('تعذر التأكد من اكتمال الإنشاء. راجع قائمة المنتجات قبل إعادة المحاولة.');return}
         setError(err.message.includes('duplicate') ? 'يوجد منتج بنفس الرابط (slug)' : err.message)
         setSaving(false)
         return
       }
       productId = created?.id ?? null
+      persistedId.current=productId
       trackAction(storeId, {
         action: 'create', entityType: 'product',
         entityId: created?.id ?? null, entityLabel: payload.name,
-        details: { price: payload.price, stock: payload.stock_quantity },
+        details: { price: payload.price },
       })
     }
 
-    // مزامنة خصائص المنتج (حذف ثم إدراج المختار)
-    if (productId && attributes.length > 0) {
-      await supabase.from('product_attribute_links').delete().eq('product_id', productId)
-      const rows = Array.from(selectedValues).map(value_id => ({ product_id: productId!, value_id, store_id: storeId }))
-      if (rows.length > 0) await supabase.from('product_attribute_links').insert(rows)
+    // أدخل الخصائص الجديدة قبل فصل القديمة حتى لا تفقد الروابط عند فشل الإدراج.
+    if(productId && attributes.length>0){
+      const {data:currentLinks,error:readError}=await supabase.from('product_attribute_links').select('value_id').eq('product_id',productId).eq('store_id',storeId)
+      if(readError){setError('حُفظ المنتج لكن تعذر تحميل خصائصه للمزامنة. أعد المحاولة بنفس النموذج.');return}
+      const existing=new Set((currentLinks||[]).map(l=>l.value_id))
+      const rows=Array.from(selectedValues).filter(id=>!existing.has(id)).map(value_id=>({product_id:productId!,value_id,store_id:storeId}))
+      if(rows.length){const {error:linkError}=await supabase.from('product_attribute_links').insert(rows);if(linkError){setError('حُفظ المنتج لكن تعذر حفظ خصائصه الجديدة. أعد المحاولة بنفس النموذج.');return}}
+      const removed=Array.from(existing).filter(id=>!selectedValues.has(id))
+      if(removed.length){const {error:removeError}=await supabase.from('product_attribute_links').delete().eq('product_id',productId).eq('store_id',storeId).in('value_id',removed);if(removeError){setError('حُفظ المنتج لكن تعذر فصل بعض الخصائص القديمة. أعد المحاولة بنفس النموذج.');return}}
     }
 
     router.push('/dashboard/products')
     router.refresh()
+    }catch{if(!persistedId.current)setUncertain(true);setError('تعذر التأكد من اكتمال الحفظ. راجع قائمة المنتجات قبل إعادة إنشاء المنتج.')}finally{setSaving(false);submitLock.current=false}
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mx-auto max-w-3xl space-y-6">
+    <form onSubmit={handleSubmit} className={styles.form} dir="rtl">
 
       {/* ── المعلومات الأساسية ── */}
       <Section title="المعلومات الأساسية">
@@ -260,7 +284,7 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
           <div className="sm:col-span-2">
             <Label>اسم المنتج <Required /></Label>
             <input
-              value={form.name}
+              aria-label="اسم المنتج" value={form.name}
               onChange={e => handleName(e.target.value)}
               placeholder="مثال: قميص قطني أبيض"
               className={input()}
@@ -270,7 +294,7 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
           <div className="sm:col-span-2">
             <Label>الوصف</Label>
             <textarea
-              value={form.description}
+              aria-label="وصف المنتج" value={form.description}
               onChange={e => set('description', e.target.value)}
               rows={3}
               placeholder="وصف تفصيلي للمنتج..."
@@ -281,7 +305,7 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
           <div>
             <Label>رمز SKU</Label>
             <div className="flex gap-2">
-              <input value={form.sku} onChange={e => set('sku', e.target.value)}
+              <input aria-label="رمز SKU" value={form.sku} onChange={e => set('sku', e.target.value)}
                 placeholder="SHIRT-WHT-M" dir="ltr" className={`${input()} flex-1`} />
               <button
                 type="button"
@@ -298,20 +322,21 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
 
           <div>
             <Label>الباركود</Label>
-            <input value={form.barcode} onChange={e => set('barcode', e.target.value)}
+            <input aria-label="الباركود" value={form.barcode} onChange={e => set('barcode', e.target.value)}
               placeholder="1234567890" dir="ltr" className={input()} />
           </div>
 
           <div>
             <Label>الرابط (slug)</Label>
             <input
-              value={form.slug}
+              aria-label="رابط المنتج" value={form.slug}
               onChange={e => set('slug', e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
               dir="ltr"
               className={input()}
             />
           </div>
 
+          <div><Label>الماركة</Label><select aria-label="ماركة المنتج" value={form.brand_id} onChange={e=>set('brand_id',e.target.value)} className={input()}><option value="">— بدون ماركة —</option>{brands.filter(b=>b.is_active||b.id===form.brand_id).map(b=><option key={b.id} value={b.id}>{b.name}{!b.is_active?' (غير مفعلة)':''}</option>)}</select><Link href="/dashboard/inventory/brands" className="text-xs text-sky-400">إدارة الماركات</Link></div>
           <div>
             <Label>الفئة</Label>
 
@@ -319,7 +344,7 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
             {cats.length > 0 ? (
               <div className="flex items-stretch gap-2">
                 <select
-                  value={form.category_id}
+                  aria-label="فئة المنتج" value={form.category_id}
                   onChange={e => set('category_id', e.target.value)}
                   className={`${input()} flex-1`}
                 >
@@ -389,11 +414,11 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
       <Section title="التسعير">
         <div className="grid gap-4 sm:grid-cols-3">
           <div>
-            <Label>السعر بعد الخصم <Required /></Label>
+            <Label>سعر البيع <Required /></Label>
             <div className="relative">
               <input
                 type="number" min="0" step="0.01"
-                value={form.price} onChange={e => set('price', e.target.value)}
+                aria-label="سعر البيع" value={form.price} onChange={e => set('price', e.target.value)}
                 placeholder="0.00" dir="ltr"
                 className={input('pl-16')}
               />
@@ -405,7 +430,7 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
             <div className="relative">
               <input
                 type="number" min="0" step="0.01"
-                value={form.compare_price} onChange={e => set('compare_price', e.target.value)}
+                aria-label="السعر قبل الخصم" value={form.compare_price} onChange={e => set('compare_price', e.target.value)}
                 placeholder="0.00" dir="ltr"
                 className={input('pl-16')}
               />
@@ -418,7 +443,7 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
             <div className="relative">
               <input
                 type="number" min="0" step="0.01"
-                value={form.cost_price} onChange={e => set('cost_price', e.target.value)}
+                aria-label="سعر التكلفة" value={form.cost_price} onChange={e => set('cost_price', e.target.value)}
                 placeholder="0.00" dir="ltr"
                 className={input('pl-16')}
               />
@@ -439,7 +464,7 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
               <div className="relative">
                 <input
                   type="number" min="0" step="0.01"
-                  value={form.price_secondary}
+                  aria-label="سعر العملة الثانية" value={form.price_secondary}
                   onChange={e => set('price_secondary', e.target.value)}
                   placeholder={
                     form.price && exchangeRate
@@ -465,10 +490,10 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
       <Section title="المخزون">
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <Label>الكمية المتوفرة</Label>
+            <Label>{isEditing?'كمية المخزون الحالية (للقراءة)':'الكمية الافتتاحية'}</Label>
             <input
               type="number" min="0"
-              value={form.stock_quantity} onChange={e => set('stock_quantity', e.target.value)}
+              disabled={isEditing} aria-label={isEditing?'كمية المخزون الحالية':'الكمية الافتتاحية'} value={form.stock_quantity} onChange={e => set('stock_quantity', e.target.value)}
               dir="ltr" className={input()}
             />
           </div>
@@ -476,12 +501,12 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
             <Label>حد تنبيه المخزون المنخفض</Label>
             <input
               type="number" min="0"
-              value={form.low_stock_alert} onChange={e => set('low_stock_alert', e.target.value)}
+              aria-label="حد التنبيه" value={form.low_stock_alert} onChange={e => set('low_stock_alert', e.target.value)}
               dir="ltr" className={input()}
             />
           </div>
         </div>
-        <div className="mt-4 space-y-3">
+        <p className="mt-3 text-xs text-slate-400">{isEditing?'الكميات اللاحقة تُعدّل من حركات المخزون؛ حفظ بيانات المنتج لا يغيّرها.':'أدخل الكمية الافتتاحية مرة واحدة؛ الكميات اللاحقة من حركات المخزون.'}</p><div className="mt-4 space-y-3">
           <Toggle
             label="تتبع المخزون"
             description="يمنع البيع تلقائياً عند نفاد الكمية"
@@ -502,23 +527,24 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
         <input
           ref={fileRef}
           type="file"
-          accept="image/*"
+          accept="image/jpeg,image/png,image/webp,image/gif"
           multiple
           className="hidden"
           onChange={e => handleImageUpload(e.target.files)}
         />
 
-        <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+        <div onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();handleImageUpload(e.dataTransfer.files)}} aria-label="منطقة صور المنتج" className="grid grid-cols-3 gap-3 rounded-xl border border-dashed border-slate-600 p-3">
           {form.images.map((url, i) => (
             <div key={url} className="group relative aspect-square">
               <img src={url} alt="" className="h-full w-full rounded-xl object-cover" />
+              {i > 0 && <button type="button" onClick={()=>setForm(f=>({...f,images:[url,...f.images.filter(image=>image!==url)]}))} className="absolute bottom-1 right-1 rounded bg-slate-900/90 px-2 py-1 text-xs text-sky-300">تعيين رئيسية</button>}
               {i === 0 && (
                 <span className="absolute bottom-1 right-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">رئيسية</span>
               )}
               <button
                 type="button"
                 onClick={() => removeImage(url)}
-                className="absolute left-1 top-1 hidden rounded-full bg-red-500 p-0.5 text-white group-hover:flex"
+                aria-label={`إزالة الصورة ${i+1} من المنتج`} className="absolute left-1 top-1 flex rounded-full bg-red-500 p-1 text-white"
               >
                 ✕
               </button>
@@ -541,14 +567,14 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
             )}
           </button>
         </div>
-        <p className="mt-2 text-xs text-slate-500">الصورة الأولى ستكون الصورة الرئيسية — حد 5MB للصورة الواحدة</p>
+        <p className="mt-2 text-xs text-slate-500">اسحب الصور هنا أو اختر الملفات. الصورة الأولى هي الرئيسية — JPG / PNG / WebP / GIF، حد 5MB للصورة</p>
       </Section>
 
       {/* ── فيديو المنتج ── */}
       <Section title="فيديو المنتج (اختياري)">
         <Label>رابط الفيديو</Label>
         <input
-          value={form.video_url}
+          aria-label="رابط الفيديو" value={form.video_url}
           onChange={e => set('video_url', e.target.value)}
           placeholder="https://www.tiktok.com/... أو YouTube أو Instagram Reels"
           dir="ltr"
@@ -556,7 +582,7 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
           className={input()}
         />
         <p className="mt-1.5 text-xs text-slate-500">
-          الملابس والعطور تزداد مبيعاتها بشكل كبير مع الفيديو — أضف رابط TikTok أو YouTube أو Instagram
+          رابط فيديو اختياري لعرض المنتج؛ أدخل رابطاً كاملاً يبدأ بـ https.
         </p>
       </Section>
 
@@ -653,7 +679,7 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
         <div className="mb-4">
           <Label>الوسوم (tags)</Label>
           <input
-            value={form.tags}
+            aria-label="وسوم المنتج" value={form.tags}
             onChange={e => set('tags', e.target.value)}
             placeholder="قمصان, رجالي, صيف (مفصولة بفاصلة)"
             className={input()}
@@ -699,11 +725,13 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
       </Section>
 
       {error && (
-        <div className="rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div>
+        <div role="alert" className={styles.alert}>{error}</div>
       )}
 
       {/* ── أزرار الحفظ ── */}
-      <div className="flex flex-col-reverse gap-2 pb-8 sm:flex-row sm:justify-end sm:gap-3">
+      <div className={styles.toolbar}>
+        <Link href="/dashboard/products">← العودة للمنتجات</Link>
+        <button type="button" disabled={saving||uploading||uncertain} onClick={e=>handleSubmit(e,'draft')}>حفظ كمسودة</button>
         <button
           type="button"
           onClick={() => router.back()}
@@ -713,10 +741,10 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
         </button>
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving||uploading||uncertain}
           className="w-full rounded-xl bg-sky-500 px-8 py-3 text-sm font-semibold text-slate-950 hover:bg-sky-400 disabled:opacity-50 sm:w-auto sm:py-2.5"
         >
-          {saving ? 'جاري الحفظ...' : isEditing ? 'حفظ التغييرات' : 'إضافة المنتج'}
+          {saving ? 'جاري الحفظ...' : isEditing ? 'حفظ التغييرات' : 'حفظ المنتج'}
         </button>
       </div>
     </form>
@@ -734,10 +762,10 @@ const PRODUCT_STATUSES = [
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-white/5 bg-slate-900 p-4 sm:p-5">
+    <section className={styles.section} data-section={title}>
       <h2 className="mb-4 text-sm font-medium text-slate-400 uppercase tracking-wide">{title}</h2>
       {children}
-    </div>
+    </section>
   )
 }
 

@@ -1,21 +1,25 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { recordAuditEvent } from '@/app/dashboard/accounting/audit-actions'
-import { postSalesInvoiceEntry } from '@/lib/accounting/engine'
+import {createSalesInvoice,type SalesInvoiceInput} from '@/app/dashboard/accounting/invoices/new/create-invoice-action'
+import Link from 'next/link'
+import styles from './new-invoice.module.css'
+import {invoiceAmounts,validInvoiceInput} from '@/lib/invoices/create-presentation'
+import {businessDay} from '@/lib/dashboard/simple-metrics'
 
-interface Product {
+export interface Product {
   id: string
   name: string
   sku: string | null
   price: number
   cost_price?: number | null
+  barcode?: string | null
   thumbnail_url: string | null
 }
 
-interface Customer {
+export interface Customer {
   id: string
   name: string
   phone: string | null
@@ -70,11 +74,13 @@ interface Props {
   currencyCode: string
   storeName: string
   prefill?: Prefill
+  cashBoxes?: {id:string;name:string}[]
+  previewData?: {products:Product[];customers:Customer[]}
 }
 
 type CustomerMode = 'search' | 'manual' | null
 
-export default function NewInvoiceForm({ storeId, userId, currencyCode, storeName, prefill }: Props) {
+export default function NewInvoiceForm({ storeId, userId, currencyCode, storeName, prefill, previewData, cashBoxes=[] }: Props) {
   const router  = useRouter()
   const supabase = createClient()
 
@@ -105,59 +111,81 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
   )
 
   // ── طريقة الدفع ──────────────────────────────────────────────
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'credit' | 'bank' | 'check' | 'card'>('cash')
+  const [collectionMode,setCollectionMode]=useState<'full'|'partial'|'none'>('full')
+  const [amountPaid,setAmountPaid]=useState('')
+  const [cashBoxId,setCashBoxId]=useState(cashBoxes[0]?.id||'')
+  const pendingRequest=useRef<{id:string;payload:SalesInvoiceInput}|null>(null)
+  const [hasPending,setHasPending]=useState(false)
+  const pendingKey=`bazarko.invoice.pending.${storeId}.${userId}`
+  useEffect(()=>{try{const v=JSON.parse(sessionStorage.getItem(pendingKey)||'null');if(v?.id&&v?.payload){pendingRequest.current=v;setHasPending(true)}}catch{}},[pendingKey])
+  function restorePending(){const p=pendingRequest.current?.payload;if(!p)return;setItems(p.items.map(i=>({...i,key:keySeq++})));setSelectedCustomer(p.customerId?{id:p.customerId,name:p.customerName,phone:p.customerPhone||null,balance:0}:null);setCustomerMode(p.customerId?'search':'manual');setCustomerName(p.customerName);setCustomerPhone(p.customerPhone);setCustomerAddress(p.customerAddress);setIssueDate(p.issueDate);setDueDate(p.dueDate);setNotes(p.notes);setDiscountType(p.discountType);setDiscountValue(p.discountValue);setCollectionMode(p.collectionMode);setAmountPaid(String(p.amountPaid));setCashBoxId(p.cashBoxId||'');setReviewing(false);setError('استُعيد طلب الحفظ السابق؛ راجعه ثم أعد التأكيد بنفس بياناته.');}
+
 
   // ── الخصم: نوعين (مبلغ ثابت ₪ / نسبة مئوية %) ────────────────
   const [discountType, setDiscountType]   = useState<'amount' | 'percent'>('amount')
   const [discountValue, setDiscountValue] = useState<number>(prefill?.discountAmount || 0)
 
   // ── الإجماليات ────────────────────────────────────────────────
-  const [issueDate, setIssueDate]           = useState(new Date().toISOString().slice(0, 10))
+  const [issueDate, setIssueDate]           = useState(businessDay().date)
   const [dueDate, setDueDate]               = useState('')
   const [notes, setNotes]                   = useState(prefill?.notes || '')
-  const [amountPaid, setAmountPaid]         = useState(0)
   const [saving, setSaving]                 = useState(false)
   const [error, setError]                   = useState('')
 
-  const subtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0)
-  const totalCost = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.cost_price) || 0), 0)
-  const computedDiscount = discountType === 'percent'
-    ? (subtotal * (Number(discountValue) || 0)) / 100
-    : (Number(discountValue) || 0)
-  const discountAmount = Math.min(subtotal, Math.max(0, computedDiscount))
-  const total    = Math.max(0, subtotal - discountAmount)
+  const amounts=invoiceAmounts(items,discountType,discountValue,0)
+  const {subtotal,total}=amounts
+  const discountAmount=amounts.discount
+  const effectivePaid=collectionMode==='full'?total:collectionMode==='none'?0:Number(amountPaid)
+  const remaining=total-effectivePaid
+  const totalCost=items.reduce((sum,i)=>sum+i.quantity*Number(i.cost_price||0),0)
+  const [reviewing,setReviewing]=useState(false)
+  const [draftNotice,setDraftNotice]=useState('')
+  const [hasDraft,setHasDraft]=useState(false)
+  const [createdId,setCreatedId]=useState<string|null>(null)
+  const [showInternal,setShowInternal]=useState(false)
+  const saveLock=useRef(false)
+  const customerVersion=useRef(0),productVersion=useRef(0)
+  const draftKey=`bazarko.invoice.draft.${storeId}.${userId}`
+  useEffect(()=>{try{setHasDraft(!!sessionStorage.getItem(draftKey))}catch{}},[draftKey])
+  function saveLocalDraft(){try{sessionStorage.setItem(draftKey,JSON.stringify({items,selectedCustomer,customerMode,customerName,customerPhone,customerAddress,issueDate,dueDate,notes,discountType,discountValue,collectionMode,amountPaid,cashBoxId}));setHasDraft(true);setDraftNotice('حُفظت مسودة في هذا التبويب فقط؛ لم تُنشأ فاتورة أو حركة مالية.')}catch{setDraftNotice('تعذر حفظ المسودة المحلية.')}}
+  function restoreLocalDraft(){try{const v=JSON.parse(sessionStorage.getItem(draftKey)||'null');if(!v||!Array.isArray(v.items))throw Error();setItems(v.items.map((i:LineItem)=>({...i,key:keySeq++})));setSelectedCustomer(v.selectedCustomer||null);setCustomerMode(v.customerMode||null);setCustomerName(v.customerName||'');setCustomerPhone(v.customerPhone||'');setCustomerAddress(v.customerAddress||'');setIssueDate(v.issueDate||businessDay().date);setDueDate(v.dueDate||'');setNotes(v.notes||'');setDiscountType(v.discountType==='percent'?'percent':'amount');setDiscountValue(Number(v.discountValue)||0);setCollectionMode(v.collectionMode==='partial'?'partial':v.collectionMode==='none'?'none':'full');setAmountPaid(v.amountPaid||'');setCashBoxId(v.cashBoxId||cashBoxes[0]?.id||'');setReviewing(false);setDraftNotice('استُعيدت المسودة. راجع البنود والأسعار والزبون قبل الحفظ.')}catch{setDraftNotice('تعذر استعادة المسودة.')}}
   const fmt      = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })
 
   // ── Debounced searches ────────────────────────────────────────
 
   const searchCustomers = useDebounce(async (q: string) => {
     if (!q.trim()) { setCustomerResults([]); return }
-    const { data } = await supabase
+    const version=customerVersion.current
+    if(previewData){setCustomerResults(previewData.customers.filter(c=>`${c.name} ${c.phone||''}`.includes(q)));return}
+    const { data,error:searchError } = await supabase
       .from('customers')
       .select('id, name, phone, balance')
       .eq('store_id', storeId)
-      .ilike('name', `%${q}%`)
+      .or(`name.ilike.%${q.replace(/[,()%]/g,'')}%,phone.ilike.%${q.replace(/[,()%]/g,'')}%`)
       .limit(6)
-    setCustomerResults((data as Customer[] | null) ?? [])
+    if(version===customerVersion.current){setCustomerResults((data as Customer[] | null) ?? []);if(searchError)setError('تعذر البحث عن الزبون.')}
   }, 250)
 
   const searchProducts = useDebounce(async (q: string) => {
     if (!q.trim()) { setProductResults([]); return }
-    const { data } = await supabase
+    const version=productVersion.current
+    if(previewData){setProductResults(previewData.products.filter(p=>`${p.name} ${p.sku||''} ${p.barcode||''}`.includes(q)));return}
+    const { data,error:searchError } = await supabase
       .from('products')
-      .select('id, name, sku, price, cost_price, thumbnail_url')
+      .select('id, name, sku, barcode, price, cost_price, thumbnail_url')
       .eq('store_id', storeId)
       .eq('is_active', true)
-      .ilike('name', `%${q}%`)
+      .or(`name.ilike.%${q.replace(/[,()%]/g,'')}%,sku.ilike.%${q.replace(/[,()%]/g,'')}%,barcode.ilike.%${q.replace(/[,()%]/g,'')}%`)
       .limit(6)
-    setProductResults((data as Product[] | null) ?? [])
+    if(version===productVersion.current){setProductResults((data as Product[] | null) ?? []);if(searchError)setError('تعذر البحث عن المنتج.')}
   }, 250)
 
   // ── البنود ───────────────────────────────────────────────────
 
   function addProductToItems(p: Product) {
+    productVersion.current++
     setItems(prev => [
-      ...prev,
+      ...prev.filter(i=>i.name.trim()||i.product_id),
       {
         key: keySeq++,
         product_id: p.id,
@@ -168,19 +196,24 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
         cost_price: Number(p.cost_price || 0),
       },
     ])
+    setReviewing(false)
     setProductSearch('')
     setProductResults([])
   }
 
   function updateItem(key: number, field: keyof LineItem, value: string | number) {
+    setReviewing(false)
     setItems(prev => prev.map(i => i.key === key ? { ...i, [field]: value } : i))
   }
 
   function removeItem(key: number) {
+    setReviewing(false)
     setItems(prev => prev.filter(i => i.key !== key))
   }
 
   function clearCustomer() {
+    customerVersion.current++
+    setReviewing(false)
     setSelectedCustomer(null)
     setCustomerSearch('')
     setCustomerResults([])
@@ -189,235 +222,52 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
     setCustomerMode(null)
   }
 
-  // ── الحفظ ────────────────────────────────────────────────────
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if(saveLock.current||createdId)return
     setError('')
-
-    if (items.length === 0) { setError('يجب إضافة بند واحد على الأقل'); return }
-    if (items.some(i => !i.name.trim())) { setError('جميع البنود يجب أن تحتوي على اسم أو وصف'); return }
-    if (items.some(i => i.unit_price < 0)) { setError('السعر لا يمكن أن يكون سالباً'); return }
-    if (items.some(i => i.quantity < 1)) { setError('الكمية يجب أن تكون 1 على الأقل'); return }
-
-    const activePhone = selectedCustomer?.phone ?? (customerMode === 'manual' ? customerPhone.trim() : '')
-    if (activePhone && !/^\+?[\d\s\-()]{7,15}$/.test(activePhone)) {
-      setError('رقم الهاتف غير صحيح (مثال: +970599123456)')
-      return
-    }
-
-    setSaving(true)
-
-    // التحقق من قفل الفترة المحاسبية لتاريخ الفاتورة
-    const { data: closedPeriod } = await supabase
-      .from('accounting_periods')
-      .select('period_name')
-      .eq('store_id', storeId)
-      .eq('is_closed', true)
-      .lte('start_date', issueDate)
-      .gte('end_date', issueDate)
-      .maybeSingle()
-
-    if (closedPeriod) {
-      setSaving(false)
-      setError(`لا يمكن إنشاء فاتورة تقع ضمن فترة محاسبية مقفلة (${closedPeriod.period_name})`)
-      return
-    }
-
-    const { data: lastInv } = await supabase
-      .from('invoices')
-      .select('invoice_number')
-      .eq('store_id', storeId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    let nextNum = 1
-    if (lastInv?.invoice_number) {
-      const match = lastInv.invoice_number.match(/INV-(\d+)/)
-      if (match) {
-        nextNum = parseInt(match[1], 10) + 1
-      }
-    }
-
-    const invoiceNumber = `INV-${String(nextNum).padStart(4, '0')}`
-
-    // ضبط حالة السداد والمبلغ المدفوع
-    let effectivePaid = amountPaid
-    let effectiveStatus = 'draft'
-
-    if (paymentMethod === 'credit') {
-      effectivePaid = 0
-      effectiveStatus = 'draft'
-    } else if (paymentMethod === 'cash') {
-      effectivePaid = total
-      effectiveStatus = 'paid'
-    } else {
-      effectiveStatus = effectivePaid >= total ? 'paid' : effectivePaid > 0 ? 'partial' : 'draft'
-    }
-
-    const { data: inv, error: invErr } = await supabase
-      .from('invoices')
-      .insert({
-        store_id:         storeId,
-        invoice_number:   invoiceNumber,
-        order_id:         prefill?.orderId ?? null,
-        quotation_id:     prefill?.quotationId ?? null,
-        customer_id:      selectedCustomer?.id ?? null,
-        customer_name:    (selectedCustomer?.name ?? (customerMode === 'manual' ? customerName.trim() : null)) || null,
-        customer_phone:   activePhone || null,
-        customer_address: customerAddress.trim() || null,
-        issue_date:       issueDate,
-        due_date:         dueDate || null,
-        payment_method:   paymentMethod,
-        status:           effectiveStatus,
-        subtotal,
-        discount_type:    discountType,
-        discount_value:   Number(discountValue) || 0,
-        discount_amount:  discountAmount,
-        total,
-        amount_paid:      effectivePaid,
-        notes:            notes.trim() || null,
-        created_by:       userId,
-      })
-      .select('id')
-      .single()
-
-    if (invErr || !inv) {
-      setSaving(false)
-      setError(`حدث خطأ أثناء الحفظ: ${invErr?.message || 'Unknown Error'}`)
-      console.error(invErr)
-      return
-    }
-
-    // إدراج بنود الفاتورة
-    await supabase.from('invoice_items').insert(
-      items.map(i => ({
-        invoice_id: inv.id,
-        product_id: i.product_id,
-        name:       i.name,
-        sku:        i.sku || null,
-        quantity:   i.quantity,
-        unit_price: i.unit_price,
-        total:      i.quantity * i.unit_price,
-        cost_price: Number(i.cost_price || 0),
-      }))
-    )
-
-    // خصم الكميات من المخزون وتسجيل حركات المخزون
-    for (const item of items) {
-      if (item.product_id) {
-        const { data: p } = await supabase.from('products').select('stock_quantity').eq('id', item.product_id).single()
-        if (p) {
-          const newStock = Math.max(0, Number(p.stock_quantity || 0) - Number(item.quantity))
-          await supabase.from('products').update({ stock_quantity: newStock }).eq('id', item.product_id)
-
-          await supabase.from('inventory_movements').insert({
-            store_id: storeId,
-            product_id: item.product_id,
-            movement_type: 'sale',
-            document_number: invoiceNumber,
-            document_type: 'فاتورة مبيعات',
-            ref_id: inv.id,
-            entity_name: selectedCustomer?.name || customerName || 'عميل نقدي',
-            quantity_in: 0,
-            quantity_out: Number(item.quantity),
-            balance_after: newStock,
-            unit_price: Number(item.unit_price),
-            movement_date: issueDate,
-          })
-        }
-      }
-    }
-
-    // إذا تم التحويل من عرض سعر — تحديث حالة عرض السعر إلى "تم تحويله لفاتورة"
-    if (prefill?.quotationId) {
-      await supabase
-        .from('quotations')
-        .update({
-          status: 'converted',
-          converted_invoice_id: inv.id,
-        })
-        .eq('id', prefill.quotationId)
-    }
-
-    // كشف حساب العميل والذمم
-    if (selectedCustomer) {
-      const { data: custData } = await supabase
-        .from('customers')
-        .select('balance, total_invoiced, total_paid')
-        .eq('id', selectedCustomer.id)
-        .single()
-
-      const currentBalance  = custData?.balance ?? 0
-      const currentInvoiced = custData?.total_invoiced ?? 0
-      const currentPaid     = custData?.total_paid ?? 0
-      const balanceAfter    = currentBalance + total
-
-      await supabase.from('customer_ledger').insert({
-        store_id: storeId, customer_id: selectedCustomer.id,
-        type: 'invoice', date: issueDate,
-        description: `فاتورة ${invoiceNumber}`,
-        debit: total, credit: 0, balance: balanceAfter,
-        reference_id: inv.id, reference_type: 'invoice', created_by: userId,
-      })
-
-      let finalBalance = balanceAfter
-      let finalPaid    = currentPaid
-
-      if (effectivePaid > 0) {
-        finalBalance = balanceAfter - effectivePaid
-        finalPaid    = currentPaid + effectivePaid
-        await supabase.from('customer_ledger').insert({
-          store_id: storeId, customer_id: selectedCustomer.id,
-          type: 'payment', date: issueDate,
-          description: `دفعة على فاتورة ${invoiceNumber}`,
-          debit: 0, credit: effectivePaid, balance: finalBalance,
-          reference_id: inv.id, reference_type: 'invoice', created_by: userId,
-        })
-      }
-
-      await supabase.from('customers').update({
-        balance:        finalBalance,
-        total_invoiced: currentInvoiced + total,
-        total_paid:     finalPaid,
-      }).eq('id', selectedCustomer.id)
-    }
-
-    await recordAuditEvent({
-      entityType: 'invoice', entityId: inv.id, entityLabel: invoiceNumber,
-      action: 'create',
-      details: { total, amountPaid: effectivePaid, paymentMethod, items: items.length, customer: selectedCustomer?.name ?? null },
-    })
-
-    // الترحيل التلقائي إلى دفتر الأستاذ العام
-    try {
-      await postSalesInvoiceEntry(inv.id, userId)
-    } catch (glErr) {
-      console.error('Error posting GL for invoice:', glErr)
-    }
-
-    router.push(`/dashboard/accounting/invoices/${inv.id}`)
+    const validation=validInvoiceInput(items,discountType,discountValue,issueDate,dueDate)
+    if(validation){setError(validation);return}
+    if(total<=0){setError('الإجمالي يجب أن يكون موجباً.');return}
+    if(!Number.isFinite(effectivePaid)||effectivePaid<0||effectivePaid>total||(collectionMode==='partial'&&(effectivePaid<=0||effectivePaid>=total))){setError('الدفعة الجزئية يجب أن تكون أكبر من صفر وأقل من الإجمالي.');return}
+    if(remaining>0&&!selectedCustomer){setError('اختر زبوناً مسجلاً للفاتورة غير المسددة بالكامل.');return}
+    if(effectivePaid>0&&!cashBoxId){setError('اختر صندوق قبض نقدي.');return}
+    if(!reviewing){setReviewing(true);return}
+    if(previewData){setError('معاينة فقط؛ لم تُحفظ فاتورة أو دفعة.');return}
+    const payload:SalesInvoiceInput={customerId:selectedCustomer?.id||null,customerName:selectedCustomer?.name||(customerMode==='manual'?customerName.trim():''),customerPhone:selectedCustomer?.phone||(customerMode==='manual'?customerPhone.trim():''),customerAddress:customerAddress.trim(),issueDate,dueDate,notes:notes.trim(),discountType,discountValue,collectionMode,amountPaid:effectivePaid,cashBoxId:effectivePaid>0?cashBoxId:null,orderId:pendingRequest.current?pendingRequest.current.payload.orderId:prefill?.orderId||null,quotationId:pendingRequest.current?pendingRequest.current.payload.quotationId:prefill?.quotationId||null,items:items.map(i=>({product_id:i.product_id,name:i.name.trim(),sku:i.sku,quantity:i.quantity,unit_price:i.unit_price}))}
+    if(pendingRequest.current&&JSON.stringify(pendingRequest.current.payload)!==JSON.stringify(payload)){setError('يوجد طلب سابق لم تُؤكد نتيجته. استعده وأعد محاولته قبل إنشاء فاتورة أخرى.');return}
+    const request=pendingRequest.current||{id:crypto.randomUUID(),payload}
+    try{sessionStorage.setItem(pendingKey,JSON.stringify(request))}catch{setError('تعذر حفظ معرف الطلب محلياً. تحقق من إتاحة تخزين المتصفح قبل الحفظ.');return}
+    pendingRequest.current=request;setHasPending(true);saveLock.current=true;setSaving(true)
+    try{
+      const result=await createSalesInvoice(storeId,request.id,request.payload)
+      if(!result.ok||!result.invoiceId){if(!result.uncertain){pendingRequest.current=null;setHasPending(false);sessionStorage.removeItem(pendingKey)}setError(result.error||'تعذر حفظ الفاتورة.');return}
+      setCreatedId(result.invoiceId)
+      try{sessionStorage.removeItem(pendingKey);sessionStorage.removeItem(draftKey)}catch{}
+      router.push(`/dashboard/accounting/invoices/${result.invoiceId}`)
+    }catch{setError('تعذر تأكيد نتيجة الحفظ. أعد محاولة الطلب نفسه؛ لا تنشئ فاتورة ثانية.')}
+    finally{saveLock.current=false;setSaving(false)}
   }
 
   // ── Render ────────────────────────────────────────────────────
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form noValidate onSubmit={handleSubmit} onChangeCapture={()=>setReviewing(false)} className={styles.form} dir="rtl">
+<div className={styles.main}>
 
       {/* شارة الطلبية المرتبطة */}
-      {prefill && (
+      {(prefill?.orderId||prefill?.quotationId) && prefill && (
         <div className="flex items-center gap-3 rounded-xl border border-sky-500/20 bg-sky-500/5 px-4 py-3">
           <span className="text-sky-400">🔗</span>
           <p className="text-sm text-sky-300">
-            هذه الفاتورة مرتبطة بالطلبية{' '}
-            <span className="font-mono font-semibold" dir="ltr">{prefill.orderNumber}</span>
+            هذه الفاتورة مرتبطة بـ {prefill.quotationId?'عرض السعر':'الطلبية'}{' '}
+            <span className="font-mono font-semibold" dir="ltr">{prefill.quotationNumber||prefill.orderNumber}</span>
           </p>
         </div>
       )}
 
       {/* ── معلومات الزبون ── */}
-      <div className="rounded-2xl border border-white/5 bg-slate-900 p-5 space-y-4">
+      <div className={`${styles.panel} space-y-4`}>
         <h2 className="text-sm font-semibold text-white">معلومات الزبون</h2>
 
         {/* اختيار الوضع */}
@@ -460,8 +310,8 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
               </svg>
               <input
                 value={customerSearch}
-                onChange={e => { setCustomerSearch(e.target.value); searchCustomers(e.target.value) }}
-                placeholder="ابحث باسم الزبون..."
+                onChange={e => { customerVersion.current++; setCustomerSearch(e.target.value); searchCustomers(e.target.value) }}
+                aria-label="البحث عن زبون" placeholder="ابحث باسم الزبون أو الهاتف..."
                 autoFocus
                 className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 pr-10 text-sm text-white placeholder-slate-400 outline-none focus:border-sky-500/50"
               />
@@ -470,6 +320,8 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
                   {customerResults.map(c => (
                     <button key={c.id} type="button"
                       onClick={() => {
+                        customerVersion.current++
+                        setReviewing(false)
                         setSelectedCustomer(c)
                         setCustomerSearch('')
                         setCustomerResults([])
@@ -552,24 +404,24 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
       </div>
 
       {/* ── تواريخ ── */}
-      <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
+      <div className={styles.panel}>
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="mb-1 block text-xs text-slate-400">تاريخ الإصدار *</label>
-            <input type="date" value={issueDate} onChange={e => setIssueDate(e.target.value)} required
+            <input aria-label="تاريخ الإصدار" type="date" value={issueDate} onChange={e => setIssueDate(e.target.value)} required
               className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white outline-none focus:border-sky-500/50 [color-scheme:dark]" />
           </div>
           <div>
             <label className="mb-1 block text-xs text-slate-400">تاريخ الاستحقاق</label>
-            <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+            <input aria-label="تاريخ الاستحقاق" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
               className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white outline-none focus:border-sky-500/50 [color-scheme:dark]" />
           </div>
         </div>
       </div>
 
       {/* ── بنود الفاتورة ── */}
-      <div className="rounded-2xl border border-white/5 bg-slate-900 p-5 space-y-4">
-        <h2 className="text-sm font-semibold text-white">بنود الفاتورة</h2>
+      <div className={`${styles.panel} space-y-4`}>
+        <h2 className="text-sm font-semibold text-white">بنود الفاتورة <span className="text-xs text-sky-300">· {items.length} بنود</span></h2><label className={styles.notice}><input type="checkbox" checked={showInternal} onChange={e=>setShowInternal(e.target.checked)}/> عرض التكلفة والربح الداخليين</label>
 
         {/* بحث عن منتج */}
         <div className="relative">
@@ -579,8 +431,9 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
           </svg>
           <input
             value={productSearch}
-            onChange={e => { setProductSearch(e.target.value); searchProducts(e.target.value) }}
-            placeholder="ابحث عن منتج لإضافته..."
+            onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();const matches=productResults.filter(p=>p.barcode===productSearch.trim()||p.sku===productSearch.trim());if(matches.length===1)addProductToItems(matches[0]);else setError('اختر منتجاً من نتائج البحث؛ يجب أن يكون الرمز مطابقاً لصنف واحد.')}}}
+            onChange={e => { productVersion.current++; setProductSearch(e.target.value); searchProducts(e.target.value) }}
+            aria-label="البحث عن منتج" placeholder="ابحث بالاسم أو SKU أو الباركود..."
             className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 pr-10 text-sm text-white placeholder-slate-400 outline-none focus:border-sky-500/50"
           />
           {productResults.length > 0 && (
@@ -615,7 +468,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
                     value={item.name}
                     onChange={e => updateItem(item.key, 'name', e.target.value)}
                     placeholder="اسم البند أو الخدمة..."
-                    required
+                    aria-label={`وصف البند ${idx+1}`}
                     className="mt-0.5 w-full bg-transparent text-sm text-white outline-none placeholder-slate-500"
                   />
                   {item.sku && <p className="text-[10px] text-slate-600 mt-0.5" dir="ltr">{item.sku}</p>}
@@ -629,9 +482,9 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
                 <div>
                   <label className="text-[10px] font-medium text-slate-500">الكمية</label>
                   <input
-                    type="number" min="1" step="1"
+                    aria-label={`كمية ${item.name||'البند'}`} type="number" min="0.01" step="any"
                     value={item.quantity}
-                    onChange={e => updateItem(item.key, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
+                    onChange={e => updateItem(item.key, 'quantity', Number(e.target.value))}
                     dir="ltr"
                     className="mt-0.5 w-16 block rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-center text-sm text-white outline-none focus:border-sky-500/50"
                   />
@@ -641,7 +494,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
                   <label className="text-[10px] font-medium text-slate-500">السعر ({currencyCode})</label>
                   <input
                     type="number" min="0" step="0.01"
-                    value={item.unit_price || ''}
+                    aria-label={`سعر ${item.name||'البند'}`} value={item.unit_price || ''}
                     onChange={e => updateItem(item.key, 'unit_price', Math.max(0, parseFloat(e.target.value) || 0))}
                     placeholder="0"
                     dir="ltr"
@@ -655,7 +508,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
                   </p>
                 </div>
               </div>
-              {Number(item.cost_price || 0) > 0 && (
+              {showInternal && Number(item.cost_price || 0) > 0 && (
                 <div className="mt-2 flex items-center justify-between text-[11px] rounded bg-white/5 px-2 py-1 text-slate-400">
                   <span>التكلفة للوحدة: <span className="text-slate-200 font-mono" dir="ltr">{fmt(item.cost_price || 0)} {currencyCode}</span></span>
                   <span>الربح: <span className={`font-mono font-semibold ${((item.quantity * item.unit_price) - (item.quantity * (item.cost_price || 0))) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`} dir="ltr">
@@ -677,10 +530,10 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
               <tr className="border-b border-white/5 bg-white/3">
                 <th className="px-3 py-2.5 text-right text-xs text-slate-400">الوصف</th>
                 <th className="w-16 px-2 py-2.5 text-center text-xs text-slate-400">الكمية</th>
-                <th className="w-24 px-2 py-2.5 text-left text-xs text-slate-400">التكلفة</th>
+                <th className={showInternal?"w-24 px-2 py-2.5 text-left text-xs text-slate-400":styles.cost}>التكلفة</th>
                 <th className="w-24 px-2 py-2.5 text-left text-xs text-slate-400">سعر البيع</th>
                 <th className="w-24 px-2 py-2.5 text-left text-xs text-slate-400">الإجمالي</th>
-                <th className="w-24 px-2 py-2.5 text-left text-xs text-slate-400">الربح</th>
+                <th className={showInternal?"w-24 px-2 py-2.5 text-left text-xs text-slate-400":styles.cost}>الربح</th>
                 <th className="w-8" />
               </tr>
             </thead>
@@ -696,21 +549,21 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
                         value={item.name}
                         onChange={e => updateItem(item.key, 'name', e.target.value)}
                         placeholder="وصف البند *"
-                        required
+                        aria-label={`وصف البند ${item.key}`}
                         className="w-full bg-transparent text-sm text-white outline-none placeholder-slate-600"
                       />
                       {item.sku && <p className="text-xs text-slate-600" dir="ltr">{item.sku}</p>}
                     </td>
                     <td className="px-2 py-2 text-center">
                       <input
-                        type="number" min="1" step="1"
+                        aria-label={`كمية ${item.name||'البند'}`} type="number" min="0.01" step="any"
                         value={item.quantity}
-                        onChange={e => updateItem(item.key, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
+                        onChange={e => updateItem(item.key, 'quantity', Number(e.target.value))}
                         dir="ltr"
                         className="w-14 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-center text-sm text-white outline-none focus:border-sky-500/50"
                       />
                     </td>
-                    <td className="px-2 py-2 text-left">
+                    <td className={showInternal?"px-2 py-2 text-left":styles.cost}>
                       <input
                         type="number" min="0" step="0.01"
                         value={item.cost_price || ''}
@@ -723,7 +576,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
                     <td className="px-2 py-2 text-left">
                       <input
                         type="number" min="0" step="0.01"
-                        value={item.unit_price || ''}
+                        aria-label={`سعر ${item.name||'البند'}`} value={item.unit_price || ''}
                         onChange={e => updateItem(item.key, 'unit_price', Math.max(0, parseFloat(e.target.value) || 0))}
                         placeholder="0"
                         dir="ltr"
@@ -733,7 +586,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
                     <td className="px-2 py-2 text-left text-sm font-semibold text-white font-mono" dir="ltr">
                       {fmt(lineTotal)}
                     </td>
-                    <td className={`px-2 py-2 text-left text-xs font-mono font-semibold ${lineProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`} dir="ltr">
+                    <td className={`${showInternal?"px-2 py-2 text-left text-xs font-mono font-semibold":styles.cost} ${lineProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`} dir="ltr">
                       {fmt(lineProfit)}
                     </td>
                     <td className="px-3 py-2">
@@ -756,36 +609,35 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
 
         <button
           type="button"
-          onClick={() => setItems(prev => [...prev, { key: keySeq++, product_id: null, name: '', sku: '', quantity: 1, unit_price: 0, cost_price: 0 }])}
+          onClick={() => {setReviewing(false);setItems(prev => [...prev, { key: keySeq++, product_id: null, name: '', sku: '', quantity: 1, unit_price: 0, cost_price: 0 }])}}
           className="w-full rounded-xl border border-dashed border-white/10 py-2.5 text-sm text-slate-400 transition-colors hover:border-sky-500/30 hover:text-sky-400"
         >
           + إضافة بند يدوي
         </button>
       </div>
 
-      {/* ── طريقة الدفع والإجماليات ── */}
-      <div className="rounded-2xl border border-white/5 bg-slate-900 p-5 space-y-4">
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-300">طريقة الدفع *</label>
-          <select
-            value={paymentMethod}
-            onChange={e => setPaymentMethod(e.target.value as any)}
-            className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white outline-none focus:border-sky-500 font-bold"
-          >
-            <option value="cash">نقداً (دفع فوري بالكامل)</option>
-            <option value="credit">على الحساب (بيع آجل / ذمة عميل)</option>
-            <option value="bank">تحويل بنكي</option>
-            <option value="check">شيك بنكي</option>
-            <option value="card">بطاقة دفع</option>
-          </select>
-        </div>
+      {/* ── ملاحظات ── */}
+      <div className={styles.panel}>
+        <label className="mb-2 block text-xs text-slate-400">ملاحظات (تظهر في الفاتورة)</label>
+        <textarea
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          placeholder="شكراً لتعاملكم معنا..."
+          rows={2}
+          className="w-full resize-none rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-sky-500/50"
+        />
+      </div>
+
+</div><aside className={styles.side}>      {/* ── طريقة الدفع والإجماليات ── */}
+      <div className={`${styles.panel} space-y-4`}>
+<h2>ملخص الفاتورة والتحصيل</h2><div className={styles.tabs}><button type="button" aria-pressed={collectionMode==='full'} onClick={()=>{setCollectionMode('full');setReviewing(false)}}>دفع كامل</button><button type="button" aria-pressed={collectionMode==='partial'} onClick={()=>{setCollectionMode('partial');setReviewing(false)}}>دفعة جزئية</button><button type="button" aria-pressed={collectionMode==='none'} onClick={()=>{setCollectionMode('none');setReviewing(false)}}>بدون دفعة</button></div><p className={styles.notice}>التحصيل النقدي بتاريخ الفاتورة، مع سند قبض مرتبط بها.</p>{collectionMode!=='none'&&<label className={styles.notice}>صندوق القبض<select aria-label="صندوق القبض" value={cashBoxId} onChange={e=>setCashBoxId(e.target.value)} className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-3 mt-2"><option value="">اختر صندوقاً</option>{cashBoxes.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></label>}{collectionMode==='partial'&&<label className={styles.notice}>المدفوع الآن<input aria-label="الدفعة الجزئية" type="number" min="0.01" max={total} step="0.01" value={amountPaid} onChange={e=>setAmountPaid(e.target.value)} className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-3 mt-2"/></label>}
 
         <div className="flex items-center justify-between text-sm border-t border-white/5 pt-3">
           <span className="text-slate-400">المجموع الفرعي</span>
           <span className="text-white font-mono font-bold" dir="ltr">{fmt(subtotal)} {currencyCode}</span>
         </div>
 
-        {totalCost > 0 && (
+        {showInternal && totalCost > 0 && (
           <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 space-y-1.5 text-xs">
             <div className="flex items-center justify-between text-slate-300">
               <span>إجمالي التكلفة التقديرية للبضاعة:</span>
@@ -812,7 +664,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
             <div className="flex rounded-lg bg-slate-900 p-0.5 text-[11px]">
               <button
                 type="button"
-                onClick={() => setDiscountType('amount')}
+                onClick={() => {setDiscountType('amount');setReviewing(false)}}
                 className={`rounded px-2.5 py-0.5 font-bold transition ${
                   discountType === 'amount' ? 'bg-sky-500 text-slate-950' : 'text-slate-400 hover:text-white'
                 }`}
@@ -821,7 +673,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
               </button>
               <button
                 type="button"
-                onClick={() => setDiscountType('percent')}
+                onClick={() => {setDiscountType('percent');setReviewing(false)}}
                 className={`rounded px-2.5 py-0.5 font-bold transition ${
                   discountType === 'percent' ? 'bg-sky-500 text-slate-950' : 'text-slate-400 hover:text-white'
                 }`}
@@ -834,7 +686,9 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
           <div className="flex items-center gap-3">
             <input
               type="number"
+              aria-label="قيمة الخصم"
               min="0"
+              max={discountType==='percent'?100:subtotal}
               step="any"
               value={discountValue || ''}
               onChange={e => setDiscountValue(Math.max(0, parseFloat(e.target.value) || 0))}
@@ -853,62 +707,28 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
           <span className="text-emerald-400 font-mono text-lg" dir="ltr">{fmt(total)} {currencyCode}</span>
         </div>
 
-        {paymentMethod === 'credit' ? (
-          <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-2.5 text-center text-xs font-semibold text-amber-300">
-            ⚠️ بيع آجل (على الدين): لن يتم تسجيل قبض بالصندوق، وسيتم تسجيل كامل المبلغ {fmt(total)} {currencyCode} كذمم مدينة على العميل.
-          </div>
-        ) : (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-slate-400">المبلغ المدفوع فوراً</span>
-            <input
-              type="number" min="0" step="0.01"
-              value={amountPaid || ''}
-              onChange={e => setAmountPaid(Math.max(0, parseFloat(e.target.value) || 0))}
-              placeholder="0"
-              dir="ltr"
-              className="w-28 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-left text-sm text-white font-mono outline-none focus:border-sky-500/50"
-            />
-          </div>
-        )}
-        {amountPaid > 0 && amountPaid < total && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-yellow-400">متبقي</span>
-            <span className="font-semibold text-yellow-400" dir="ltr">{fmt(total - amountPaid)} {currencyCode}</span>
-          </div>
-        )}
-        {amountPaid >= total && total > 0 && (
-          <p className="text-xs text-emerald-400">✓ الفاتورة مدفوعة بالكامل</p>
-        )}
-      </div>
-
-      {/* ── ملاحظات ── */}
-      <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
-        <label className="mb-2 block text-xs text-slate-400">ملاحظات (تظهر في الفاتورة)</label>
-        <textarea
-          value={notes}
-          onChange={e => setNotes(e.target.value)}
-          placeholder="شكراً لتعاملكم معنا..."
-          rows={2}
-          className="w-full resize-none rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-sky-500/50"
-        />
-      </div>
-
+<div className={styles.summary}><span>المدفوع الآن</span><b>{fmt(effectivePaid)} {currencyCode}</b></div><div className={styles.summary}><span>المتبقي على الزبون</span><strong>{fmt(remaining)} {currencyCode}</strong></div><p className={styles.notice}>{remaining>0?'يسجل المتبقي على حساب الزبون المختار.':'الفاتورة مدفوعة بالكامل بسند قبض نقدي.'}</p>
+</div>
       {error && (
-        <p className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <p role="alert" className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
           {error}
         </p>
       )}
 
-      <div className="flex gap-3 pb-6">
+      <div className={styles.actions}>{hasPending&&<button type="button" disabled={saving} onClick={restorePending}>استعادة طلب الحفظ السابق</button>}
+<button type="button" disabled={saving||!!createdId} onClick={saveLocalDraft}>حفظ مسودة محلية</button>{hasDraft&&<button type="button" disabled={saving||!!createdId} onClick={restoreLocalDraft}>استعادة المسودة المحلية</button>}<p role="status" className={styles.notice}>{draftNotice}</p>
+{createdId&&<Link href={`/dashboard/accounting/invoices/${createdId}`}>فتح الفاتورة المحفوظة للمراجعة</Link>}
+
         <button type="button" onClick={() => router.back()}
           className="flex-1 rounded-xl border border-white/10 py-3 text-sm text-slate-400 transition-colors hover:text-white">
           إلغاء
         </button>
-        <button type="submit" disabled={saving}
+        <button type="submit" disabled={saving||!!createdId}
           className="flex-[2] rounded-xl bg-sky-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-sky-500 disabled:opacity-50">
-          {saving ? 'جاري الحفظ...' : 'إنشاء الفاتورة'}
+          {saving ? 'جاري الحفظ...' : reviewing?'تأكيد وحفظ الفاتورة':'مراجعة قبل الحفظ'}
         </button>
       </div>
+</aside>{reviewing&&<section className={styles.review} role="region" aria-label="مراجعة الفاتورة"><h2>راجع الفاتورة قبل تأكيد الحفظ</h2><p>الزبون: {selectedCustomer?.name||customerName||'عميل نقدي'} · {items.length} بنود · الإصدار: {issueDate}</p><p>الإجمالي: {fmt(total)} {currencyCode} · المدفوع: {fmt(effectivePaid)} · المتبقي: {fmt(remaining)}</p><p className={styles.notice}>سيتم حفظ الفاتورة وبنودها وتحديث المخزون وحساب الزبون. راجع الطباعة من صفحة الفاتورة بعد الحفظ.</p></section>}
     </form>
   )
 }

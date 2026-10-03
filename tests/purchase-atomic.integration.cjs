@@ -1,0 +1,62 @@
+// Runs schema + fixtures inside one transaction; ALWAYS rolls back, including DDL.
+const {Client}=require('pg'),fs=require('node:fs'),assert=require('node:assert/strict'),{randomUUID}=require('node:crypto');require('@next/env').loadEnvConfig(process.cwd())
+;(async()=>{const c=new Client({connectionString:process.env.DATABASE_URL,connectionTimeoutMillis:15000,query_timeout:20000,application_name:'bazarko-rollback-invoice-test'});await c.connect();console.log('Connected; starting rollback test');let passed=0;try{
+ await c.query('BEGIN');console.log('Transaction started');await c.query(fs.readFileSync('db/migrations/055_atomic_purchase_invoice.sql','utf8').replace(/^BEGIN;$/m,'').replace(/^COMMIT;$/m,''));
+ console.log('Migration compiled');
+ const actor=(await c.query('select owner_id from public.stores limit 1')).rows[0]?.owner_id;if(!actor)throw Error('Existing actor required for rollback fixture');
+ const store=randomUUID(),customer=randomUUID(),product=randomUUID(),box=randomUUID();
+ await c.query("insert into stores(id,owner_id,country_code,name,subdomain,currency_code) values($1,$2,'PS','Rollback invoice fixture',$3,'ILS')",[store,actor,'rollback-'+store]);
+ await c.query("insert into store_members(store_id,profile_id,role,is_active) values($1,$2,'owner',true) on conflict do nothing",[store,actor]);
+ const tags={};for(const [i,tag,type,normal] of [[1,'SUPPLIER_PAYABLE','liability','credit'],[2,'SALES_REVENUE','revenue','credit'],[3,'CASH','asset','debit'],[4,'COGS','expense','debit'],[5,'INVENTORY','asset','debit']]){tags[tag]=randomUUID();await c.query('insert into accounts(id,store_id,code,name,type,normal_balance,account_tag) values($1,$2,$3,$4,$5,$6,$4)',[tags[tag],store,'TEST-'+i,tag,type,normal]);}
+ await c.query("insert into cash_boxes(id,store_id,name,type,account_id) values($1,$2,'Rollback box','cash',$3)",[box,store,tags.CASH]);
+ await c.query("insert into suppliers(id,store_id,name,balance) values($1,$2,'Rollback customer',0)",[customer,store]);
+ await c.query("insert into products(id,store_id,name,slug,price,cost_price,stock_quantity,track_stock) values($1,$2,'Rollback product',($1::uuid)::text,35,20,10,true)",[product,store]);
+ await c.query("select set_config('request.jwt.claim.sub',$1,true)",[actor]);await c.query('SET LOCAL ROLE authenticated');
+ const base={invoice_number:'PUR-TEST-1',invoice_date:'2026-10-02',supplier_id:customer,cash_box_id:box,mode:'post',method:'partial',paid:'20',discount:'10',tax:'0',items:[{product_id:product,quantity:'2',unit_price:'35'}]};
+ const call=async(payload,key=randomUUID())=>(await c.query('select public.create_purchase_invoice_atomic($1,$2,$3::jsonb) result',[store,key,JSON.stringify(payload)])).rows[0].result;
+ const fail=async(payload,pattern,key)=>{await c.query('SAVEPOINT rejected');let message='';try{await call(payload,key)}catch(e){message=e.message}await c.query('ROLLBACK TO SAVEPOINT rejected');assert.match(message,pattern);passed++};
+ const key=randomUUID(),r=await call(base,key);assert.equal(r.total,60);assert.equal(r.paid,20);passed++;
+ assert.equal((await call(base,key)).invoiceId,r.invoiceId);passed++;
+ await fail({...base,paid:'21'},/سبق استخدامه/,key);
+ await c.query('RESET ROLE');
+ assert.equal(Number((await c.query('select stock_quantity from products where id=$1',[product])).rows[0].stock_quantity),12);
+ assert.equal(Number((await c.query('select cost_price from products where id=$1',[product])).rows[0].cost_price),30);
+ assert.equal(Number((await c.query('select balance from suppliers where id=$1',[customer])).rows[0].balance),40);
+ assert.equal((await c.query('select count(*)::int n from vouchers where purchase_invoice_id=$1',[r.invoiceId])).rows[0].n,1);
+ assert.equal((await c.query('select count(*)::int n from cash_movements where ref_id=$1',[r.voucherId])).rows[0].n,1);
+ for(const [tag,expected] of Object.entries({SUPPLIER_PAYABLE:40,INVENTORY:60,CASH:-20}))assert.equal(Number((await c.query('select balance from accounts where id=$1',[tags[tag]])).rows[0].balance),expected);passed++;
+ await c.query('SET LOCAL ROLE authenticated');
+ await fail({...base,invoice_number:'PUR-FAIL',paid:'99'},/قيمة الدفعة/);
+ await fail({...base,invoice_number:'PUR-FAIL',supplier_id:randomUUID()},/المورد/);
+ await fail({...base,invoice_number:'PUR-FAIL',cash_box_id:randomUUID()},/صندوقاً/);
+ await fail({...base,invoice_number:'PUR-FAIL',items:[base.items[0],base.items[0]]},/مكرر/);
+ await fail({...base,invoice_number:'PUR-FAIL',tax:'10'},/الضريبة غير مدعومة/);
+ await fail({...base,invoice_number:'PUR-FRACTION',items:[{...base.items[0],quantity:'1.5'}]},/كمية صحيحة/);
+ await c.query('RESET ROLE');
+ assert.equal((await c.query("select has_function_privilege('anon','public.create_purchase_invoice_atomic(uuid,uuid,jsonb)','EXECUTE') allowed")).rows[0].allowed,false);passed++;
+ await c.query("select set_config('request.jwt.claim.sub',$1,true)",[randomUUID()]);await c.query('SET LOCAL ROLE authenticated');
+ await fail({...base,invoice_number:'PUR-UNAUTHORIZED'},/غير مصرح/);
+ await c.query('RESET ROLE');await c.query("select set_config('request.jwt.claim.sub',$1,true)",[actor]);await c.query('SET LOCAL ROLE authenticated');
+ const d=await call({...base,invoice_number:'PUR-DRAFT',mode:'draft'});assert.equal(d.draft,true);passed++;
+ await c.query('RESET ROLE');
+ assert.equal((await c.query('select count(*)::int n from inventory_movements where ref_id=$1',[d.invoiceId])).rows[0].n,0);
+ assert.equal((await c.query('select count(*)::int n from journal_entries where ref_id=$1',[d.invoiceId])).rows[0].n,0);
+ assert.equal((await c.query('select paid_amount from purchase_invoices where id=$1',[d.invoiceId])).rows[0].paid_amount,'0.00');passed++;
+ await c.query(`create function public.test_purchase_late_failure() returns trigger language plpgsql as $$begin if NEW.description like '%PUR-ROLLBACK%' then raise exception 'late rollback fixture';end if;return NEW;end$$`);
+ await c.query('create trigger test_purchase_late_failure before insert on public.cash_movements for each row execute function public.test_purchase_late_failure()');
+ await c.query('SET LOCAL ROLE authenticated');
+ await fail({...base,invoice_number:'PUR-ROLLBACK'},/late rollback fixture/);
+ await c.query('RESET ROLE');
+ assert.equal(Number((await c.query('select stock_quantity from products where id=$1',[product])).rows[0].stock_quantity),12);
+ assert.equal(Number((await c.query('select balance from suppliers where id=$1',[customer])).rows[0].balance),40);passed++;
+ await c.query('SET LOCAL ROLE authenticated');
+ const full=await call({...base,invoice_number:'PUR-FULL',method:'cash'});assert.equal(full.paid,60);passed++;
+ const credit=await call({...base,invoice_number:'PUR-CREDIT',method:'credit'});assert.equal(credit.paid,0);passed++;
+ await c.query('RESET ROLE');
+ assert.equal(Number((await c.query('select stock_quantity from products where id=$1',[product])).rows[0].stock_quantity),16);
+ assert.equal(Number((await c.query('select balance from suppliers where id=$1',[customer])).rows[0].balance),100);
+ assert.equal((await c.query('select count(*)::int n from purchase_invoices where store_id=$1',[store])).rows[0].n,4);
+ assert.equal((await c.query('select count(*)::int n from vouchers where store_id=$1',[store])).rows[0].n,2);
+ const totals=(await c.query('select sum(l.debit) d,sum(l.credit) c from journal_lines l join journal_entries e on e.id=l.journal_entry_id where e.store_id=$1',[store])).rows[0];assert.equal(totals.d,totals.c);passed++;
+ console.log(JSON.stringify({passed,rolledBack:true}));
+ }finally{await c.query('ROLLBACK');await c.end()}})().catch(e=>{console.error(e.message);process.exitCode=1})

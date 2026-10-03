@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
+import {getInvoiceCashBoxes} from './create-invoice-action'
 import NewInvoiceForm from '@/components/dashboard/accounting/NewInvoiceForm'
 
 interface SearchParams {
@@ -89,16 +90,17 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: S
     }
   }
 
+  const cashBoxes=await getInvoiceCashBoxes()
   return (
-    <div className="p-4 sm:p-6 max-w-3xl" dir="rtl">
+    <div className="p-4 sm:p-6 max-w-[1600px]" dir="rtl">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Link
-            href="/dashboard/sales"
+            href="/dashboard/accounting/invoices"
             className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-slate-800/80 px-3.5 py-1.5 text-xs font-bold text-slate-300 hover:bg-slate-700 hover:text-white transition shadow-sm"
           >
             <span className="text-sky-400">←</span>
-            <span>العودة إلى لوحة إدارة المبيعات</span>
+            <span>العودة إلى الفواتير</span>
           </Link>
           <h1 className="text-xl font-black text-white">فاتورة مبيعات جديدة</h1>
         </div>
@@ -116,6 +118,7 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: S
         currencyCode={store.currency_code}
         storeName={store.name}
         prefill={prefill}
+        cashBoxes={cashBoxes}
       />
     </div>
   )

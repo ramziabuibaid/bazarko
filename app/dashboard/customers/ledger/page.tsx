@@ -1,3 +1,5 @@
+import {allRows} from '@/lib/dashboard/load-simple-dashboard'
+import type {CustomerItem} from '@/components/dashboard/customers/CustomerLedgerClient'
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
 import { redirect } from 'next/navigation'
@@ -29,12 +31,8 @@ export default async function CustomerLedgerPage({ searchParams }: Props) {
     .single()
   if (!store) redirect('/onboarding')
 
-  // جلب كافة الزبائن بدون استثناء (حتى لو كان الرصيد صفراً)
-  const { data: customers } = await supabase
-    .from('customers')
-    .select('id, name, phone, city, balance, total_orders, customer_type, credit_limit, total_paid')
-    .eq('store_id', store.id)
-    .order('name', { ascending: true })
+  const result=await allRows<CustomerItem>((from,to)=>supabase.from('customers').select('id, name, phone, city, balance, total_orders, customer_type, credit_limit, total_paid').eq('store_id',store.id).order('name').order('id').range(from,to)).then(data=>({data,error:false})).catch(()=>({data:[],error:true}))
+  const customers=result.data
 
   return (
     <div className="p-4 sm:p-6 space-y-6">
@@ -42,7 +40,7 @@ export default async function CustomerLedgerPage({ searchParams }: Props) {
         <div>
           <h1 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2">
             <span>📋</span>
-            <span>كشوف حسابات وذمم الزبائن</span>
+            <span>حسابات العملاء</span>
           </h1>
           <p className="mt-1 text-xs sm:text-sm text-slate-400">
             متابعة أرصدة وحركات جميع العملاء، الأرصدة الافتتاحية والتراكمية، الطباعة الرسمية والمشاركة الفورية
@@ -60,6 +58,7 @@ export default async function CustomerLedgerPage({ searchParams }: Props) {
       </div>
 
       <CustomerLedgerClient
+        loadError={result.error}
         customers={customers || []}
         currencyCode={store.currency_code || 'ILS'}
         storeName={store.name || 'Bazarko Store'}

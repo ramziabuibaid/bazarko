@@ -1,0 +1,3 @@
+export interface Brand {id:string;store_id:string;name:string;slug:string;description:string|null;logo_url:string|null;is_active:boolean;sort_order:number}
+export function brandSlug(name:string){return name.trim().toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9\u0621-\u064A-]/g,'').replace(/-+/g,'-').replace(/^-|-$/g,'').slice(0,40)}
+export function validateBrand(name:string,slug:string){if(!name.trim()||name.trim().length>100)return 'أدخل اسماً من 1 إلى 100 حرف';if(!/^[a-z0-9\u0621-\u064A]+(?:-[a-z0-9\u0621-\u064A]+)*$/.test(slug)||slug.length>40)return 'الرابط يقبل الحروف والأرقام والشرطات بين الكلمات، حتى 40 حرفاً';return null}

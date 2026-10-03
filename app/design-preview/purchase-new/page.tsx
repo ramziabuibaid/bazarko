@@ -1,0 +1,3 @@
+import {notFound} from 'next/navigation'
+import CreatePurchaseClient from '@/app/dashboard/purchases/new/CreatePurchaseClient'
+export default function Preview(){if(process.env.NODE_ENV!=='development')notFound();return <main className="bg-slate-950 min-h-screen p-4 sm:p-6"><p className="text-xs text-slate-400 mb-5">معاينة · بيانات توضيحية فقط</p><CreatePurchaseClient cashBoxes={[{id:'demo-box',name:'صندوق توضيحي'}]} preview store={{id:'demo',name:'متجر توضيحي',currency_code:'ILS'}} suppliers={[{id:'supplier',name:'مورد توضيحي',phone:null,balance:1200}]} products={[{id:'product',name:'منتج توضيحي',sku:'DEMO-001',barcode:'123456',cost_price:35,price:50,stock_quantity:10},{id:'zero',name:'صنف تكلفة صفرية',cost_price:0,price:50,stock_quantity:0}]}/></main>}

@@ -1,6 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import styles from './directory.module.css'
+import {filterCustomers,whatsappNumber,csvCell} from '@/lib/customers/directory'
+import {BUSINESS_TIME_ZONE} from '@/lib/dashboard/simple-metrics'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -30,6 +33,10 @@ interface Props {
   searchQuery: string
   sort: string
   lastOrderDates: Record<string, string>
+  countryCode?: string
+  preview?: boolean
+  loadError?: boolean
+  orderError?: boolean
   initShowAdd?: boolean
 }
 
@@ -68,11 +75,11 @@ function exportCSV(customers: Customer[], currencyCode: string, lastOrderDates: 
     c.city ?? '',
     TYPE_LABELS[c.customer_type]?.label ?? c.customer_type,
     c.total_orders,
-    c.balance > 0 ? `${c.balance} ${currencyCode}` : '',
-    lastOrderDates[c.id] ? new Date(lastOrderDates[c.id]).toLocaleDateString('ar-u-nu-latn') : '',
+    `${c.balance} ${currencyCode}`,
+    lastOrderDates[c.id] ? new Date(lastOrderDates[c.id]).toLocaleDateString('ar-u-nu-latn',{timeZone:BUSINESS_TIME_ZONE}) : '',
   ])
   const csv = [headers, ...rows]
-    .map(row => row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+    .map(row => row.map(csvCell).join(','))
     .join('\n')
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
@@ -84,9 +91,17 @@ function exportCSV(customers: Customer[], currencyCode: string, lastOrderDates: 
 }
 
 export default function CustomersTable({
-  customers, currencyCode, storeId, activeType, searchQuery, sort, lastOrderDates, initShowAdd,
+  customers, currencyCode, storeId, activeType, searchQuery, sort, lastOrderDates, initShowAdd, countryCode='PS', preview=false, loadError=false, orderError=false,
 }: Props) {
   const router = useRouter()
+  const [query,setQuery]=useState(searchQuery),[type,setType]=useState(activeType),[sorting,setSorting]=useState(sort)
+  const [city,setCity]=useState(''),[debt,setDebt]=useState('all'),[advanced,setAdvanced]=useState(false),[page,setPage]=useState(1)
+  const [mutationError,setMutationError]=useState('')
+  const busy=useRef(false)
+  const visible=filterCustomers(customers,query,type,city,debt,sorting)
+  const pages=Math.max(1,Math.ceil(visible.length/10)),currentPage=Math.min(page,pages)
+  useEffect(()=>{setPage(1)},[query,type,city,debt,sorting])
+  useEffect(()=>{setQuery(searchQuery);setType(activeType);setSorting(sort)},[searchQuery,activeType,sort])
   const [showAdd, setShowAdd] = useState(initShowAdd || false)
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
   const [deletingCustomer, setDeletingCustomer] = useState<Customer | null>(null)
@@ -99,12 +114,32 @@ export default function CustomersTable({
     customer_type: 'retail', notes: '', credit_limit: '0', social_url: '',
   })
 
+  useEffect(()=>{
+    if(!showAdd&&!editingCustomer&&!deletingCustomer)return
+    const previous=document.activeElement as HTMLElement|null
+    const dialog=document.querySelector<HTMLElement>('[role="dialog"]')
+    const first=dialog?.querySelector<HTMLElement>('input, button, select, textarea, a[href]')
+    first?.focus()
+    function keyboard(event:KeyboardEvent){
+      if(event.key==='Escape'&&!busy.current){setShowAdd(false);setEditingCustomer(null);setDeletingCustomer(null)}
+      if(event.key!=='Tab'||!dialog)return
+      const controls=Array.from(dialog.querySelectorAll<HTMLElement>('input, button, select, textarea, a[href]')).filter(el=>!el.hasAttribute('disabled'))
+      const first=controls[0],last=controls[controls.length-1]
+      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus()}
+      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus()}
+    }
+    document.addEventListener('keydown',keyboard)
+    return ()=>{document.removeEventListener('keydown',keyboard);previous?.focus()}
+  },[showAdd,editingCustomer,deletingCustomer])
+
   function handleEditClick(c: Customer) {
     setForm({
       name: c.name, phone: c.phone ?? '', email: c.email ?? '', city: c.city ?? '',
       address: c.address ?? '', customer_type: c.customer_type, notes: c.notes ?? '',
       credit_limit: String(c.credit_limit ?? 0), social_url: c.social_url ?? ''
     })
+    setMutationError('')
+    setShowAdd(false)
     setEditingCustomer(c)
   }
 
@@ -116,7 +151,7 @@ export default function CustomersTable({
   async function importFromContacts() {
     const nav = navigator as Navigator & { contacts?: { select: (props: string[], opts: object) => Promise<Array<{ name?: string[]; tel?: string[]; email?: string[] }>> } }
     if (!nav.contacts) {
-      setImportMsg('هذه الميزة تعمل على Chrome (Android) وSafari (iOS) فقط.')
+      setImportMsg('المتصفح الحالي لا يدعم اختيار جهات الاتصال. أدخل البيانات يدوياً.')
       setTimeout(() => setImportMsg(''), 4000)
       return
     }
@@ -138,28 +173,13 @@ export default function CustomersTable({
     setImporting(false)
   }
 
-  function buildUrl(params: Record<string, string>) {
-    const sp = new URLSearchParams()
-    if (activeType !== 'all') sp.set('type', activeType)
-    if (searchQuery) sp.set('q', searchQuery)
-    if (sort !== 'created_at') sp.set('sort', sort)
-    for (const [k, v] of Object.entries(params)) {
-      if (v && v !== 'all' && v !== 'created_at') sp.set(k, v)
-      else sp.delete(k)
-    }
-    const s = sp.toString()
-    return `/dashboard/customers${s ? `?${s}` : ''}`
-  }
-
-  function handleSearch(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    const q = (e.currentTarget.elements.namedItem('q') as HTMLInputElement).value
-    router.push(buildUrl({ q }))
-  }
-
   async function saveCustomer(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.name.trim()) return
+    if(busy.current)return
+    setMutationError('')
+    if(!form.name.trim()||!Number.isFinite(Number(form.credit_limit))||Number(form.credit_limit)<0){setMutationError('تحقق من الاسم وحد الائتمان');return}
+    if(preview){setMutationError('معاينة فقط؛ لم يتم حفظ بيانات.');return}
+    busy.current=true
     setSaving(true)
     const supabase = createClient()
     const data = {
@@ -174,42 +194,52 @@ export default function CustomersTable({
       social_url: form.social_url.trim() || null,
     }
     
+    try {
     let error;
     if (editingCustomer) {
-      const { error: err } = await supabase.from('customers').update({ ...data, updated_at: new Date().toISOString() }).eq('id', editingCustomer.id)
+      const { error: err } = await supabase.from('customers').update({ ...data, updated_at: new Date().toISOString() }).eq('id', editingCustomer.id).eq('store_id',storeId).select('id').single()
       error = err
     } else {
-      const { error: err } = await supabase.from('customers').insert({ store_id: storeId, ...data })
+      const { error: err } = await supabase.from('customers').insert({ store_id: storeId, ...data }).select('id').single()
       error = err
     }
     
+    busy.current=false
     setSaving(false)
+    if(error)setMutationError('تعذر حفظ الزبون. تحقق من البيانات والصلاحيات ثم أعد المحاولة.')
     if (!error) {
       setShowAdd(false)
       setEditingCustomer(null)
       setForm({ name: '', phone: '', email: '', city: '', address: '', customer_type: 'retail', notes: '', credit_limit: '0', social_url: '' })
       router.refresh()
     }
+    } catch {setMutationError('تعذر الاتصال لحفظ الزبون. أعد المحاولة.')}
+    finally {busy.current=false;setSaving(false)}
   }
 
   async function deleteCustomer() {
-    if (!deletingCustomer) return
-    setDeleting(true)
-    const supabase = createClient()
-    await supabase.from('customers').delete().eq('id', deletingCustomer.id)
-    setDeleting(false)
-    setDeletingCustomer(null)
-    router.refresh()
+    if(!deletingCustomer || busy.current)return
+    setMutationError('')
+    if(preview){setMutationError('معاينة فقط؛ لم تُحذف بيانات.');return}
+    busy.current=true;setDeleting(true)
+    try {
+      const {error}=await createClient().from('customers').delete().eq('id',deletingCustomer.id).eq('store_id',storeId).select('id').single()
+      if(error)throw error
+      setDeletingCustomer(null);router.refresh()
+    } catch {setMutationError('تعذر حذف الزبون؛ قد توجد معاملات مرتبطة به أو صلاحيات غير كافية.')}
+    finally {busy.current=false;setDeleting(false)}
   }
 
   return (
-    <div className="space-y-3">
+    <div className={`${styles.table} space-y-3`}>
       {/* صف البحث وأزرار الإجراءات */}
-      <div className="flex gap-2">
-        <form onSubmit={handleSearch} className="flex flex-1 gap-2">
+      <div className={styles.toolbar}>
+        <form onSubmit={e=>e.preventDefault()} className="flex flex-1 gap-2">
           <input
             name="q"
-            defaultValue={searchQuery}
+            value={query}
+            onChange={e=>setQuery(e.target.value)}
+            aria-label="البحث عن زبون"
             placeholder="ابحث بالاسم، الهاتف، أو البريد..."
             className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-relaxed text-white placeholder-slate-500 outline-none focus:border-sky-500/50"
           />
@@ -221,14 +251,14 @@ export default function CustomersTable({
           </button>
         </form>
         <button
-          onClick={() => exportCSV(customers, currencyCode, lastOrderDates)}
+          onClick={() => exportCSV(visible, currencyCode, lastOrderDates)}
           title="تصدير CSV"
           className="shrink-0 rounded-xl border border-white/10 px-3 py-3 text-sm text-slate-400 hover:bg-white/5 hover:text-white transition-colors"
         >
           ↓ CSV
         </button>
         <button
-          onClick={() => setShowAdd(true)}
+          onClick={() => {setMutationError('');handleCancelEdit();setShowAdd(true)}}
           className="shrink-0 flex items-center gap-1.5 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm font-medium text-sky-400 hover:bg-sky-500/20 transition-colors"
         >
           <span className="text-base leading-none">+</span>
@@ -237,26 +267,31 @@ export default function CustomersTable({
         </button>
       </div>
 
+      <button type="button" className="rounded-xl border border-white/10 px-4 py-2 text-slate-300" aria-expanded={advanced} onClick={()=>setAdvanced(v=>!v)}>بحث متقدم</button>
+      {advanced&&<div className={styles.advanced}><label>المدينة<select value={city} onChange={e=>setCity(e.target.value)}><option value="">كل المدن</option>{[...new Set(customers.map(c=>c.city).filter(Boolean))].map(c=><option key={c!} value={c!}>{c}</option>)}</select></label><label>الرصيد<select value={debt} onChange={e=>setDebt(e.target.value)}><option value="all">جميع الأرصدة</option><option value="debtor">مدين</option><option value="creditor">دائن</option><option value="balanced">متوازن</option></select></label><button type="button" onClick={()=>{setCity('');setDebt('all');setQuery('');setType('all');setSorting('created_at')}}>مسح الفلاتر</button></div>}
       {/* صف الفلاتر والترتيب */}
-      <div className="flex items-center justify-between gap-2">
+      <div className={styles.filters}>
         <div className="flex gap-1 overflow-x-auto">
           {TYPE_TABS.map(tab => (
-            <Link
+            <button
+              type="button"
               key={tab.key}
-              href={buildUrl({ type: tab.key })}
+              onClick={()=>setType(tab.key)}
+              aria-pressed={type===tab.key}
               className={`shrink-0 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
-                activeType === tab.key
+                type === tab.key
                   ? 'bg-sky-500/15 text-sky-400'
                   : 'text-slate-400 hover:bg-white/5 hover:text-white'
               }`}
             >
               {tab.label}
-            </Link>
+            </button>
           ))}
         </div>
         <select
-          value={sort}
-          onChange={e => router.push(buildUrl({ sort: e.target.value }))}
+          value={sorting}
+          aria-label="ترتيب الزبائن"
+          onChange={e => setSorting(e.target.value)}
           className="shrink-0 rounded-xl border border-white/10 bg-slate-800 px-3 py-2 text-sm text-slate-300 outline-none"
         >
           <option value="created_at">الأحدث</option>
@@ -266,12 +301,12 @@ export default function CustomersTable({
       </div>
 
       {/* الجدول */}
-      {customers.length === 0 ? (
+      {visible.length === 0 ? (
         <div className="rounded-2xl border border-white/5 bg-white/3 py-16 text-center">
           <p className="text-4xl">👥</p>
-          <p className="mt-3 text-slate-400">لا يوجد زبائن</p>
+          <p className="mt-3 text-slate-400">{loadError?'البيانات غير متاحة':customers.length?'لا توجد نتائج تطابق البحث والفلاتر':'أضف أول زبون لتبدأ تنظيم علاقاتك وطلباته'}</p>
           <button
-            onClick={() => setShowAdd(true)}
+            onClick={() => {setMutationError('');handleCancelEdit();setShowAdd(true)}}
             className="mt-4 rounded-xl bg-sky-600 px-5 py-2 text-sm font-semibold text-white hover:bg-sky-500"
           >
             أضف أول زبون
@@ -293,7 +328,7 @@ export default function CustomersTable({
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {customers.map(c => {
+              {visible.slice((currentPage-1)*10,currentPage*10).map(c => {
                 const t = TYPE_LABELS[c.customer_type] ?? TYPE_LABELS.retail
                 const lastOrder = lastOrderDates[c.id]
                 const since = lastOrder ? daysSince(lastOrder) : null
@@ -301,18 +336,17 @@ export default function CustomersTable({
                   since?.level === 'fresh'  ? 'text-emerald-400' :
                   since?.level === 'stale'  ? 'text-amber-400' :
                   'text-slate-400'
-                const waNum = c.phone?.replace(/\D/g, '')
+                const waNum = whatsappNumber(c.phone,countryCode)
                 return (
                   <tr key={c.id} className="hover:bg-white/3 transition-colors">
                     <td className="px-4 py-3">
-                      <p className="font-medium text-white">{c.name}</p>
-                      {c.city && <p className="text-xs text-slate-500">{c.city}</p>}
+                      <div className={styles.avatar}><span aria-hidden="true">{c.name.trim().slice(0,1)}</span><div><Link href={`/dashboard/customers/${c.id}`} className="font-semibold text-white">{c.name}</Link>{c.city&&<p className="text-xs text-slate-400">{c.city}</p>}{!c.is_active&&<small className="text-amber-400">غير نشط</small>}</div></div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         {c.phone ? (
                           <>
-                            <a
+                            {waNum&&<a
                               href={`https://wa.me/${waNum}`}
                               target="_blank"
                               rel="noopener noreferrer"
@@ -320,7 +354,7 @@ export default function CustomersTable({
                               className="flex-shrink-0 rounded-lg bg-emerald-500/10 px-2 py-1 text-sm text-emerald-400 hover:bg-emerald-500/20 transition-colors"
                             >
                               💬
-                            </a>
+                            </a>}
                             <span className="text-sm text-slate-300" dir="ltr">{c.phone}</span>
                           </>
                         ) : c.email ? (
@@ -342,7 +376,7 @@ export default function CustomersTable({
                       </span>
                     </td>
                     <td className="hidden lg:table-cell px-4 py-3 text-xs text-slate-300">
-                      {new Date(c.created_at).toLocaleDateString('ar-u-nu-latn')}
+                      {new Date(c.created_at).toLocaleDateString('ar-u-nu-latn',{timeZone:BUSINESS_TIME_ZONE})}
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-300">
                       <Link 
@@ -358,19 +392,19 @@ export default function CustomersTable({
                         <span className="text-sm font-semibold text-red-400" dir="ltr">
                           {c.balance.toLocaleString('ar-u-nu-latn')} {currencyCode}
                         </span>
-                      ) : (
-                        <span className="text-sm text-emerald-400">✓ مسدد</span>
+                      ) : c.balance<0 ? (<span className="text-sm text-sky-400">دائن: {Math.abs(c.balance).toLocaleString('en-GB')} {currencyCode}</span>) : (
+                        <span className="text-sm text-emerald-400">✓ متوازن</span>
                       )}
                     </td>
                     <td className="hidden md:table-cell px-4 py-3">
                       {since ? (
                         <span className={`text-xs ${sinceColor}`}>{since.text}</span>
                       ) : (
-                        <span className="text-xs text-slate-600">لم يطلب بعد</span>
+                        <span className="text-xs text-slate-400">{orderError?'غير متاح':'لم يطلب بعد'}</span>
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
+                      <details className={styles.actions}><summary aria-label={`إجراءات ${c.name}`}>•••</summary><div>
                         <Link
                           href={`/dashboard/customers/${c.id}`}
                           className="rounded-lg bg-white/5 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-white transition-colors"
@@ -384,12 +418,12 @@ export default function CustomersTable({
                           تعديل
                         </button>
                         <button
-                          onClick={() => setDeletingCustomer(c)}
+                          onClick={() => {setMutationError('');setDeletingCustomer(c)}}
                           className="rounded-lg bg-red-500/10 px-2.5 py-1.5 text-xs text-red-400 hover:bg-red-500/20 transition-colors"
                         >
                           حذف
                         </button>
-                      </div>
+                      </div></details>
                     </td>
                   </tr>
                 )
@@ -399,10 +433,12 @@ export default function CustomersTable({
         </div>
       )}
 
+      {visible.length>0&&<div className={styles.pagination}><span>عرض {(currentPage-1)*10+1}–{Math.min(currentPage*10,visible.length)} من {visible.length}</span><button disabled={currentPage===1} onClick={()=>setPage(currentPage-1)}>السابق</button><span>{currentPage} / {pages}</span><button disabled={currentPage===pages} onClick={()=>setPage(currentPage+1)}>التالي</button></div>}
+      <section className={styles.empty}><h2>زبائنك في مكان واحد</h2><p>نظّم الزبائن حسب النوع، وتابع الطلبات والأرصدة بسهولة.</p><Link href="/dashboard/customers/ledger" className="text-sky-400">عرض حسابات العملاء ←</Link></section>
       {/* Modal إضافة/تعديل زبون */}
       {(showAdd || editingCustomer) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={editingCustomer ? handleCancelEdit : () => setShowAdd(false)}>
-          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-label={editingCustomer?'تعديل زبون':'زبون جديد'} className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <h2 className="mb-4 text-lg font-semibold text-white">{editingCustomer ? 'تعديل زبون' : 'زبون جديد'}</h2>
 
             {/* استيراد من جهات الاتصال */}
@@ -435,11 +471,14 @@ export default function CustomersTable({
               </>
             )}
 
+            {mutationError&&<p role="alert" className={styles.error}>{mutationError}</p>}
             <form onSubmit={saveCustomer} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">
                   <label className="mb-1 block text-xs text-slate-400">الاسم *</label>
                   <input
+                    aria-label="اسم الزبون"
+                    autoFocus
                     value={form.name}
                     onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                     required
@@ -450,6 +489,7 @@ export default function CustomersTable({
                 <div>
                   <label className="mb-1 block text-xs text-slate-400">الهاتف *</label>
                   <input
+                    aria-label="هاتف الزبون"
                     value={form.phone}
                     onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
                     placeholder="0591234567"
@@ -498,6 +538,7 @@ export default function CustomersTable({
                     onChange={e => setForm(f => ({ ...f, credit_limit: e.target.value }))}
                     type="number"
                     min="0"
+                    step="any"
                     dir="ltr"
                     className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white outline-none focus:border-sky-500/50"
                   />
@@ -548,14 +589,15 @@ export default function CustomersTable({
       {/* Modal حذف زبون */}
       {deletingCustomer && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setDeletingCustomer(null)}>
-          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900 p-6 text-center" onClick={e => e.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-label="حذف الزبون" className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900 p-6 text-center" onClick={e => e.stopPropagation()}>
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10 text-2xl text-red-400">
               ⚠️
             </div>
             <h2 className="mb-2 text-lg font-semibold text-white">حذف الزبون</h2>
             <p className="mb-6 text-sm text-slate-400">
-              هل أنت متأكد من حذف الزبون <strong>{deletingCustomer.name}</strong>؟ لا يمكن التراجع عن هذا الإجراء وسيتم حذف جميع البيانات المرتبطة به.
+              هل أنت متأكد من حذف الزبون <strong>{deletingCustomer.name}</strong>؟ لا يمكن التراجع عن الحذف. قد يمنع النظام حذف زبون لديه معاملات مرتبطة.
             </p>
+            {mutationError&&<p role="alert" className={styles.error}>{mutationError}</p>}
             <div className="flex gap-3">
               <button
                 onClick={() => setDeletingCustomer(null)}

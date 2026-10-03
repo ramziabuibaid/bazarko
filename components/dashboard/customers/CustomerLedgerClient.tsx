@@ -1,9 +1,13 @@
 'use client'
 
-import { useState, useMemo, useEffect, useTransition } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import Link from 'next/link'
+import styles from './accounts.module.css'
+import {accountStats,calculateStatement,validStatementRange} from '@/lib/customers/accounts'
+import {businessDay} from '@/lib/dashboard/simple-metrics'
+import {whatsappNumber} from '@/lib/customers/directory'
 import { getCustomerStatement, CustomerStatementResult, CustomerStatementRow } from '@/app/dashboard/customers/ledger/customer-statement-actions'
-import { useToast } from '@/components/ui/Toast'
+
 
 export interface CustomerItem {
   id: string
@@ -21,6 +25,8 @@ interface Props {
   customers: CustomerItem[]
   currencyCode: string
   storeName: string
+  loadError?: boolean
+  preview?: boolean
   initialCustomerId?: string
 }
 
@@ -40,10 +46,13 @@ export default function CustomerLedgerClient({
   customers,
   currencyCode,
   storeName,
-  initialCustomerId,
+  initialCustomerId,loadError=false,preview=false,
 }: Props) {
-  const toast = useToast()
-  const [isPending, startTransition] = useTransition()
+
+  const requestVersion=useRef(0)
+  const [statementError,setStatementError]=useState('')
+  const [page,setPage]=useState(1)
+  useEffect(()=>()=>{requestVersion.current++},[])
 
   // فلاتر قائمة العملاء
   const [search, setSearch] = useState('')
@@ -72,9 +81,9 @@ export default function CustomerLedgerClient({
     return customers.filter(c => {
       const matchSearch =
         !search ||
-        c.name.toLowerCase().includes(search.toLowerCase()) ||
-        (c.phone && c.phone.includes(search)) ||
-        (c.city && c.city.toLowerCase().includes(search.toLowerCase()))
+        c.name.toLowerCase().includes(search.trim().toLowerCase()) ||
+        (c.phone && c.phone.includes(search.trim())) ||
+        (c.city && c.city.toLowerCase().includes(search.trim().toLowerCase()))
 
       if (!matchSearch) return false
 
@@ -86,29 +95,8 @@ export default function CustomerLedgerClient({
   }, [customers, search, balanceFilter])
 
   // إحصائيات عامة
-  const stats = useMemo(() => {
-    let totalDebt = 0
-    let totalCredit = 0
-    let debtorsCount = 0
-    let clearedCount = 0
-    let creditorsCount = 0
-
-    customers.forEach(c => {
-      const b = c.balance || 0
-      if (b > 0.001) {
-        totalDebt += b
-        debtorsCount++
-      } else if (b < -0.001) {
-        totalCredit += Math.abs(b)
-        creditorsCount++
-      } else {
-        clearedCount++
-      }
-    })
-
-    return { totalDebt, totalCredit, debtorsCount, clearedCount, creditorsCount, totalCount: customers.length }
-  }, [customers])
-
+  const stats=useMemo(()=>accountStats(customers),[customers])
+  useEffect(()=>{setPage(1)},[search,balanceFilter])
   // ضبط العميل الافتراضي عند فتح الصفحة
   useEffect(() => {
     if (initialCustomerId) {
@@ -125,16 +113,18 @@ export default function CustomerLedgerClient({
     loadStatement(cust.id, fromDate, toDate)
   }
 
-  function loadStatement(custId: string, from: string, to: string) {
+  async function loadStatement(custId:string,from:string,to:string) {
+    const version=++requestVersion.current
+    setStatementData(null);setStatementError('')
+    if(!validStatementRange(from,to)){setStatementError('تحقق من الفترة؛ البداية يجب ألا تتجاوز النهاية');setLoadingStatement(false);return}
     setLoadingStatement(true)
-    startTransition(async () => {
-      const res = await getCustomerStatement(custId, from || undefined, to || undefined)
-      if (!res.success) {
-        toast(res.error || 'فشل تحميل كشف الحساب', 'error')
-      }
+    try {
+      const res:CustomerStatementResult=preview?{success:true,...calculateStatement([{id:'demo-sale',date:businessDay().date,type:'فاتورة مبيعات',doc_no:'INV-DEMO',description:'حركة توضيحية فقط',debit:500,credit:0},{id:'demo-receipt',date:businessDay().date,type:'سند قبض',doc_no:'RCP-DEMO',description:'دفعة توضيحية',debit:0,credit:150}],from,to)}:await getCustomerStatement(custId,from||undefined,to||undefined)
+      if(version!==requestVersion.current)return
+      if(!res.success){setStatementError(res.error||'تعذر تحميل كشف الحساب');return}
       setStatementData(res)
-      setLoadingStatement(false)
-    })
+    } catch {if(version===requestVersion.current)setStatementError('تعذر الاتصال لتحميل الكشف. أعد المحاولة.')}
+    finally {if(version===requestVersion.current)setLoadingStatement(false)}
   }
 
   function handleFilterDates(from: string, to: string) {
@@ -146,9 +136,8 @@ export default function CustomerLedgerClient({
   }
 
   function setPresetRange(preset: 'today' | 'week' | 'month' | 'quarter' | 'year' | 'all') {
-    const today = new Date()
-    const pad = (n: number) => String(n).padStart(2, '0')
-    const toStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
+    const toStr=businessDay().date,today=new Date(`${toStr}T12:00:00Z`)
+    const pad=(n:number)=>String(n).padStart(2,'0')
 
     if (preset === 'all') {
       handleFilterDates('', '')
@@ -161,29 +150,29 @@ export default function CustomerLedgerClient({
     }
 
     if (preset === 'week') {
-      const d = new Date()
-      d.setDate(d.getDate() - 7)
-      const fromStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+      const d = new Date(`${toStr}T12:00:00Z`)
+      d.setUTCDate(d.getUTCDate() - 6)
+      const fromStr = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
       handleFilterDates(fromStr, toStr)
       return
     }
 
     if (preset === 'month') {
-      const fromStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-01`
+      const fromStr = `${today.getUTCFullYear()}-${pad(today.getUTCMonth() + 1)}-01`
       handleFilterDates(fromStr, toStr)
       return
     }
 
     if (preset === 'quarter') {
-      const currentMonth = today.getMonth()
+      const currentMonth = today.getUTCMonth()
       const quarterStartMonth = Math.floor(currentMonth / 3) * 3
-      const fromStr = `${today.getFullYear()}-${pad(quarterStartMonth + 1)}-01`
+      const fromStr = `${today.getUTCFullYear()}-${pad(quarterStartMonth + 1)}-01`
       handleFilterDates(fromStr, toStr)
       return
     }
 
     if (preset === 'year') {
-      const fromStr = `${today.getFullYear()}-01-01`
+      const fromStr = `${today.getUTCFullYear()}-01-01`
       handleFilterDates(fromStr, toStr)
       return
     }
@@ -192,7 +181,7 @@ export default function CustomerLedgerClient({
   // رابط واتساب برسمي احترافي
   function getWhatsAppShareUrl(customer: CustomerItem, statement?: CustomerStatementResult | null) {
     if (!customer.phone) return null
-    const cleanPhone = customer.phone.replace(/\D/g, '')
+    const cleanPhone = whatsappNumber(customer.phone)
     if (!cleanPhone) return null
 
     const opening = statement ? fmt(statement.openingBalance) : '0.00'
@@ -202,7 +191,7 @@ export default function CustomerLedgerClient({
 
     const dateNotice = fromDate || toDate
       ? `📅 الفترة: من ${fromDate || 'البداية'} إلى ${toDate || 'تاريخه'}\n`
-      : `📅 تاريخ الكشف: ${new Date().toISOString().slice(0, 10)}\n`
+      : `📅 تاريخ الكشف: ${businessDay().date}\n`
 
     const printUrl = typeof window !== 'undefined'
       ? `${window.location.origin}/dashboard/customers/${customer.id}/statement/print${fromDate || toDate ? `?from=${fromDate}&to=${toDate}` : ''}`
@@ -212,8 +201,8 @@ export default function CustomerLedgerClient({
       `نرفق لكم ملخص كشف الحساب المالي لدى *${storeName}*:\n\n` +
       dateNotice +
       `📌 الرصيد الافتتاحي: ${opening} ${currencyCode}\n` +
-      `➕ إجمالي المبيعات (مدين): ${debits} ${currencyCode}\n` +
-      `➖ إجمالي المسدد (دائن): ${credits} ${currencyCode}\n` +
+      `➕ إجمالي الحركات المدينة: ${debits} ${currencyCode}\n` +
+      `➖ إجمالي الحركات الدائنة: ${credits} ${currencyCode}\n` +
       `━━━━━━━━━━━━━━━\n` +
       `⚖️ *صافي الرصيد المستحق: ${closing} ${currencyCode}*\n` +
       `━━━━━━━━━━━━━━━\n\n` +
@@ -225,13 +214,14 @@ export default function CustomerLedgerClient({
   }
 
   return (
-    <div className="space-y-6">
+    <div className={`${styles.page} space-y-6`} dir="rtl">
+      {loadError&&<p role="alert" className={styles.error}>تعذر تحميل حسابات العملاء؛ الأرصدة والإجماليات غير متاحة.</p>}
       {/* ── البطاقات الإحصائية العلوية ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className={styles.stats}>
         <div className="rounded-2xl border border-rose-500/20 bg-rose-500/5 p-4 relative overflow-hidden">
-          <p className="text-xs font-semibold text-rose-400">إجمالي الذمم المطلوبة (المدينين)</p>
+          <p className="text-xs font-semibold text-rose-400">إلنا عند الزبائن</p>
           <p className="mt-2 text-2xl font-black font-mono text-rose-300" dir="ltr">
-            {fmt(stats.totalDebt)} {currencyCode}
+            {loadError?'—':fmt(stats.totalDebt)} {currencyCode}
           </p>
           <div className="mt-1 flex items-center justify-between text-xs text-rose-400/80">
             <span>{stats.debtorsCount} عميل مدين</span>
@@ -240,19 +230,19 @@ export default function CustomerLedgerClient({
         </div>
 
         <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 relative overflow-hidden">
-          <p className="text-xs font-semibold text-emerald-400">العملاء المسددون (رصيد 0)</p>
+          <p className="text-xs font-semibold text-emerald-400">الزبائن المتوازنة أرصدتهم</p>
           <p className="mt-2 text-2xl font-black font-mono text-emerald-300">
-            {stats.clearedCount}
+            {loadError?'—':stats.clearedCount}
           </p>
           <div className="mt-1 text-xs text-emerald-400/80">
-            تم تسوية كامل الحسابات ✅
+            رصيد الحساب يساوي صفراً
           </div>
         </div>
 
         <div className="rounded-2xl border border-sky-500/20 bg-sky-500/5 p-4 relative overflow-hidden">
-          <p className="text-xs font-semibold text-sky-400">أرصدة دائنة للعملاء (لهم لدينا)</p>
+          <p className="text-xs font-semibold text-sky-400">للزبائن عندنا</p>
           <p className="mt-2 text-2xl font-black font-mono text-sky-300" dir="ltr">
-            {fmt(stats.totalCredit)} {currencyCode}
+            {loadError?'—':fmt(stats.totalCredit)} {currencyCode}
           </p>
           <div className="mt-1 text-xs text-sky-400/80">
             {stats.creditorsCount} عميل لديه رصيد دائن
@@ -262,7 +252,7 @@ export default function CustomerLedgerClient({
         <div className="rounded-2xl border border-white/10 bg-slate-900/90 p-4 relative overflow-hidden">
           <p className="text-xs font-semibold text-slate-400">إجمالي قاعدة العملاء المسجلة</p>
           <p className="mt-2 text-2xl font-black font-mono text-white">
-            {stats.totalCount}
+            {loadError?'—':stats.totalCount}
           </p>
           <div className="mt-1 text-xs text-slate-400">
             شامل كافة الأصناف والأرصدة
@@ -276,7 +266,7 @@ export default function CustomerLedgerClient({
           <div>
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
               <span>📋</span>
-              <span>مستكشف كشوف حسابات العملاء</span>
+              <span>قائمة حسابات العملاء</span>
             </h2>
             <p className="text-xs text-slate-400 mt-1">
               اختر أي زبون لعرض كشف حسابه التراكمي، حساب الرصيد الافتتاحي، والطباعة الرسمية A4 أو المشاركة عبر واتساب.
@@ -292,7 +282,7 @@ export default function CustomerLedgerClient({
               <span>سند قبض جديد</span>
             </Link>
             <Link
-              href="/dashboard/customers/new"
+              href="/dashboard/customers?add=true"
               className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-3.5 py-2 text-xs font-medium text-slate-300 transition"
             >
               <span>+</span>
@@ -307,6 +297,7 @@ export default function CustomerLedgerClient({
             <span className="absolute right-3.5 top-2.5 text-slate-500">🔍</span>
             <input
               type="text"
+              aria-label="البحث في حسابات العملاء"
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="ابحث باسم الزبون، رقم الهاتف، أو المدينة..."
@@ -326,11 +317,12 @@ export default function CustomerLedgerClient({
             {([
               { key: 'all', label: `الكل (${customers.length})` },
               { key: 'debtors', label: `مدين (${stats.debtorsCount})` },
-              { key: 'cleared', label: `مسدد (${stats.clearedCount})` },
+              { key: 'cleared', label: `متوازن (${stats.clearedCount})` },
               { key: 'creditors', label: `دائن (${stats.creditorsCount})` },
             ] as const).map(f => (
               <button
                 key={f.key}
+                aria-pressed={balanceFilter===f.key}
                 onClick={() => setBalanceFilter(f.key)}
                 className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
                   balanceFilter === f.key
@@ -359,6 +351,9 @@ export default function CustomerLedgerClient({
                 </span>
                 <button
                   onClick={() => {
+                    requestVersion.current++
+                    setLoadingStatement(false)
+                    setStatementError('')
                     setSelectedCustomer(null)
                     setSelectedCustomerId('')
                     setStatementData(null)
@@ -371,7 +366,7 @@ export default function CustomerLedgerClient({
               </div>
 
               <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400 pt-1">
-                {selectedCustomer.phone && (
+                {selectedCustomer.phone && statementData?.success && !loadingStatement && (
                   <span className="flex items-center gap-1 font-mono" dir="ltr">
                     📞 {selectedCustomer.phone}
                   </span>
@@ -406,7 +401,7 @@ export default function CustomerLedgerClient({
                 >
                   {fmt(Math.abs(selectedCustomer.balance))} {currencyCode}
                   <span className="text-xs mr-1 font-sans">
-                    {selectedCustomer.balance > 0.001 ? '(مدين / عليه)' : selectedCustomer.balance < -0.001 ? '(دائن / له)' : '(مسدد)'}
+                    {selectedCustomer.balance > 0.001 ? '(مدين / عليه)' : selectedCustomer.balance < -0.001 ? '(دائن / له)' : '(متوازن)'}
                   </span>
                 </span>
               </div>
@@ -422,7 +417,7 @@ export default function CustomerLedgerClient({
                   <span>طباعة A4 رسمية</span>
                 </Link>
 
-                {selectedCustomer.phone && (
+                {selectedCustomer.phone && statementData?.success && !loadingStatement && (
                   <a
                     href={getWhatsAppShareUrl(selectedCustomer, statementData) || '#'}
                     target="_blank"
@@ -430,7 +425,7 @@ export default function CustomerLedgerClient({
                     className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3.5 py-2 text-xs font-bold text-white shadow transition"
                   >
                     <span>💬</span>
-                    <span>إرسال واتساب</span>
+                    <span>فتح رسالة واتساب</span>
                   </a>
                 )}
 
@@ -453,6 +448,7 @@ export default function CustomerLedgerClient({
                 <span className="text-xs text-slate-500">من:</span>
                 <input
                   type="date"
+                  aria-label="بداية فترة الكشف"
                   value={fromDate}
                   onChange={e => handleFilterDates(e.target.value, toDate)}
                   className="rounded-lg border border-white/10 bg-slate-900 px-2.5 py-1 text-xs text-white focus:border-sky-500 focus:outline-none"
@@ -462,6 +458,7 @@ export default function CustomerLedgerClient({
                 <span className="text-xs text-slate-500">إلى:</span>
                 <input
                   type="date"
+                  aria-label="نهاية فترة الكشف"
                   value={toDate}
                   onChange={e => handleFilterDates(fromDate, e.target.value)}
                   className="rounded-lg border border-white/10 bg-slate-900 px-2.5 py-1 text-xs text-white focus:border-sky-500 focus:outline-none"
@@ -481,7 +478,7 @@ export default function CustomerLedgerClient({
             <div className="flex flex-wrap items-center gap-1">
               {[
                 { id: 'today', label: 'اليوم' },
-                { id: 'week', label: 'هذا الأسبوع' },
+                { id: 'week', label: 'آخر 7 أيام' },
                 { id: 'month', label: 'هذا الشهر' },
                 { id: 'quarter', label: 'هذا الربع' },
                 { id: 'year', label: 'هذه السنة' },
@@ -498,8 +495,9 @@ export default function CustomerLedgerClient({
             </div>
           </div>
 
+          {statementData?.success&&!fromDate&&!toDate&&Math.abs(statementData.closingBalance-Number(selectedCustomer.balance))>0.01&&<p role="status" className={styles.error}>رصيد الحركات {fmt(statementData.closingBalance)} {currencyCode} يختلف عن رصيد العميل المسجل {fmt(selectedCustomer.balance)} {currencyCode}. راجع الحركات والأرصدة الافتتاحية قبل اعتماد الكشف.</p>}
           {/* جدول الحركات التراكمي */}
-          {loadingStatement ? (
+          {statementError?<div role="alert" className={styles.error}>{statementError}<button onClick={()=>loadStatement(selectedCustomerId,fromDate,toDate)} className="mr-4 underline">إعادة المحاولة</button></div>:loadingStatement ? (
             <div className="py-16 text-center text-slate-400 space-y-2">
               <div className="inline-block h-8 w-8 animate-spin rounded-full border-2 border-sky-400 border-t-transparent" />
               <p className="text-sm">جاري تحميل حركات الحساب والرصيد التراكمي...</p>
@@ -611,7 +609,7 @@ export default function CustomerLedgerClient({
         {filteredCustomers.length === 0 ? (
           <div className="rounded-2xl border border-white/10 bg-slate-900/60 py-14 text-center">
             <p className="text-3xl mb-2">🔍</p>
-            <p className="text-sm font-semibold text-white">لم يتم العثور على أي زبون يطابق البحث</p>
+            <p className="text-sm font-semibold text-white">{loadError?'البيانات غير متاحة':'لم يتم العثور على أي زبون يطابق البحث'}</p>
             <p className="text-xs text-slate-400 mt-1">جرب تغيير كلمات البحث أو فلتر الرصيد</p>
           </div>
         ) : (
@@ -628,7 +626,7 @@ export default function CustomerLedgerClient({
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 text-slate-300">
-                {filteredCustomers.map(c => {
+                {filteredCustomers.slice((page-1)*10,page*10).map(c => {
                   const isSelected = selectedCustomerId === c.id
                   const b = c.balance || 0
                   return (
@@ -656,11 +654,11 @@ export default function CustomerLedgerClient({
                               {c.phone}
                             </a>
                             <a
-                              href={getWhatsAppShareUrl(c) || '#'}
+                              href={`https://wa.me/${whatsappNumber(c.phone)||''}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-2 py-1 text-emerald-400 hover:bg-emerald-500/25 transition text-xs font-medium"
-                              title="إرسال كشف ومطالبة عبر واتساب"
+                              title="فتح محادثة واتساب"
                             >
                               <span>💬</span>
                             </a>
@@ -690,7 +688,7 @@ export default function CustomerLedgerClient({
                         >
                           {fmt(Math.abs(b))} {currencyCode}
                           <span className="text-[10px] mr-1 font-sans">
-                            {b > 0.001 ? 'مدين' : b < -0.001 ? 'دائن' : 'مسدد'}
+                            {b > 0.001 ? 'مدين' : b < -0.001 ? 'دائن' : 'متوازن'}
                           </span>
                         </span>
                       </td>
@@ -728,6 +726,7 @@ export default function CustomerLedgerClient({
           </div>
         )}
       </div>
+      {filteredCustomers.length>0&&<div className={styles.pagination}><span>عرض {(page-1)*10+1}–{Math.min(page*10,filteredCustomers.length)} من {filteredCustomers.length}</span><button disabled={page<=1} onClick={()=>setPage(page-1)}>السابق</button><span>{page}</span><button disabled={page*10>=filteredCustomers.length} onClick={()=>setPage(page+1)}>التالي</button></div>}
     </div>
   )
 }
