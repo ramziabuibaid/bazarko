@@ -31,11 +31,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, message: 'تم إفراغ وإعادة ضبط بيانات المتجر بنجاح' })
     }
 
-    // 2. Promote Entity to Bazarko Action
-    if (action === 'promote') {
+    // 2. Promote Entity to Bazarko Action / Hybrid Sync
+    if (action === 'promote' || action === 'hybrid_sync') {
+      if (action === 'hybrid_sync' || entity === 'hybrid') {
+        const { executeHybridSync } = await import('@/lib/shamel/hybrid-sync')
+        const result = await executeHybridSync(supabase, storeId)
+        return NextResponse.json({ ok: true, result, message: 'تمت المزامنة الهجينة والمطابقة بنجاح' })
+      }
+
       if (!entity) {
         return NextResponse.json({ error: 'يرجى تحديد الكيان المراد ترحيله' }, { status: 400 })
       }
+
+      // If promoting customers or stock, execute via hybrid-sync engine to ensure phone matching & schema stability
+      if (entity === 'customers' || entity === 'stock') {
+        const { executeHybridSync } = await import('@/lib/shamel/hybrid-sync')
+        const result = await executeHybridSync(supabase, storeId)
+        return NextResponse.json({ ok: true, result: { promoted_count: entity === 'customers' ? (result.customersInserted + result.customersUpdated) : (result.productsInserted + result.productsUpdated) } })
+      }
+
       const { data, error } = await supabase.rpc('shamel_promote_entity', {
         p_store_id: storeId,
         p_entity: entity,

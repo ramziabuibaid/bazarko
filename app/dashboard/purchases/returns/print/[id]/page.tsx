@@ -32,6 +32,7 @@ export default async function PrintPurchaseReturnPage({ params }: { params: { id
 
   if (!store || !returnDoc) notFound()
 
+  const currency=returnDoc.currency||null
   return (
     <div className="min-h-screen bg-slate-100 p-4 sm:p-8 text-slate-900 font-sans print:p-0 print:bg-white">
       {/* ── Toolbar ── */}
@@ -69,6 +70,8 @@ export default async function PrintPurchaseReturnPage({ params }: { params: { id
           </div>
         </div>
 
+        {returnDoc.status!=='completed'&&<p className="my-3 font-bold text-amber-700">هذا السند غير معتمد ولا يثبت تسوية مالية.</p>}
+        {returnDoc.receipt_voucher_id&&<p className="my-3 text-xs print:hidden"><Link href={`/dashboard/accounting/receipts/print/${returnDoc.receipt_voucher_id}`}>عرض سند القبض المرتبط بالاسترداد النقدي</Link></p>}
         {/* Supplier & Reason Info */}
         <div className="my-4 grid grid-cols-2 gap-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
           <div>
@@ -98,9 +101,9 @@ export default async function PrintPurchaseReturnPage({ params }: { params: { id
                 <td className="p-2.5 text-center font-mono text-slate-500">{idx + 1}</td>
                 <td className="p-2.5 font-semibold text-slate-900">{item.product_name}</td>
                 <td className="p-2.5 text-center font-mono font-bold">{Number(item.quantity).toLocaleString('en-GB')}</td>
-                <td className="p-2.5 text-left font-mono">{Number(item.unit_price).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪</td>
+                <td className="p-2.5 text-left font-mono">{Number(item.unit_price).toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currency||'عملة غير محددة'}</td>
                 <td className="p-2.5 text-left font-mono font-bold text-slate-900">
-                  {Number(item.total_price).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪
+                  {Number(item.total_price).toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currency||'عملة غير محددة'}
                 </td>
               </tr>
             ))}
@@ -109,7 +112,7 @@ export default async function PrintPurchaseReturnPage({ params }: { params: { id
             <tr className="bg-slate-50 border-t-2 border-slate-900 font-bold text-xs">
               <td colSpan={4} className="p-3 text-right">الإجمالي الكلي لمردود الشراء:</td>
               <td className="p-3 text-left font-mono text-sm font-black text-slate-900">
-                {Number(returnDoc.total_amount).toLocaleString('en-GB', { minimumFractionDigits: 2 })} ₪
+                {Number(returnDoc.total_amount).toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currency||'عملة غير محددة'}
               </td>
             </tr>
           </tfoot>
@@ -117,7 +120,7 @@ export default async function PrintPurchaseReturnPage({ params }: { params: { id
 
         {/* Tafqeet in Arabic */}
         <div className="mt-4 rounded-lg bg-slate-50 p-3 text-xs font-bold text-slate-800 border">
-          فقط {tafqeet(Number(returnDoc.total_amount), 'ILS')} لا غير.
+          {currency?`فقط ${tafqeet(Number(returnDoc.total_amount),currency)} لا غير.`:'عملة السند القديم غير محددة؛ راجع الفاتورة الأصلية.'}
         </div>
 
         {/* Signatures */}

@@ -33,9 +33,9 @@ export default async function PrintSupplierStatementPage({ params, searchParams 
   ] = await Promise.all([
     supabase.from('stores').select('*').eq('id', storeId).single(),
     supabase.from('suppliers').select('*').eq('id', params.id).eq('store_id', storeId).single(),
-    supabase.from('purchase_invoices').select('id, invoice_number, invoice_date, total_amount, payment_status, notes').eq('supplier_id', params.id).eq('store_id', storeId),
-    supabase.from('purchase_returns').select('id, return_number, return_date, total_amount, reason').eq('supplier_id', params.id).eq('store_id', storeId),
-    supabase.from('vouchers').select('id, voucher_number, date, amount, payment_method, type, description').eq('supplier_id', params.id).eq('store_id', storeId).eq('type', 'payment')
+    supabase.from('purchase_invoices').select('id, invoice_number, invoice_date, total_amount, payment_status, notes').eq('supplier_id', params.id).eq('store_id', storeId).eq('status','completed'),
+    supabase.from('purchase_returns').select('id, return_number, return_date, total_amount, reason').eq('supplier_id', params.id).eq('store_id', storeId).eq('status','completed'),
+    supabase.from('vouchers').select('id, voucher_number, date, amount, payment_method, type, description, purchase_return_id').eq('supplier_id', params.id).eq('store_id', storeId).or('type.eq.payment,and(type.eq.receipt,purchase_return_id.not.is.null)')
   ])
 
   if (!store || !supplier) notFound()
@@ -81,10 +81,10 @@ export default async function PrintSupplierStatementPage({ params, searchParams 
   for (const pm of payments || []) {
     allTxs.push({
       date: pm.date,
-      type: 'سند صرف (دفعة)',
+      type: pm.type==='receipt'?'سند قبض (استرداد من المورد)':'سند صرف (دفعة)',
       doc_no: pm.voucher_number,
-      debit: Number(pm.amount || 0),
-      credit: 0,
+      debit: pm.type==='receipt'?0:Number(pm.amount || 0),
+      credit: pm.type==='receipt'?Number(pm.amount || 0):0,
       notes: pm.description || `سند صرف (${pm.payment_method || 'نقدي'})`,
     })
   }

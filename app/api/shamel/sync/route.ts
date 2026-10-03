@@ -6,6 +6,7 @@ import {
   fetchGoogleDriveFolderFiles,
   syncFromGoogleDriveFolder,
 } from '@/lib/shamel/gdrive'
+import { executeHybridSync } from '@/lib/shamel/hybrid-sync'
 
 export async function GET() {
   try {
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { action, folderId, folderName, serviceAccount, credentialsJson, autoSync, syncInterval } = body
+    const { action, folderId, folderName, serviceAccount, credentialsJson, autoSync, syncInterval, syncModel } = body
 
     // 1. Update Config action
     if (action === 'save_config') {
@@ -64,6 +65,19 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // Fetch existing config report to preserve report data while updating model if needed
+      const { data: existingCfg } = await supabase
+        .from('shamel_sync_configs')
+        .select('last_sync_report')
+        .eq('store_id', storeId)
+        .maybeSingle()
+
+      const currentReport = (existingCfg?.last_sync_report as any) || {}
+      const updatedReport = {
+        ...currentReport,
+        sync_model: syncModel || currentReport.sync_model || 'hybrid_sync',
+      }
+
       const { data, error } = await supabase
         .from('shamel_sync_configs')
         .upsert(
@@ -75,6 +89,7 @@ export async function POST(req: NextRequest) {
             gdrive_credentials_json: credentialsJson || null,
             auto_sync_enabled: autoSync ?? false,
             sync_interval_hours: syncInterval || 24,
+            last_sync_report: updatedReport,
             updated_at: new Date().toISOString(),
           },
           { onConflict: 'store_id' }
@@ -86,7 +101,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: error.message }, { status: 500 })
       }
 
-      return NextResponse.json({ ok: true, message: 'تم حفظ إعدادات المزامنة السحابية بنجاح', config: data })
+      return NextResponse.json({ ok: true, message: 'تم حفظ إعدادات ونموذج المزامنة السحابية بنجاح', config: data })
     }
 
     // 2. Trigger Sync Now action
@@ -203,7 +218,20 @@ export async function POST(req: NextRequest) {
             created_by: user.id,
           })
 
-        const detailedMsg = `اكتملت المزامنة بنجاح: تم تحديث ${summary.accountsCount} حساب، ${summary.customersCount} زبون ومورد، ${summary.productsCount} صنف، ${summary.chequesCount} شيك.`
+        // Hybrid Model: automatically synchronize Customers and Stock to Bazarko
+        let hybridResult: any = null
+        const syncModel = (config.last_sync_report as any)?.sync_model || 'hybrid_sync'
+        if (syncModel === 'hybrid_sync') {
+          try {
+            hybridResult = await executeHybridSync(supabase, storeId)
+          } catch (hybridErr: any) {
+            console.warn('Hybrid sync automatic reconciliation warning:', hybridErr?.message)
+          }
+        }
+
+        const detailedMsg = hybridResult
+          ? `اكتملت المزامنة بنجاح: تم تحديث ${summary.accountsCount} حساب، ومزامنة ومطابقة ${hybridResult.customersInserted + hybridResult.customersUpdated + hybridResult.customersMatchedByPhone} زبون، و${hybridResult.productsInserted + hybridResult.productsUpdated} صنف في بازاركو.`
+          : `اكتملت المزامنة بنجاح: تم تحديث ${summary.accountsCount} حساب، ${summary.customersCount} زبون ومورد، ${summary.productsCount} صنف، ${summary.chequesCount} شيك.`
 
         const report = {
           checked_at: now,
@@ -211,7 +239,9 @@ export async function POST(req: NextRequest) {
           folder_name: folderTitle || config.gdrive_folder_name,
           files_found: filesDownloaded,
           status: 'synced_successfully',
+          sync_model: syncModel,
           counts: summary,
+          hybrid_result: hybridResult,
         }
 
         const { data: updatedConfig } = await supabase

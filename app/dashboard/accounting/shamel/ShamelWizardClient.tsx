@@ -221,6 +221,9 @@ export default function ShamelWizardClient({
   const [syncConfig, setSyncConfig] = useState(initialSyncConfig || {})
   const [folderIdInput, setFolderIdInput] = useState(initialSyncConfig?.gdrive_folder_id || '')
   const [folderNameInput, setFolderNameInput] = useState(initialSyncConfig?.gdrive_folder_name || '')
+  const [syncModelInput, setSyncModelInput] = useState<'hybrid_sync' | 'full_migration'>(
+    (initialSyncConfig?.last_sync_report as any)?.sync_model || 'hybrid_sync'
+  )
   const [autoSyncInput, setAutoSyncInput] = useState(initialSyncConfig?.auto_sync_enabled || false)
   const [syncIntervalInput, setSyncIntervalInput] = useState(initialSyncConfig?.sync_interval_hours || 24)
   const [savingConfig, setSavingConfig] = useState(false)
@@ -708,6 +711,7 @@ export default function ShamelWizardClient({
           action: 'save_config',
           folderId: folderIdInput.trim(),
           folderName: folderNameInput.trim(),
+          syncModel: syncModelInput,
           autoSync: autoSyncInput,
           syncInterval: Number(syncIntervalInput),
         }),
@@ -2029,6 +2033,61 @@ export default function ShamelWizardClient({
                 placeholder="مثال: ma3rwdaljdede أو Shamel_Backups"
                 className="w-full px-3.5 py-2.5 text-sm border border-white/10 bg-slate-950 text-white rounded-xl outline-none focus:border-sky-500"
               />
+            </div>
+
+            {/* اختيار نموذج العمل المحاسبي */}
+            <div className="bg-slate-950/80 border border-white/10 rounded-2xl p-4 space-y-3">
+              <label className="block text-xs font-bold text-amber-400">
+                ⚙️ نموذج العمل المحاسبي وطريقة المزامنة (Operating Model):
+              </label>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label className={`p-3.5 rounded-xl border cursor-pointer transition flex items-start gap-3 ${
+                  syncModelInput === 'hybrid_sync'
+                    ? 'border-sky-500 bg-sky-500/10'
+                    : 'border-white/10 bg-white/5 hover:border-white/20'
+                }`}>
+                  <input
+                    type="radio"
+                    name="syncModel"
+                    value="hybrid_sync"
+                    checked={syncModelInput === 'hybrid_sync'}
+                    onChange={() => setSyncModelInput('hybrid_sync')}
+                    className="mt-1 w-4 h-4 text-sky-500"
+                  />
+                  <div>
+                    <div className="text-xs font-bold text-white mb-0.5">
+                      النموذج الهجين: الاستمرار مع الشامل
+                    </div>
+                    <div className="text-[11px] text-slate-400 leading-relaxed">
+                      المحاسبة مستمرة في الشامل، وبازاركو أداة تسجيل وتطوير. مزامنة البضاعة من الشامل لبازاركو، ومطابقة الزبائن بالهاتف، وترحيل فواتير وسندات بازاركو للشامل.
+                    </div>
+                  </div>
+                </label>
+
+                <label className={`p-3.5 rounded-xl border cursor-pointer transition flex items-start gap-3 ${
+                  syncModelInput === 'full_migration'
+                    ? 'border-sky-500 bg-sky-500/10'
+                    : 'border-white/10 bg-white/5 hover:border-white/20'
+                }`}>
+                  <input
+                    type="radio"
+                    name="syncModel"
+                    value="full_migration"
+                    checked={syncModelInput === 'full_migration'}
+                    onChange={() => setSyncModelInput('full_migration')}
+                    className="mt-1 w-4 h-4 text-sky-500"
+                  />
+                  <div>
+                    <div className="text-xs font-bold text-white mb-0.5">
+                      الهجرة الكاملة إلى بازاركو
+                    </div>
+                    <div className="text-[11px] text-slate-400 leading-relaxed">
+                      الانتقال التام بحيث يصبح بازاركو النظام المحاسبي والإداري الوحيد والاستغناء عن الشامل.
+                    </div>
+                  </div>
+                </label>
+              </div>
             </div>
 
             <div className="flex items-center gap-4">

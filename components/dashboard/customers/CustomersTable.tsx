@@ -23,6 +23,7 @@ interface Customer {
   customer_type: string
   is_active: boolean
   created_at: string
+  shamel_code?: string | null
 }
 
 interface Props {
@@ -340,7 +341,21 @@ export default function CustomersTable({
                 return (
                   <tr key={c.id} className="hover:bg-white/3 transition-colors">
                     <td className="px-4 py-3">
-                      <div className={styles.avatar}><span aria-hidden="true">{c.name.trim().slice(0,1)}</span><div><Link href={`/dashboard/customers/${c.id}`} className="font-semibold text-white">{c.name}</Link>{c.city&&<p className="text-xs text-slate-400">{c.city}</p>}{!c.is_active&&<small className="text-amber-400">غير نشط</small>}</div></div>
+                      <div className={styles.avatar}>
+                        <span aria-hidden="true">{c.name.trim().slice(0,1)}</span>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <Link href={`/dashboard/customers/${c.id}`} className="font-semibold text-white">{c.name}</Link>
+                            {c.shamel_code && (
+                              <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-mono font-bold text-sky-400 border border-sky-500/30" title={`رقم الشامل: ${c.shamel_code}`}>
+                                {c.shamel_code}
+                              </span>
+                            )}
+                          </div>
+                          {c.city&&<p className="text-xs text-slate-400">{c.city}</p>}
+                          {!c.is_active&&<small className="text-amber-400">غير نشط</small>}
+                        </div>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
