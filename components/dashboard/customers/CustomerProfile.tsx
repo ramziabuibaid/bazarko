@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createVoucher } from '@/app/dashboard/accounting/vouchers/voucher-actions'
+import CustomerShamelStatementView from './CustomerShamelStatementView'
 
 interface LedgerEntry {
   id: string
@@ -44,6 +45,9 @@ interface Customer {
   total_paid: number
   customer_type: string
   is_active: boolean
+  shamel_code?: string | null
+  last_order_at?: string | null
+  last_payment_at?: string | null
 }
 
 interface Props {
@@ -52,6 +56,7 @@ interface Props {
   orders: Order[]
   currencyCode: string
   storeId: string
+  storeName?: string
 }
 
 const TYPE_LABELS: Record<string, string> = { retail: 'تجزئة', wholesale: 'جملة', vip: 'VIP' }
@@ -67,9 +72,9 @@ const LEDGER_TYPE: Record<string, { label: string; color: string }> = {
   credit_note: { label: 'إشعار دائن', color: 'text-emerald-400' },
 }
 
-export default function CustomerProfile({ customer, ledger, orders, currencyCode, storeId }: Props) {
+export default function CustomerProfile({ customer, ledger, orders, currencyCode, storeId, storeName = 'متجر بازاركو' }: Props) {
   const router = useRouter()
-  const [tab, setTab] = useState<'ledger' | 'orders' | 'info'>('ledger')
+  const [tab, setTab] = useState<'shamel' | 'ledger' | 'orders' | 'info'>(customer.shamel_code ? 'shamel' : 'ledger')
   const [showPayment, setShowPayment] = useState(false)
   const [payForm, setPayForm] = useState({ amount: '', method: 'cash', notes: '' })
   const [paying, setSaving] = useState(false)
@@ -165,9 +170,16 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
                 👤
               </div>
               <h2 className="mt-3 text-lg font-bold text-white">{customer.name}</h2>
-              <span className="mt-1 inline-block rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-400">
-                {TYPE_LABELS[customer.customer_type] ?? customer.customer_type}
-              </span>
+              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                <span className="inline-block rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-400">
+                  {TYPE_LABELS[customer.customer_type] ?? customer.customer_type}
+                </span>
+                {customer.shamel_code && (
+                  <span className="inline-block rounded-full bg-sky-500/15 border border-sky-500/30 px-2.5 py-0.5 text-xs font-mono font-bold text-sky-400">
+                    رقم الشامل: {customer.shamel_code}
+                  </span>
+                )}
+              </div>
             </div>
             <button
               onClick={() => setEditMode(true)}
@@ -245,6 +257,18 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
                 <span className={item.color ?? 'text-white'} dir="ltr">{item.value} {item.unit}</span>
               </div>
             ))}
+            {customer.last_order_at && (
+              <div className="flex justify-between text-xs text-slate-300">
+                <span className="text-slate-400">آخر فاتورة / طلبية:</span>
+                <span dir="ltr">{new Date(customer.last_order_at).toLocaleDateString('ar-u-nu-latn')}</span>
+              </div>
+            )}
+            {customer.last_payment_at && (
+              <div className="flex justify-between text-xs text-emerald-400">
+                <span className="text-slate-400">آخر دفعة / سند قبض:</span>
+                <span dir="ltr">{new Date(customer.last_payment_at).toLocaleDateString('ar-u-nu-latn')}</span>
+              </div>
+            )}
             <div className="border-t border-white/10 pt-3 flex justify-between font-semibold">
               <span className="text-slate-300">الذمة الحالية</span>
               <span className={customer.balance > 0 ? 'text-red-400' : 'text-emerald-400'} dir="ltr">
@@ -255,7 +279,7 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
 
           {customer.balance > 0 && (
             <button
-              onClick={() => setShowPayment(true)}
+              onClick={() => router.push(`/dashboard/accounting/receipts?customer_id=${customer.id}`)}
               className="mt-4 w-full rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500"
             >
               💵 تسجيل دفعة
@@ -294,24 +318,60 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
       {/* ── العمود الرئيسي ── */}
       <div className="lg:col-span-2">
         {/* تبويبات */}
-        <div className="mb-4 flex gap-1 rounded-xl border border-white/5 bg-white/3 p-1">
-          {([
-            { key: 'ledger', label: '📒 كشف الحساب' },
-            { key: 'orders', label: '📦 الطلبيات' },
-          ] as const).map(t => (
+        <div className="mb-4 flex flex-wrap gap-1 rounded-xl border border-white/5 bg-white/3 p-1">
+          {customer.shamel_code && (
             <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${
-                tab === t.key ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'
+              type="button"
+              onClick={() => setTab('shamel')}
+              className={`flex-1 min-w-[140px] rounded-lg py-2.5 px-3 text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-1.5 ${
+                tab === 'shamel'
+                  ? 'bg-sky-600 text-white shadow-lg shadow-sky-600/30'
+                  : 'text-sky-400 hover:text-white hover:bg-white/5'
               }`}
             >
-              {t.label}
+              <span>🏛️ كشف حساب الشامل</span>
+              <span className="font-mono text-[10px] bg-sky-950/80 px-1.5 py-0.5 rounded border border-sky-400/40 font-bold">
+                {customer.shamel_code}
+              </span>
             </button>
-          ))}
+          )}
+
+          <button
+            type="button"
+            onClick={() => setTab('ledger')}
+            className={`flex-1 min-w-[120px] rounded-lg py-2.5 px-3 text-xs sm:text-sm font-medium transition-all ${
+              tab === 'ledger'
+                ? 'bg-slate-700 text-white shadow'
+                : 'text-slate-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            📒 كشف حساب بازاركو
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setTab('orders')}
+            className={`flex-1 min-w-[100px] rounded-lg py-2.5 px-3 text-xs sm:text-sm font-medium transition-all ${
+              tab === 'orders'
+                ? 'bg-slate-700 text-white shadow'
+                : 'text-slate-400 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            📦 طلبيات المتجر ({orders.length})
+          </button>
         </div>
 
-        {/* كشف الحساب */}
+        {/* 1. كشف حساب الشامل المحاسبي */}
+        {tab === 'shamel' && customer.shamel_code && (
+          <CustomerShamelStatementView
+            customerCode={customer.shamel_code}
+            customerName={customer.name}
+            storeName={storeName}
+            currencyCode={currencyCode}
+          />
+        )}
+
+        {/* 2. كشف حساب بازاركو */}
         {tab === 'ledger' && (
           <div id="print-area" className="overflow-hidden rounded-2xl border border-white/5">
             {/* رأس الطباعة — يظهر فقط عند الطباعة */}
@@ -323,7 +383,7 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
             </div>
 
             {ledger.length === 0 ? (
-              <div className="py-12 text-center text-slate-500">لا توجد حركات مالية</div>
+              <div className="py-12 text-center text-slate-500">لا توجد حركات مالية مسجلة في بازاركو بعد</div>
             ) : (
               <div className="overflow-x-auto">
               <table className="w-full min-w-[560px] text-sm print:min-w-0">
@@ -377,7 +437,7 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
           </div>
         )}
 
-        {/* الطلبيات */}
+        {/* 3. الطلبيات */}
         {tab === 'orders' && (
           <div className="overflow-hidden rounded-2xl border border-white/5">
             {orders.length === 0 ? (

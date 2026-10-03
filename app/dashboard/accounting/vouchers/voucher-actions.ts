@@ -187,6 +187,7 @@ function normalizePaymentMethod(method?: string | null): 'cash' | 'cheque' | 'sp
  * والربط الاختياري بالفواتير
  */
 export async function createVoucher(input: CreateVoucherInput) {
+  if(input.type==='receipt' && ['cash','cheque','split'].includes(normalizePaymentMethod(input.payment_method))) return {success:false,error:'سجّل القبض النقدي أو الشيكات والمختلط من صفحة سندات القبض لضمان الحفظ الذري'}
   try {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -653,6 +654,7 @@ export async function deleteVoucher(voucherId: string) {
       .single()
 
     if (vErr || !v) return { success: false, error: 'السند غير موجود' }
+    if(v.creation_request_id) return {success:false,error:'السند الذري لا يقبل الحذف من هذا المسار؛ يلزم عكس ذري مستقل'}
 
     // التحقق من قفل الفترة المحاسبية لتاريخ السند
     const periodCheck = await checkIsPeriodClosed(storeId, v.date)
@@ -909,6 +911,7 @@ export async function updateVoucher(input: UpdateVoucherInput) {
       .single()
 
     if (oldErr || !oldV) return { success: false, error: 'السند غير موجود' }
+    if(oldV.creation_request_id) return {success:false,error:'السند الذري لا يقبل التعديل من هذا المسار؛ يلزم عكس ذري مستقل'}
 
     const totalAmount = Number(input.amount)
     if (isNaN(totalAmount) || totalAmount <= 0) {

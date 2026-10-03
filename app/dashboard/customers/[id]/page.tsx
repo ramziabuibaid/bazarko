@@ -18,7 +18,7 @@ export default async function CustomerDetailPage({ params }: Props) {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, currency_code')
+    .select('id, name, currency_code')
     .eq('id', storeId)
     .single()
   if (!store) redirect('/onboarding')
@@ -61,6 +61,7 @@ export default async function CustomerDetailPage({ params }: Props) {
         orders={orders ?? []}
         currencyCode={store.currency_code}
         storeId={store.id}
+        storeName={store.name}
       />
     </div>
   )

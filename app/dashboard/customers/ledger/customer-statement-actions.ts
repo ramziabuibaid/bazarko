@@ -172,7 +172,13 @@ export async function getCustomerStatement(
       }
     }
 
-    const {openingBalance,rows:periodRows,totalDebit,totalCredit,closingBalance}=calculateStatement(allTxs,fromDate,toDate)
+    let {openingBalance,rows:periodRows,totalDebit,totalCredit,closingBalance}=calculateStatement(allTxs,fromDate,toDate)
+
+    // إذا لم تكن هناك حركات مسجلة داخل بازاركو وكان للزبون رصيد مستورد من الشامل
+    if (allTxs.length === 0 && Number(customer.balance || 0) !== 0) {
+      openingBalance = Number(customer.balance || 0)
+      closingBalance = Number(customer.balance || 0)
+    }
 
     return {
       success: true,

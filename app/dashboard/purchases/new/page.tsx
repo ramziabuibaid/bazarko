@@ -8,7 +8,7 @@ export const metadata = {
   title: 'تسجيل فاتورة شراء جديدة — Bazarko ERP',
 }
 
-export default async function NewPurchasePage() {
+export default async function NewPurchasePage({searchParams}:{searchParams?:{supplier_id?:string}}) {
   const supabase = createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
@@ -32,6 +32,7 @@ export default async function NewPurchasePage() {
   if(boxesError)throw new Error('تعذر تحميل الصناديق')
   return (
     <CreatePurchaseClient
+      initialSupplier={searchParams?.supplier_id}
       cashBoxes={boxes||[]}
       store={store!}
       suppliers={suppliers || []}

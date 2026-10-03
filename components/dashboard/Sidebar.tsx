@@ -50,8 +50,7 @@ const navGroups: NavGroup[] = [
       { href: '/dashboard/accounting/invoices', label: 'فواتير المبيعات', icon: '🧾' },
       { href: '/dashboard/invoices/returns', label: 'مردودات المبيعات', icon: '↩️' },
       { href: '/dashboard/quotations', label: 'عروض الأسعار', icon: '📑' },
-      { href: '/dashboard/customers', label: 'دليل الزبائن والعملاء', icon: '👥' },
-      { href: '/dashboard/customers/ledger', label: 'كشوف حسابات العملاء', icon: '📋' },
+      { href: '/dashboard/customers', label: 'دليل وحسابات العملاء', icon: '👥' },
     ],
   },
   {
@@ -132,6 +131,15 @@ const navGroups: NavGroup[] = [
     items: [
       { href: '/dashboard/maintenance', label: 'لوحة الصيانة', icon: '🔧' },
       { href: '/dashboard/maintenance/new', label: 'استلام جهاز جديد', icon: '➕' },
+    ],
+  },
+  {
+    id: 'settings',
+    title: 'الإعدادات والمستخدمون',
+    icon: '⚙️',
+    items: [
+      { href: '/dashboard/settings', label: 'إعدادات وهوية المتجر', icon: '⚙️' },
+      { href: '/dashboard/settings/team', label: 'فريق العمل والمستخدمين', icon: '👥' },
     ],
   },
 ]

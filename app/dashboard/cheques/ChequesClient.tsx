@@ -7,9 +7,11 @@ import { createClient } from '@/lib/supabase/client'
 import { PALESTINIAN_BANKS, getPmaBankByCode, normalizeBankCode } from '@/lib/palestineBanks'
 import { tafqeet } from '@/lib/tafqeet'
 import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
+import LinkedChequeOperation from './LinkedChequeOperation'
 import { executeCheckOperation, getCheckAuditHistory } from './check-lifecycle-actions'
 
 interface CheckItem {
+  receipt_settlement_active?:boolean|null
   id: string
   store_id: string
   type: 'received' | 'issued'
@@ -738,7 +740,8 @@ export default function ChequesClient({
                       <td className="p-3.5 text-center">
                         <div className="flex items-center justify-center flex-wrap gap-1">
                           {/* المرحلة 1: في الحافظة */}
-                          {check.status === 'in_portfolio' && (
+                          {check.receipt_settlement_active != null && check.status === 'in_portfolio' && <><button onClick={()=>setShowOpModal({check,opType:'collect'})} className="rounded-lg bg-emerald-500/15 px-2 py-1 text-xs text-emerald-300">تحصيل مرتبط</button><button onClick={()=>setShowOpModal({check,opType:'return_to_customer'})} className="rounded-lg bg-amber-500/15 px-2 py-1 text-xs text-amber-300">إعادة للمصدر</button></>}
+                          {check.receipt_settlement_active == null && check.status === 'in_portfolio' && (
                             <>
                               <button
                                 onClick={() => setShowOpModal({ check, opType: 'deposit' })}
@@ -794,7 +797,7 @@ export default function ChequesClient({
                           )}
 
                           {/* المرحلة 3: محصل ومودع */}
-                          {check.status === 'collected' && (
+                          {check.receipt_settlement_active == null && check.status === 'collected' && (
                             <button
                               onClick={() => setShowOpModal({ check, opType: 'bounce' })}
                               className="rounded-lg bg-rose-500/15 px-2 py-1 text-[11px] font-bold text-rose-400 hover:bg-rose-500/25 transition"
@@ -1135,7 +1138,8 @@ export default function ChequesClient({
       )}
 
       {/* ── Modal: تنفيذ عملية على الشيك مع المعادلة المحاسبية المزدوجة ── */}
-      {showOpModal && (
+      <LinkedChequeOperation storeId={store.id} selection={showOpModal?.check.receipt_settlement_active != null ? showOpModal : null} banks={bankAccounts} boxes={cashBoxes} onClose={()=>setShowOpModal(null)}/>
+      {showOpModal && showOpModal.check.receipt_settlement_active == null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
           <div className="relative max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-white/10 pb-3">

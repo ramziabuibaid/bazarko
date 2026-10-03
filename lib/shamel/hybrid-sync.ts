@@ -28,6 +28,27 @@ export function normalizePhone(phone: string | null | undefined): string {
 }
 
 /**
+ * Calculates sell price from cost price:
+ * - 35% profit margin (cost * 1.35)
+ * - Tiered rounding upwards:
+ *   - cost < 100 ILS: round up to nearest 10
+ *   - cost 100 - 1000 ILS: round up to nearest 50
+ *   - cost > 1000 ILS: round up to nearest 100
+ */
+export function calculateSellPrice(costPrice: number): number {
+  const cost = Number(costPrice) || 0
+  if (cost <= 0) return 0
+  const rawPrice = cost * 1.35
+  if (cost < 100) {
+    return Math.ceil(rawPrice / 10) * 10
+  } else if (cost <= 1000) {
+    return Math.ceil(rawPrice / 50) * 50
+  } else {
+    return Math.ceil(rawPrice / 100) * 100
+  }
+}
+
+/**
  * Synchronizes Shamel data to Bazarko operational tables under the Hybrid Model:
  * 1. Customers:
  *    - Existing Bazarko customer with matching shamel_code -> update details.
@@ -58,7 +79,7 @@ export async function executeHybridSync(
   while (true) {
     const { data, error } = await supabase
       .from('shamel_customers')
-      .select('code, name, phone, address, balance')
+      .select('code, name, phone, address, balance, last_invoice_date, last_receipt_date')
       .eq('store_id', storeId)
       .range(page * 1000, (page + 1) * 1000 - 1)
     if (error) throw new Error(`فشل جلب زبائن الشامل: ${error.message}`)
@@ -72,7 +93,7 @@ export async function executeHybridSync(
   while (true) {
     const { data, error } = await supabase
       .from('customers')
-      .select('id, name, phone, shamel_code, address')
+      .select('id, name, phone, shamel_code, address, balance, last_order_at, last_payment_at')
       .eq('store_id', storeId)
       .range(page * 1000, (page + 1) * 1000 - 1)
     if (error) throw new Error(`فشل جلب زبائن بازاركو: ${error.message}`)
@@ -99,6 +120,10 @@ export async function executeHybridSync(
   for (const sc of allShamelCustomers) {
     if (sc.code.startsWith('S')) continue
 
+    const lastOrderIso = sc.last_invoice_date ? `${sc.last_invoice_date}T00:00:00.000Z` : null
+    const lastPaymentIso = sc.last_receipt_date ? `${sc.last_receipt_date}T00:00:00.000Z` : null
+    const shamelBalance = Number(sc.balance || 0)
+
     const existingByCode = byShamelCode.get(sc.code)
     if (existingByCode) {
       await supabase
@@ -107,6 +132,9 @@ export async function executeHybridSync(
           name: sc.name,
           phone: sc.phone || existingByCode.phone,
           address: sc.address || existingByCode.address,
+          balance: shamelBalance,
+          last_order_at: lastOrderIso || existingByCode.last_order_at,
+          last_payment_at: lastPaymentIso || existingByCode.last_payment_at,
           updated_at: new Date().toISOString(),
         })
         .eq('id', existingByCode.id)
@@ -123,6 +151,9 @@ export async function executeHybridSync(
         .update({
           shamel_code: sc.code,
           address: existingByPhone.address || sc.address || undefined,
+          balance: shamelBalance,
+          last_order_at: lastOrderIso || existingByPhone.last_order_at,
+          last_payment_at: lastPaymentIso || existingByPhone.last_payment_at,
           updated_at: new Date().toISOString(),
         })
         .eq('id', existingByPhone.id)
@@ -136,7 +167,9 @@ export async function executeHybridSync(
         name: sc.name,
         phone: sc.phone || '',
         address: sc.address || '',
-        balance: 0,
+        balance: shamelBalance,
+        last_order_at: lastOrderIso,
+        last_payment_at: lastPaymentIso,
         shamel_code: sc.code,
         customer_type: 'retail',
         is_active: true,
@@ -175,7 +208,7 @@ export async function executeHybridSync(
   while (true) {
     const { data, error } = await supabase
       .from('products')
-      .select('id, shamel_code, name, price, cost_price, barcode')
+      .select('id, shamel_code, sku, barcode, name, price, cost_price')
       .eq('store_id', storeId)
       .range(page * 1000, (page + 1) * 1000 - 1)
     if (error) throw new Error(`فشل جلب منتجات بازاركو: ${error.message}`)
@@ -184,45 +217,63 @@ export async function executeHybridSync(
     page++
   }
 
-  const productByShamelCode = new Map<string, any>()
+  const productByCode = new Map<string, any>()
+  const productByBarcode = new Map<string, any>()
   for (const p of existingBazarkoProducts) {
     if (p.shamel_code) {
-      productByShamelCode.set(p.shamel_code, p)
+      productByCode.set(p.shamel_code, p)
+    }
+    if (p.sku) {
+      productByCode.set(p.sku, p)
+    }
+    if (p.barcode) {
+      productByBarcode.set(p.barcode, p)
     }
   }
 
   const productsToInsert: any[] = []
 
   for (const stk of allShamelStock) {
-    const existing = productByShamelCode.get(stk.code)
+    const existing = productByCode.get(stk.code) || (stk.barcode ? productByBarcode.get(stk.barcode) : null)
+    const inStockQty = Math.max(0, Math.round(Number(stk.quantity) || 0))
+    const cost = Number(stk.cost_price) || 0
+
     if (existing) {
+      const newPrice = cost > 0 ? calculateSellPrice(cost) : (stk.price > 0 ? stk.price : existing.price)
       await supabase
         .from('products')
         .update({
           name: stk.name,
+          sku: stk.code,
+          shamel_code: stk.code,
           barcode: stk.barcode || existing.barcode,
-          price: stk.price > 0 ? stk.price : existing.price,
-          cost_price: stk.cost_price > 0 ? stk.cost_price : existing.cost_price,
-          status: 'active',
+          price: newPrice,
+          cost_price: cost > 0 ? cost : existing.cost_price,
+          stock_quantity: inStockQty,
+          track_stock: true,
+          status: inStockQty > 0 ? 'active' : 'hidden',
           updated_at: new Date().toISOString(),
         })
         .eq('id', existing.id)
       result.productsUpdated++
-    } else {
+    } else if (inStockQty > 0) {
+      // Synchronize only products that have available stock
       const cleanCode = (stk.code || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
       const rand = Math.random().toString(36).substring(2, 8)
       const slug = `shamel-${cleanCode || 'item'}-${rand}`
+      const price = cost > 0 ? calculateSellPrice(cost) : (Number(stk.price) || 0)
 
       productsToInsert.push({
         store_id: storeId,
         name: stk.name,
         slug,
         sku: stk.code,
-        barcode: stk.barcode || '',
-        price: Number(stk.price) || 0,
-        cost_price: Number(stk.cost_price) || 0,
-        stock_quantity: 0,
         shamel_code: stk.code,
+        barcode: stk.barcode || '',
+        price,
+        cost_price: cost,
+        stock_quantity: inStockQty,
+        track_stock: true,
         status: 'active',
       })
     }

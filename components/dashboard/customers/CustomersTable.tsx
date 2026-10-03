@@ -7,6 +7,7 @@ import {BUSINESS_TIME_ZONE} from '@/lib/dashboard/simple-metrics'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import ShamelStatementModal from '@/app/dashboard/accounting/shamel/components/ShamelStatementModal'
 
 interface Customer {
   id: string
@@ -24,12 +25,15 @@ interface Customer {
   is_active: boolean
   created_at: string
   shamel_code?: string | null
+  last_order_at?: string | null
+  last_payment_at?: string | null
 }
 
 interface Props {
   customers: Customer[]
   currencyCode: string
   storeId: string
+  storeName?: string
   activeType: string
   searchQuery: string
   sort: string
@@ -91,18 +95,134 @@ function exportCSV(customers: Customer[], currencyCode: string, lastOrderDates: 
   URL.revokeObjectURL(url)
 }
 
+interface ColumnDef {
+  id: string
+  label: string
+  defaultVisible: boolean
+}
+
+const ALL_COLUMNS: ColumnDef[] = [
+  { id: 'name', label: 'الزبون', defaultVisible: true },
+  { id: 'phone', label: 'التواصل', defaultVisible: true },
+  { id: 'customer_type', label: 'النوع', defaultVisible: true },
+  { id: 'created_at', label: 'تاريخ التسجيل', defaultVisible: true },
+  { id: 'total_orders', label: 'طلبيات بازاركو', defaultVisible: true },
+  { id: 'balance', label: 'الذمة / الرصيد', defaultVisible: true },
+  { id: 'last_order', label: 'آخر طلبية بازاركو', defaultVisible: true },
+  { id: 'last_shamel_invoice', label: 'آخر فاتورة شامل', defaultVisible: true },
+  { id: 'last_shamel_payment', label: 'آخر دفعة شامل', defaultVisible: true },
+]
+
+const DEFAULT_VISIBLE_COLUMNS = ALL_COLUMNS.reduce((acc, col) => {
+  acc[col.id] = col.defaultVisible
+  return acc
+}, {} as Record<string, boolean>)
+
 export default function CustomersTable({
-  customers, currencyCode, storeId, activeType, searchQuery, sort, lastOrderDates, initShowAdd, countryCode='PS', preview=false, loadError=false, orderError=false,
+  customers, currencyCode, storeId, storeName = 'متجر بازاركو', activeType, searchQuery, sort, lastOrderDates, initShowAdd, countryCode='PS', preview=false, loadError=false, orderError=false,
 }: Props) {
   const router = useRouter()
-  const [query,setQuery]=useState(searchQuery),[type,setType]=useState(activeType),[sorting,setSorting]=useState(sort)
-  const [city,setCity]=useState(''),[debt,setDebt]=useState('all'),[advanced,setAdvanced]=useState(false),[page,setPage]=useState(1)
-  const [mutationError,setMutationError]=useState('')
-  const busy=useRef(false)
-  const visible=filterCustomers(customers,query,type,city,debt,sorting)
-  const pages=Math.max(1,Math.ceil(visible.length/10)),currentPage=Math.min(page,pages)
-  useEffect(()=>{setPage(1)},[query,type,city,debt,sorting])
-  useEffect(()=>{setQuery(searchQuery);setType(activeType);setSorting(sort)},[searchQuery,activeType,sort])
+  const [query, setQuery] = useState(searchQuery)
+  const [type, setType] = useState(activeType)
+  const [city, setCity] = useState('')
+  const [debt, setDebt] = useState('all')
+  const [hideZero, setHideZero] = useState(false)
+  const [advanced, setAdvanced] = useState(false)
+  const [page, setPage] = useState(1)
+  const [sortField, setSortField] = useState<string>(sort || 'created_at')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+  const [mutationError, setMutationError] = useState('')
+  const [showColSettings, setShowColSettings] = useState(false)
+  const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>(DEFAULT_VISIBLE_COLUMNS)
+  const [statementCustomer, setStatementCustomer] = useState<Customer | null>(null)
+
+  // Load custom columns preferences
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`bazarko_cust_cols_${storeId}`)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        setVisibleColumns(prev => ({ ...prev, ...parsed }))
+      }
+    } catch {}
+  }, [storeId])
+
+  function toggleColumn(colId: string) {
+    setVisibleColumns(prev => {
+      const next = { ...prev, [colId]: !prev[colId] }
+      try {
+        localStorage.setItem(`bazarko_cust_cols_${storeId}`, JSON.stringify(next))
+      } catch {}
+      return next
+    })
+  }
+
+  function handleSort(columnId: string) {
+    if (sortField === columnId) {
+      setSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortField(columnId)
+      setSortOrder('desc')
+    }
+  }
+
+  // Filter customers
+  const filtered = filterCustomers(customers, query, type, city, hideZero ? 'non_zero' : debt, 'created_at')
+
+  // Client-side sort based on header click
+  const visible = [...filtered].sort((a, b) => {
+    let comparison = 0
+    switch (sortField) {
+      case 'name':
+        comparison = a.name.localeCompare(b.name, 'ar')
+        break
+      case 'phone':
+        comparison = (a.phone || '').localeCompare(b.phone || '')
+        break
+      case 'customer_type':
+        comparison = a.customer_type.localeCompare(b.customer_type)
+        break
+      case 'created_at':
+        comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        break
+      case 'total_orders':
+      case 'orders':
+        comparison = a.total_orders - b.total_orders
+        break
+      case 'balance':
+        comparison = a.balance - b.balance
+        break
+      case 'last_order': {
+        const da = lastOrderDates[a.id] ? new Date(lastOrderDates[a.id]).getTime() : 0
+        const db = lastOrderDates[b.id] ? new Date(lastOrderDates[b.id]).getTime() : 0
+        comparison = da - db
+        break
+      }
+      case 'last_shamel_invoice': {
+        const da = a.last_order_at ? new Date(a.last_order_at).getTime() : 0
+        const db = b.last_order_at ? new Date(b.last_order_at).getTime() : 0
+        comparison = da - db
+        break
+      }
+      case 'last_shamel_payment': {
+        const da = a.last_payment_at ? new Date(a.last_payment_at).getTime() : 0
+        const db = b.last_payment_at ? new Date(b.last_payment_at).getTime() : 0
+        comparison = da - db
+        break
+      }
+      default:
+        comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    }
+    return sortOrder === 'asc' ? comparison : -comparison
+  })
+
+  const PAGE_SIZE = 20
+  const pages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
+  const currentPage = Math.min(page, pages)
+  useEffect(() => { setPage(1) }, [query, type, city, debt, hideZero, sortField, sortOrder])
+  useEffect(() => { setQuery(searchQuery); setType(activeType); if (sort) setSortField(sort) }, [searchQuery, activeType, sort])
+
+  const busy = useRef(false)
   const [showAdd, setShowAdd] = useState(initShowAdd || false)
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
   const [deletingCustomer, setDeletingCustomer] = useState<Customer | null>(null)
@@ -251,6 +371,33 @@ export default function CustomersTable({
             بحث
           </button>
         </form>
+
+        {/* زر إخفاء أصحاب الرصيد الصفري */}
+        <button
+          type="button"
+          onClick={() => setHideZero(v => !v)}
+          className={`shrink-0 flex items-center gap-1.5 rounded-xl border px-3.5 py-3 text-sm font-medium transition-colors ${
+            hideZero
+              ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+              : 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-white'
+          }`}
+          title="إخفاء الزبائن الذين رصيدهم صفر"
+        >
+          <span>{hideZero ? '✓' : '∅'}</span>
+          <span>إخفاء الأرصدة الصفرية</span>
+        </button>
+
+        {/* تخصيص الأعمدة */}
+        <button
+          type="button"
+          onClick={() => setShowColSettings(true)}
+          className="shrink-0 flex items-center gap-1.5 rounded-xl border border-white/10 px-3 py-3 text-sm text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+          title="تخصيص أعمدة الجدول"
+        >
+          <span>⚙️</span>
+          <span className="hidden md:inline">الأعمدة</span>
+        </button>
+
         <button
           onClick={() => exportCSV(visible, currencyCode, lastOrderDates)}
           title="تصدير CSV"
@@ -269,7 +416,8 @@ export default function CustomersTable({
       </div>
 
       <button type="button" className="rounded-xl border border-white/10 px-4 py-2 text-slate-300" aria-expanded={advanced} onClick={()=>setAdvanced(v=>!v)}>بحث متقدم</button>
-      {advanced&&<div className={styles.advanced}><label>المدينة<select value={city} onChange={e=>setCity(e.target.value)}><option value="">كل المدن</option>{[...new Set(customers.map(c=>c.city).filter(Boolean))].map(c=><option key={c!} value={c!}>{c}</option>)}</select></label><label>الرصيد<select value={debt} onChange={e=>setDebt(e.target.value)}><option value="all">جميع الأرصدة</option><option value="debtor">مدين</option><option value="creditor">دائن</option><option value="balanced">متوازن</option></select></label><button type="button" onClick={()=>{setCity('');setDebt('all');setQuery('');setType('all');setSorting('created_at')}}>مسح الفلاتر</button></div>}
+      {advanced&&<div className={styles.advanced}><label>المدينة<select value={city} onChange={e=>setCity(e.target.value)}><option value="">كل المدن</option>{[...new Set(customers.map(c=>c.city).filter(Boolean))].map(c=><option key={c!} value={c!}>{c}</option>)}</select></label><label>الرصيد<select value={debt} onChange={e=>setDebt(e.target.value)}><option value="all">جميع الأرصدة</option><option value="debtor">مدين</option><option value="creditor">دائن</option><option value="balanced">متوازن</option></select></label><button type="button" onClick={()=>{setCity('');setDebt('all');setHideZero(false);setQuery('');setType('all');setSortField('created_at');setSortOrder('desc')}}>مسح الفلاتر</button></div>}
+      
       {/* صف الفلاتر والترتيب */}
       <div className={styles.filters}>
         <div className="flex gap-1 overflow-x-auto">
@@ -289,17 +437,66 @@ export default function CustomersTable({
             </button>
           ))}
         </div>
-        <select
-          value={sorting}
-          aria-label="ترتيب الزبائن"
-          onChange={e => setSorting(e.target.value)}
-          className="shrink-0 rounded-xl border border-white/10 bg-slate-800 px-3 py-2 text-sm text-slate-300 outline-none"
-        >
-          <option value="created_at">الأحدث</option>
-          <option value="balance">الأعلى ذمة</option>
-          <option value="orders">الأكثر طلبيات</option>
-        </select>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-400">ترتيب سريع:</span>
+          <select
+            value={sortField}
+            aria-label="ترتيب الزبائن"
+            onChange={e => { setSortField(e.target.value); setSortOrder('desc') }}
+            className="shrink-0 rounded-xl border border-white/10 bg-slate-800 px-3 py-2 text-sm text-slate-300 outline-none"
+          >
+            <option value="created_at">الأحدث تسجيلاً</option>
+            <option value="balance">الأعلى ذمة</option>
+            <option value="total_orders">الأكثر طلبيات</option>
+            <option value="name">الاسم أبجدياً</option>
+            <option value="last_order">آخر طلبية بازاركو</option>
+            <option value="last_shamel_invoice">آخر فاتورة شامل</option>
+            <option value="last_shamel_payment">آخر دفعة شامل</option>
+          </select>
+        </div>
       </div>
+
+      {/* نافذة تخصيص الأعمدة */}
+      {showColSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setShowColSettings(false)}>
+          <div role="dialog" aria-modal="true" aria-label="تخصيص الأعمدة" className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900 p-6" onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-white mb-1">تخصيص أعمدة الجدول</h3>
+            <p className="text-xs text-slate-400 mb-4">اختر الأعمدة التي ترغب بعرضها (يتم حفظ اختياراتك دائماً)</p>
+            <div className="space-y-2 mb-6">
+              {ALL_COLUMNS.map(col => (
+                <label key={col.id} className="flex items-center justify-between p-2 rounded-xl bg-white/5 hover:bg-white/10 cursor-pointer transition-colors">
+                  <span className="text-sm text-slate-200">{col.label}</span>
+                  <input
+                    type="checkbox"
+                    checked={visibleColumns[col.id] ?? true}
+                    onChange={() => toggleColumn(col.id)}
+                    className="h-4 w-4 rounded accent-sky-500"
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setVisibleColumns(DEFAULT_VISIBLE_COLUMNS)
+                  try { localStorage.removeItem(`bazarko_cust_cols_${storeId}`) } catch {}
+                }}
+                className="rounded-xl border border-white/10 px-4 py-2 text-xs text-slate-400 hover:text-white"
+              >
+                استعادة الافتراضي
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowColSettings(false)}
+                className="rounded-xl bg-sky-600 px-5 py-2 text-xs font-semibold text-white hover:bg-sky-500"
+              >
+                تم
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* الجدول */}
       {visible.length === 0 ? (
@@ -315,130 +512,270 @@ export default function CustomersTable({
         </div>
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-white/5">
-          <table className="min-w-[680px] w-full">
+          <table className="min-w-[760px] w-full">
             <thead>
               <tr className="border-b border-white/5 bg-white/3">
-                <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الزبون</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">التواصل</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">النوع</th>
-                <th className="hidden lg:table-cell px-4 py-3 text-right text-xs font-medium text-slate-400">تاريخ التسجيل</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الطلبيات</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-slate-400">الذمة</th>
-                <th className="hidden md:table-cell px-4 py-3 text-right text-xs font-medium text-slate-400">آخر طلبية</th>
+                {visibleColumns.name && (
+                  <th onClick={() => handleSort('name')} className="px-4 py-3 text-right text-xs font-medium text-slate-400 cursor-pointer select-none hover:text-white transition-colors">
+                    <div className="flex items-center gap-1.5 justify-start">
+                      <span>الزبون</span>
+                      {sortField === 'name' && <span className="text-sky-400 font-bold">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                    </div>
+                  </th>
+                )}
+                {visibleColumns.phone && (
+                  <th onClick={() => handleSort('phone')} className="px-4 py-3 text-right text-xs font-medium text-slate-400 cursor-pointer select-none hover:text-white transition-colors">
+                    <div className="flex items-center gap-1.5 justify-start">
+                      <span>التواصل</span>
+                      {sortField === 'phone' && <span className="text-sky-400 font-bold">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                    </div>
+                  </th>
+                )}
+                {visibleColumns.customer_type && (
+                  <th onClick={() => handleSort('customer_type')} className="px-4 py-3 text-right text-xs font-medium text-slate-400 cursor-pointer select-none hover:text-white transition-colors">
+                    <div className="flex items-center gap-1.5 justify-start">
+                      <span>النوع</span>
+                      {sortField === 'customer_type' && <span className="text-sky-400 font-bold">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                    </div>
+                  </th>
+                )}
+                {visibleColumns.created_at && (
+                  <th onClick={() => handleSort('created_at')} className="hidden lg:table-cell px-4 py-3 text-right text-xs font-medium text-slate-400 cursor-pointer select-none hover:text-white transition-colors">
+                    <div className="flex items-center gap-1.5 justify-start">
+                      <span>تاريخ التسجيل</span>
+                      {sortField === 'created_at' && <span className="text-sky-400 font-bold">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                    </div>
+                  </th>
+                )}
+                {visibleColumns.total_orders && (
+                  <th onClick={() => handleSort('total_orders')} className="px-4 py-3 text-right text-xs font-medium text-slate-400 cursor-pointer select-none hover:text-white transition-colors">
+                    <div className="flex items-center gap-1.5 justify-start">
+                      <span>الطلبيات (بازاركو)</span>
+                      {sortField === 'total_orders' && <span className="text-sky-400 font-bold">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                    </div>
+                  </th>
+                )}
+                {visibleColumns.balance && (
+                  <th onClick={() => handleSort('balance')} className="px-4 py-3 text-right text-xs font-medium text-slate-400 cursor-pointer select-none hover:text-white transition-colors">
+                    <div className="flex items-center gap-1.5 justify-start">
+                      <span>الذمة / الرصيد</span>
+                      {sortField === 'balance' && <span className="text-sky-400 font-bold">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                    </div>
+                  </th>
+                )}
+                {visibleColumns.last_order && (
+                  <th onClick={() => handleSort('last_order')} className="hidden md:table-cell px-4 py-3 text-right text-xs font-medium text-slate-400 cursor-pointer select-none hover:text-white transition-colors">
+                    <div className="flex items-center gap-1.5 justify-start">
+                      <span>آخر طلبية بازاركو</span>
+                      {sortField === 'last_order' && <span className="text-sky-400 font-bold">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                    </div>
+                  </th>
+                )}
+                {visibleColumns.last_shamel_invoice && (
+                  <th onClick={() => handleSort('last_shamel_invoice')} className="hidden xl:table-cell px-4 py-3 text-right text-xs font-medium text-slate-400 cursor-pointer select-none hover:text-white transition-colors">
+                    <div className="flex items-center gap-1.5 justify-start">
+                      <span>آخر فاتورة شامل</span>
+                      {sortField === 'last_shamel_invoice' && <span className="text-sky-400 font-bold">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                    </div>
+                  </th>
+                )}
+                {visibleColumns.last_shamel_payment && (
+                  <th onClick={() => handleSort('last_shamel_payment')} className="hidden xl:table-cell px-4 py-3 text-right text-xs font-medium text-slate-400 cursor-pointer select-none hover:text-white transition-colors">
+                    <div className="flex items-center gap-1.5 justify-start">
+                      <span>آخر دفعة شامل</span>
+                      {sortField === 'last_shamel_payment' && <span className="text-sky-400 font-bold">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+                    </div>
+                  </th>
+                )}
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {visible.slice((currentPage-1)*10,currentPage*10).map(c => {
+              {visible.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map(c => {
                 const t = TYPE_LABELS[c.customer_type] ?? TYPE_LABELS.retail
-                const lastOrder = lastOrderDates[c.id]
-                const since = lastOrder ? daysSince(lastOrder) : null
-                const sinceColor =
-                  since?.level === 'fresh'  ? 'text-emerald-400' :
-                  since?.level === 'stale'  ? 'text-amber-400' :
-                  'text-slate-400'
-                const waNum = whatsappNumber(c.phone,countryCode)
+                const bazarkoOrder = lastOrderDates[c.id]
+                const sinceBazarko = bazarkoOrder ? daysSince(bazarkoOrder) : null
+                const sinceInvoice = c.last_order_at ? daysSince(c.last_order_at) : null
+                const sincePayment = c.last_payment_at ? daysSince(c.last_payment_at) : null
+                const waNum = whatsappNumber(c.phone, countryCode)
                 return (
                   <tr key={c.id} className="hover:bg-white/3 transition-colors">
-                    <td className="px-4 py-3">
-                      <div className={styles.avatar}>
-                        <span aria-hidden="true">{c.name.trim().slice(0,1)}</span>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <Link href={`/dashboard/customers/${c.id}`} className="font-semibold text-white">{c.name}</Link>
-                            {c.shamel_code && (
-                              <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-mono font-bold text-sky-400 border border-sky-500/30" title={`رقم الشامل: ${c.shamel_code}`}>
-                                {c.shamel_code}
-                              </span>
-                            )}
+                    {visibleColumns.name && (
+                      <td className="px-4 py-3">
+                        <div className={styles.avatar}>
+                          <span aria-hidden="true">{c.name.trim().slice(0,1)}</span>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <Link href={`/dashboard/customers/${c.id}`} className="font-semibold text-white">{c.name}</Link>
+                              {c.shamel_code && (
+                                <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-mono font-bold text-sky-400 border border-sky-500/30" title={`رقم الشامل: ${c.shamel_code}`}>
+                                  {c.shamel_code}
+                                </span>
+                              )}
+                            </div>
+                            {c.city&&<p className="text-xs text-slate-400">{c.city}</p>}
+                            {!c.is_active&&<small className="text-amber-400">غير نشط</small>}
                           </div>
-                          {c.city&&<p className="text-xs text-slate-400">{c.city}</p>}
-                          {!c.is_active&&<small className="text-amber-400">غير نشط</small>}
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        {c.phone ? (
-                          <>
-                            {waNum&&<a
-                              href={`https://wa.me/${waNum}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              title="فتح واتساب"
-                              className="flex-shrink-0 rounded-lg bg-emerald-500/10 px-2 py-1 text-sm text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                      </td>
+                    )}
+                    {visibleColumns.phone && (
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          {c.phone ? (
+                            <>
+                              {waNum&&<a
+                                href={`https://wa.me/${waNum}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="فتح واتساب"
+                                className="flex-shrink-0 rounded-lg bg-emerald-500/10 px-2 py-1 text-sm text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                              >
+                                💬
+                              </a>}
+                              <span className="text-sm text-slate-300" dir="ltr">{c.phone}</span>
+                            </>
+                          ) : c.email ? (
+                            <a
+                              href={`mailto:${c.email}`}
+                              className="text-sm text-slate-400 hover:text-sky-400 transition-colors"
+                              dir="ltr"
                             >
-                              💬
-                            </a>}
-                            <span className="text-sm text-slate-300" dir="ltr">{c.phone}</span>
-                          </>
-                        ) : c.email ? (
-                          <a
-                            href={`mailto:${c.email}`}
-                            className="text-sm text-slate-400 hover:text-sky-400 transition-colors"
-                            dir="ltr"
-                          >
-                            ✉️ {c.email}
-                          </a>
-                        ) : (
-                          <span className="text-xs text-slate-600">—</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${t.color}`}>
-                        {t.label}
-                      </span>
-                    </td>
-                    <td className="hidden lg:table-cell px-4 py-3 text-xs text-slate-300">
-                      {new Date(c.created_at).toLocaleDateString('ar-u-nu-latn',{timeZone:BUSINESS_TIME_ZONE})}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-300">
-                      <Link 
-                        href={`/dashboard/orders?q=${encodeURIComponent(c.phone || c.name)}`}
-                        className="text-sky-400 hover:underline"
-                        title="عرض طلبيات هذا الزبون"
-                      >
-                        {c.total_orders} طلبيات
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3">
-                      {c.balance > 0 ? (
-                        <span className="text-sm font-semibold text-red-400" dir="ltr">
-                          {c.balance.toLocaleString('ar-u-nu-latn')} {currencyCode}
+                              ✉️ {c.email}
+                            </a>
+                          ) : (
+                            <span className="text-xs text-slate-600">—</span>
+                          )}
+                        </div>
+                      </td>
+                    )}
+                    {visibleColumns.customer_type && (
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${t.color}`}>
+                          {t.label}
                         </span>
-                      ) : c.balance<0 ? (<span className="text-sm text-sky-400">دائن: {Math.abs(c.balance).toLocaleString('en-GB')} {currencyCode}</span>) : (
-                        <span className="text-sm text-emerald-400">✓ متوازن</span>
-                      )}
-                    </td>
-                    <td className="hidden md:table-cell px-4 py-3">
-                      {since ? (
-                        <span className={`text-xs ${sinceColor}`}>{since.text}</span>
-                      ) : (
-                        <span className="text-xs text-slate-400">{orderError?'غير متاح':'لم يطلب بعد'}</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <details className={styles.actions}><summary aria-label={`إجراءات ${c.name}`}>•••</summary><div>
-                        <Link
-                          href={`/dashboard/customers/${c.id}`}
-                          className="rounded-lg bg-white/5 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-white transition-colors"
+                      </td>
+                    )}
+                    {visibleColumns.created_at && (
+                      <td className="hidden lg:table-cell px-4 py-3 text-xs text-slate-300">
+                        {new Date(c.created_at).toLocaleDateString('ar-u-nu-latn',{timeZone:BUSINESS_TIME_ZONE})}
+                      </td>
+                    )}
+                    {visibleColumns.total_orders && (
+                      <td className="px-4 py-3 text-sm text-slate-300">
+                        <Link 
+                          href={`/dashboard/orders?q=${encodeURIComponent(c.phone || c.name)}`}
+                          className="text-sky-400 hover:underline"
+                          title="عرض طلبيات هذا الزبون في المتجر"
                         >
-                          الملف
+                          {c.total_orders} طلبيات
                         </Link>
-                        <button
-                          onClick={() => handleEditClick(c)}
-                          className="rounded-lg bg-sky-500/10 px-2.5 py-1.5 text-xs text-sky-400 hover:bg-sky-500/20 transition-colors"
-                        >
-                          تعديل
-                        </button>
-                        <button
-                          onClick={() => {setMutationError('');setDeletingCustomer(c)}}
-                          className="rounded-lg bg-red-500/10 px-2.5 py-1.5 text-xs text-red-400 hover:bg-red-500/20 transition-colors"
-                        >
-                          حذف
-                        </button>
-                      </div></details>
+                      </td>
+                    )}
+                    {visibleColumns.balance && (
+                      <td className="px-4 py-3">
+                        {c.balance > 0 ? (
+                          <span className="text-sm font-semibold text-red-400" dir="ltr">
+                            {c.balance.toLocaleString('ar-u-nu-latn')} {currencyCode}
+                          </span>
+                        ) : c.balance<0 ? (<span className="text-sm text-sky-400">دائن: {Math.abs(c.balance).toLocaleString('ar-u-nu-latn')} {currencyCode}</span>) : (
+                          <span className="text-sm text-emerald-400">✓ متوازن (0)</span>
+                        )}
+                      </td>
+                    )}
+                    {visibleColumns.last_order && (
+                      <td className="hidden md:table-cell px-4 py-3">
+                        {sinceBazarko ? (
+                          <span className={`text-xs block ${sinceBazarko.level === 'fresh' ? 'text-emerald-400' : sinceBazarko.level === 'stale' ? 'text-amber-400' : 'text-slate-400'}`}>
+                            {sinceBazarko.text}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-500">لا يوجد طلب بالمتجر</span>
+                        )}
+                      </td>
+                    )}
+                    {visibleColumns.last_shamel_invoice && (
+                      <td className="hidden xl:table-cell px-4 py-3 text-xs">
+                        {c.last_order_at ? (
+                          <div>
+                            <span className="text-slate-300 block">{new Date(c.last_order_at).toLocaleDateString('ar-u-nu-latn')}</span>
+                            {sinceInvoice && <span className="text-[10px] text-slate-500 block">{sinceInvoice.text}</span>}
+                          </div>
+                        ) : (
+                          <span className="text-slate-500">—</span>
+                        )}
+                      </td>
+                    )}
+                    {visibleColumns.last_shamel_payment && (
+                      <td className="hidden xl:table-cell px-4 py-3 text-xs">
+                        {c.last_payment_at ? (
+                          <div>
+                            <span className="text-emerald-400 block font-medium">{new Date(c.last_payment_at).toLocaleDateString('ar-u-nu-latn')}</span>
+                            {sincePayment && <span className="text-[10px] text-emerald-500/70 block">{sincePayment.text}</span>}
+                          </div>
+                        ) : (
+                          <span className="text-slate-500">—</span>
+                        )}
+                      </td>
+                    )}
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5 justify-end">
+                        {c.shamel_code ? (
+                          <button
+                            type="button"
+                            onClick={() => setStatementCustomer(c)}
+                            title="عرض كشف حساب الشامل"
+                            className="inline-flex items-center gap-1 rounded-lg bg-sky-500/10 border border-sky-500/20 px-2.5 py-1 text-xs font-medium text-sky-400 hover:bg-sky-500/20 transition-colors"
+                          >
+                            <span>📄</span>
+                            <span className="hidden sm:inline">كشف الشامل</span>
+                          </button>
+                        ) : (
+                          <Link
+                            href={`/dashboard/customers/${c.id}?tab=ledger`}
+                            title="كشف حساب الحركات"
+                            className="inline-flex items-center gap-1 rounded-lg bg-white/5 border border-white/10 px-2 py-1 text-xs text-slate-300 hover:bg-white/10 hover:text-white transition-colors"
+                          >
+                            <span>📋</span>
+                            <span className="hidden sm:inline">كشف الحساب</span>
+                          </Link>
+                        )}
+                        <details className={styles.actions}><summary aria-label={`إجراءات ${c.name}`}>•••</summary><div>
+                          <Link
+                            href={`/dashboard/customers/${c.id}`}
+                            className="rounded-lg bg-white/5 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-white transition-colors"
+                          >
+                            الملف الشخصي
+                          </Link>
+                          {c.shamel_code && (
+                            <button
+                              type="button"
+                              onClick={() => setStatementCustomer(c)}
+                              className="rounded-lg bg-sky-500/10 px-2.5 py-1.5 text-xs text-sky-400 hover:bg-sky-500/20 transition-colors text-right"
+                            >
+                              كشف حساب الشامل
+                            </button>
+                          )}
+                          <Link
+                            href={`/dashboard/customers/${c.id}?tab=ledger`}
+                            className="rounded-lg bg-white/5 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-white/10 hover:text-white transition-colors"
+                          >
+                            كشف حساب بازاركو
+                          </Link>
+                          <button
+                            onClick={() => handleEditClick(c)}
+                            className="rounded-lg bg-sky-500/10 px-2.5 py-1.5 text-xs text-sky-400 hover:bg-sky-500/20 transition-colors"
+                          >
+                            تعديل
+                          </button>
+                          <button
+                            onClick={() => {setMutationError('');setDeletingCustomer(c)}}
+                            className="rounded-lg bg-red-500/10 px-2.5 py-1.5 text-xs text-red-400 hover:bg-red-500/20 transition-colors"
+                          >
+                            حذف
+                          </button>
+                        </div></details>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -448,8 +785,15 @@ export default function CustomersTable({
         </div>
       )}
 
-      {visible.length>0&&<div className={styles.pagination}><span>عرض {(currentPage-1)*10+1}–{Math.min(currentPage*10,visible.length)} من {visible.length}</span><button disabled={currentPage===1} onClick={()=>setPage(currentPage-1)}>السابق</button><span>{currentPage} / {pages}</span><button disabled={currentPage===pages} onClick={()=>setPage(currentPage+1)}>التالي</button></div>}
-      <section className={styles.empty}><h2>زبائنك في مكان واحد</h2><p>نظّم الزبائن حسب النوع، وتابع الطلبات والأرصدة بسهولة.</p><Link href="/dashboard/customers/ledger" className="text-sky-400">عرض حسابات العملاء ←</Link></section>
+      {visible.length > 0 && (
+        <div className={styles.pagination}>
+          <span>عرض {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, visible.length)} من {visible.length}</span>
+          <button disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>السابق</button>
+          <span>{currentPage} / {pages}</span>
+          <button disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}>التالي</button>
+        </div>
+      )}
+
       {/* Modal إضافة/تعديل زبون */}
       {(showAdd || editingCustomer) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={editingCustomer ? handleCancelEdit : () => setShowAdd(false)}>
@@ -630,6 +974,17 @@ export default function CustomersTable({
             </div>
           </div>
         </div>
+      )}
+      {/* Modal كشف حساب الشامل الموحد */}
+      {statementCustomer && (
+        <ShamelStatementModal
+          isOpen={!!statementCustomer}
+          onClose={() => setStatementCustomer(null)}
+          customerCode={statementCustomer.shamel_code || ''}
+          customerName={statementCustomer.name}
+          storeName={storeName}
+          currencyCode={currencyCode}
+        />
       )}
     </div>
   )

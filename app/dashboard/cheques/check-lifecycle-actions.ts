@@ -58,6 +58,7 @@ export async function previewCheckAccounting(
       .single()
 
     if (!check) return { success: false, error: 'الشيك غير موجود' }
+    if (check.receipt_settlement_active != null) return linkedChequeOperation(input,crypto.randomUUID(),false)
 
     let debitName = ''
     let debitCode = ''
@@ -219,12 +220,13 @@ export async function executeCheckOperation(
     // التحقق من الصلاحيات ووجود الشيك
     const { data: check } = await supabase
       .from('checks')
-      .select('id, check_number, amount')
+      .select('id, check_number, amount, receipt_settlement_active')
       .eq('id', input.checkId)
       .eq('store_id', storeId)
       .single()
 
     if (!check) return { success: false, error: 'الشيك غير موجود' }
+    if (check.receipt_settlement_active != null) return {success:false,error:'استخدم التحصيل أو الإعادة المرتبطين بمعرف طلب لضمان عدم التكرار'}
 
     // استدعاء الإجراء المخزن الذري
     const { data: rpcRes, error: rpcErr } = await supabase.rpc('execute_check_lifecycle_operation', {
@@ -274,4 +276,19 @@ export async function getCheckAuditHistory(checkId: string) {
   } catch (err: any) {
     return { success: false, error: err.message, operations: [] }
   }
+}
+
+/** Linked receipt checks use actual source accounts and a durable request identity. */
+export async function linkedChequeOperation(input:CheckOperationInput,requestId:string,execute:boolean):Promise<{success:boolean;preview?:CheckAccountingPreview;error?:string;uncertain?:boolean}>{
+ try{
+  const c=createClient(),{data:{user}}=await c.auth.getUser();if(!user)return {success:false,error:'يلزم تسجيل الدخول'};
+  const storeId=await getStoreForUser(c,user.id);if(!storeId)return {success:false,error:'المتجر غير متاح'};
+  if(!/^[\da-f]{8}-([\da-f]{4}-){3}[\da-f]{12}$/i.test(requestId))return {success:false,error:'معرف العملية غير صحيح'};
+  const payload={operationType:input.operationType,operationDate:input.operationDate,targetBankAccountId:input.targetBankAccountId||'',targetCashBoxId:input.targetCashBoxId||'',targetSupplierId:input.targetSupplierId||'',notes:input.notes||''};
+  const {data,error}=await c.rpc('receipt_cheque_operation_atomic',{p_store_id:storeId,p_check_id:input.checkId,p_request_id:requestId,p_payload:payload,p_execute:execute});
+  if(error)return {success:false,error:error.message,uncertain:execute&&(!error.code||!/^[0-9A-Z]{5}$/.test(error.code))};
+  if(!data?.success||(execute&&!data?.operationId))return {success:false,error:'تعذر تأكيد نتيجة العملية؛ أعد محاولة الطلب نفسه',uncertain:execute};
+  if(execute){try{for(const p of ['/dashboard/cheques','/dashboard/accounting/receipts','/dashboard/accounting/treasury','/dashboard/accounting/journal','/dashboard/accounting/invoices','/dashboard/customers','/dashboard/customers/ledger','/dashboard/finance'])revalidatePath(p);revalidatePath('/dashboard/customers/[id]','page');revalidatePath('/dashboard/accounting/invoices/[id]','page')}catch{}}
+  return {success:true,preview:data.preview};
+ }catch{return {success:false,error:execute?'انقطع الاتصال؛ أعد محاولة الطلب نفسه للتحقق من النتيجة':'تعذر تحميل المعاينة',uncertain:execute}}
 }

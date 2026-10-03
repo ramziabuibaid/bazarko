@@ -12,6 +12,7 @@ interface SearchParams {
 
 const ENTITY_LABELS: Record<string, string> = {
   invoice: 'فاتورة',
+  check: 'شيك',
   voucher: 'سند',
   cash_movement: 'حركة صندوق',
   cash_session: 'إغلاق صندوق',
@@ -111,6 +112,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Search
     { key: '', label: 'الكل' },
     { key: 'invoice', label: 'الفواتير' },
     { key: 'voucher', label: 'السندات' },
+    { key: 'check', label: 'الشيكات' },
     { key: 'cash_movement', label: 'الصندوق' },
     { key: 'cash_session', label: 'الإغلاقات' },
   ]
