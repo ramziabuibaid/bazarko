@@ -4,6 +4,7 @@ import { useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { recordAuditEvent } from '@/app/dashboard/accounting/audit-actions'
+import { deleteInvoice } from '@/app/dashboard/accounting/invoices/invoice-actions'
 import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
 
 interface Product {
@@ -126,7 +127,32 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
   const [notes, setNotes] = useState(invoice.notes || '')
   const [amountPaid, setAmountPaid] = useState<number>(Number(invoice.amount_paid || 0))
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState('')
+
+  async function handleDeleteInvoice() {
+    if (saving || deleting) return
+    if (!window.confirm(`هل أنت متأكد من رغبتك في حذف الفاتورة #${invoice.invoice_number} نهائياً؟\nسيتم استرجاع كميات المخزون للأصناف وعكس أي ذمم مسجلة على الزبون وإلغاء القيد المحاسبي المرتبط.`)) {
+      return
+    }
+
+    setDeleting(true)
+    setError('')
+    try {
+      const res = await deleteInvoice(invoice.id)
+      if (res.ok) {
+        router.push('/dashboard/accounting/invoices')
+        router.refresh()
+      } else {
+        setError(res.error || 'تعذر حذف الفاتورة')
+      }
+    } catch (err: any) {
+      console.error(err)
+      setError(err?.message || 'حدث خطأ أثناء حذف الفاتورة')
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   // ── بحث المنتجات ─────────────────────────────────────────────
   const [productSearch, setProductSearch] = useState('')
@@ -146,27 +172,49 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
 
   // ── Debounced searches ────────────────────────────────────────
   const searchCustomers = useDebounce(async (q: string) => {
-    if (!q.trim()) { setCustomerResults([]); return }
-    const { data } = await supabase
+    const raw = q.trim()
+    if (!raw) { setCustomerResults([]); return }
+    const tokens = raw.split(/\s+/).filter(Boolean)
+    if (tokens.length === 0) { setCustomerResults([]); return }
+
+    let query = supabase
       .from('customers')
       .select('id, name, phone, balance')
       .eq('store_id', storeId)
-      .ilike('name', `%${q}%`)
-      .limit(6)
+
+    for (const t of tokens) {
+      const safe = t.replace(/[,()%]/g, '')
+      if (safe) {
+        query = query.or(`name.ilike.%${safe}%,phone.ilike.%${safe}%`)
+      }
+    }
+
+    const { data } = await query.limit(8)
     setCustomerResults((data as Customer[] | null) ?? [])
-  }, 250)
+  }, 200)
 
   const searchProducts = useDebounce(async (q: string) => {
-    if (!q.trim()) { setProductResults([]); return }
-    const { data } = await supabase
+    const raw = q.trim()
+    if (!raw) { setProductResults([]); return }
+    const tokens = raw.split(/\s+/).filter(Boolean)
+    if (tokens.length === 0) { setProductResults([]); return }
+
+    let query = supabase
       .from('products')
       .select('id, name, sku, price, thumbnail_url')
       .eq('store_id', storeId)
       .eq('is_active', true)
-      .ilike('name', `%${q}%`)
-      .limit(6)
+
+    for (const t of tokens) {
+      const safe = t.replace(/[,()%]/g, '')
+      if (safe) {
+        query = query.or(`name.ilike.%${safe}%,sku.ilike.%${safe}%`)
+      }
+    }
+
+    const { data } = await query.limit(8)
     setProductResults((data as Product[] | null) ?? [])
-  }, 250)
+  }, 200)
 
   function addProductToItems(p: Product) {
     setItems(prev => [
@@ -422,6 +470,15 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
             <span>✏️</span> تعديل فاتورة المبيعات #{invoice.invoice_number}
           </h1>
         </div>
+        <button
+          type="button"
+          disabled={saving || deleting}
+          onClick={handleDeleteInvoice}
+          className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs font-bold text-rose-400 hover:bg-rose-500/20 disabled:opacity-50 transition flex items-center gap-1.5"
+        >
+          <span>🗑️</span>
+          <span>{deleting ? 'جارٍ حذف الفاتورة...' : 'حذف الفاتورة نهائياً'}</span>
+        </button>
       </div>
 
       {error && (
@@ -631,6 +688,8 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
                       min="1"
                       required
                       value={item.quantity}
+                      onFocus={e => e.target.select()}
+                      onClick={e => (e.target as HTMLInputElement).select()}
                       onChange={e => updateItem(item.key, 'quantity', Number(e.target.value))}
                       className="w-full rounded-lg border border-white/10 bg-slate-800 p-2 text-xs text-white text-center font-mono outline-none focus:border-sky-500"
                     />
@@ -642,6 +701,8 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
                       min="0"
                       required
                       value={item.unit_price}
+                      onFocus={e => e.target.select()}
+                      onClick={e => (e.target as HTMLInputElement).select()}
                       onChange={e => updateItem(item.key, 'unit_price', Number(e.target.value))}
                       className="w-full rounded-lg border border-white/10 bg-slate-800 p-2 text-xs text-white text-center font-mono outline-none focus:border-sky-500"
                     />
@@ -742,13 +803,22 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
             </div>
           )}
 
-          <div className="pt-4 flex gap-3">
+          <div className="pt-4 flex flex-col sm:flex-row gap-3">
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || deleting}
               className="flex-1 rounded-xl bg-sky-600 px-5 py-3 text-sm font-bold text-white hover:bg-sky-500 disabled:opacity-50 transition shadow-lg shadow-sky-900/40"
             >
               {saving ? 'جارٍ حفظ التعديلات...' : '💾 حفظ التعديلات'}
+            </button>
+            <button
+              type="button"
+              disabled={saving || deleting}
+              onClick={handleDeleteInvoice}
+              className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm font-bold text-rose-400 hover:bg-rose-500/20 disabled:opacity-50 transition flex items-center justify-center gap-1.5"
+            >
+              <span>🗑️</span>
+              <span>{deleting ? 'جارٍ الحذف...' : 'حذف الفاتورة'}</span>
             </button>
             <button
               type="button"

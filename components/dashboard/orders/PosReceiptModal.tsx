@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { generateAndPrintPdf } from '@/lib/pdf/printPdf'
 
 export interface ReceiptItem {
@@ -52,8 +52,13 @@ const PAYMENT_METHOD_NAMES: Record<string, { ar: string; en: string }> = {
 export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }: Props) {
   const [printLayout, setPrintLayout] = useState<'thermal' | 'a4'>('thermal')
   const [printing, setPrinting] = useState(false)
-
-  if (!isOpen) return null
+  const [autoPrint, setAutoPrint] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('bazarko_pos_autoprint') === 'true'
+    }
+    return false
+  })
+  const printedRef = useRef(false)
 
   const isCash = receipt.paymentMethod === 'cash'
   const isCredit = receipt.paymentMethod === 'credit'
@@ -84,21 +89,50 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
     en: receipt.paymentMethod,
   }
 
+  // الطباعة المباشرة السريعة (Direct Print)
+  const handleDirectPrint = () => {
+    window.print()
+  }
+
   const handlePrint = async () => {
     setPrinting(true)
     try {
-      await generateAndPrintPdf({
-        elementId: 'pos-receipt-print-area',
-        format: printLayout,
-        filename: `receipt-${receipt.orderNumber}.pdf`,
-        action: 'print',
-      })
+      if (printLayout === 'thermal') {
+        // للطابعات الحرارية (USB / Network / ZKT / Xprinter): استدعاء نافذة الطباعة المباشرة بأبعاد الإيصال
+        window.print()
+      } else {
+        await generateAndPrintPdf({
+          elementId: 'pos-receipt-print-area',
+          format: 'a4',
+          filename: `receipt-${receipt.orderNumber}.pdf`,
+          action: 'print',
+        })
+      }
     } catch (e) {
       console.error(e)
       window.print()
     } finally {
       setPrinting(false)
     }
+  }
+
+  // تفعيل الطباعة التلقائية بمجرد اكتمال البيع إذا كان الخيار مفعلاً
+  useEffect(() => {
+    if (isOpen && autoPrint && !printedRef.current) {
+      printedRef.current = true
+      const timer = setTimeout(() => {
+        handlePrint()
+      }, 350)
+      return () => clearTimeout(timer)
+    }
+  }, [isOpen, autoPrint])
+
+  const toggleAutoPrint = () => {
+    const next = !autoPrint
+    setAutoPrint(next)
+    try {
+      localStorage.setItem('bazarko_pos_autoprint', String(next))
+    } catch {}
   }
 
   const handleDownloadPdf = async () => {
@@ -115,6 +149,8 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
     }
   }
 
+  if (!isOpen) return null
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-2 sm:p-4 backdrop-blur-sm print:p-0 print:bg-white print:static print:z-auto">
       {/* Container Dialog */}
@@ -129,7 +165,18 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Auto-print toggle */}
+            <label className="flex items-center gap-1.5 cursor-pointer text-xs bg-slate-800/80 hover:bg-slate-800 px-2.5 py-1.5 rounded-lg border border-white/5 text-slate-300">
+              <input
+                type="checkbox"
+                checked={autoPrint}
+                onChange={toggleAutoPrint}
+                className="rounded accent-sky-500 w-3.5 h-3.5 cursor-pointer"
+              />
+              <span>طباعة تلقائية ⚡</span>
+            </label>
+
             {/* Format toggle */}
             <div className="flex rounded-lg bg-slate-800 p-0.5 text-xs">
               <button
@@ -190,6 +237,29 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
             </button>
           </div>
         </div>
+
+        {/* Global Print CSS to ensure thermal 80mm compatibility */}
+        <style jsx global>{`
+          @media print {
+            @page {
+              size: ${printLayout === 'thermal' ? '80mm auto' : 'auto'};
+              margin: ${printLayout === 'thermal' ? '0mm' : '10mm'};
+            }
+            body {
+              margin: 0 !important;
+              padding: 0 !important;
+              background: #ffffff !important;
+            }
+            #pos-receipt-print-area {
+              width: ${printLayout === 'thermal' ? '76mm !important' : '100% !important'};
+              max-width: ${printLayout === 'thermal' ? '76mm !important' : '100% !important'};
+              margin: 0 auto !important;
+              padding: 2mm !important;
+              box-shadow: none !important;
+              border: none !important;
+            }
+          }
+        `}</style>
 
         {/* Printable Area */}
         <div className="overflow-y-auto p-4 sm:p-6 print:overflow-visible print:p-0">

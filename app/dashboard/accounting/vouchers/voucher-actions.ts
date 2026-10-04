@@ -1043,10 +1043,10 @@ export async function updateVoucher(input: UpdateVoucherInput) {
       if (oldInv) {
         const revPaid = Math.max(0, Number(oldInv.amount_paid || 0) - oldAmt)
         const invTotal = Number(oldInv.total || 0)
-        const revStatus = revPaid >= invTotal ? 'paid' : (revPaid > 0 ? 'partial' : 'draft')
+        const revStatus = revPaid >= invTotal ? 'paid' : (revPaid > 0 ? 'partial' : 'sent')
         await supabase
           .from('invoices')
-          .update({ amount_paid: revPaid, status: revStatus })
+          .update({ amount_paid: revPaid, status: revStatus, paid_at: revPaid >= invTotal ? new Date().toISOString() : null })
           .eq('id', oldV.invoice_id)
       }
     }
@@ -1335,7 +1335,7 @@ export async function updateVoucher(input: UpdateVoucherInput) {
     }
 
     // هـ) تطبيق أثر الفاتورة الجديدة إن وُجدت
-    const effectiveInvoiceId = input.invoice_id || oldV.invoice_id
+    const effectiveInvoiceId = input.invoice_id !== undefined ? input.invoice_id : oldV.invoice_id
     if (effectiveInvoiceId) {
       const { data: inv } = await supabase
         .from('invoices')
@@ -1346,12 +1346,13 @@ export async function updateVoucher(input: UpdateVoucherInput) {
       if (inv) {
         const newPaid = Number(inv.amount_paid || 0) + totalAmount
         const invTotal = Number(inv.total || 0)
-        const newStatus = newPaid >= invTotal ? 'paid' : (newPaid > 0 ? 'partial' : 'draft')
+        const newStatus = newPaid >= invTotal ? 'paid' : (newPaid > 0 ? 'partial' : 'sent')
         await supabase
           .from('invoices')
           .update({
             amount_paid: newPaid,
             status: newStatus,
+            paid_at: newStatus === 'paid' ? input.date : null,
             paid_date: newStatus === 'paid' ? input.date : null,
           })
           .eq('id', effectiveInvoiceId)

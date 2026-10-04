@@ -40,3 +40,58 @@ export async function createBankReceipt(storeId:string,requestId:string,input:Ba
  return {ok:true,voucherId:data.voucherId,voucherNumber:data.voucherNumber};
  }catch{return {ok:false,error:'انقطع الاتصال أثناء الحفظ؛ أعد محاولة الطلب نفسه للتحقق من نتيجته',uncertain:true}}
 }
+
+export async function updateReceiptAction(storeId: string, voucherId: string, input: CashReview): Promise<{ ok: boolean; error?: string }> {
+ const c = createClient(), { data: { user } } = await c.auth.getUser();
+ if (!user) return { ok: false, error: 'يلزم تسجيل الدخول' };
+ if (await getStoreForUser(c, user.id) !== storeId) return { ok: false, error: 'المتجر غير مصرح به' };
+
+ const { updateVoucher } = await import('@/app/dashboard/accounting/vouchers/voucher-actions');
+ const res = await updateVoucher({
+   id: voucherId,
+   date: input.date,
+   payment_method: 'cash',
+   amount: Number(input.amount),
+   cash_amount: Number(input.amount),
+   cash_box_id: input.boxId || null,
+   customer_id: input.customerId || null,
+   party_name: input.partyName || '',
+   description: input.description,
+   reference: input.reference || null,
+   invoice_id: input.invoiceId || null,
+ });
+
+ if (!res.success) {
+   return { ok: false, error: res.error || 'تعذر تعديل سند القبض' };
+ }
+
+ try {
+   for (const path of ['/dashboard/accounting/receipts', '/dashboard/accounting/treasury', '/dashboard/accounting/journal', '/dashboard/customers', '/dashboard/customers/ledger', '/dashboard/accounting/invoices']) {
+     revalidatePath(path);
+   }
+   if (input.invoiceId) revalidatePath(`/dashboard/accounting/invoices/${input.invoiceId}`);
+   if (input.customerId) revalidatePath(`/dashboard/customers/${input.customerId}`);
+ } catch {}
+
+ return { ok: true };
+}
+
+export async function deleteReceiptAction(storeId: string, voucherId: string): Promise<{ ok: boolean; error?: string }> {
+ const c = createClient(), { data: { user } } = await c.auth.getUser();
+ if (!user) return { ok: false, error: 'يلزم تسجيل الدخول' };
+ if (await getStoreForUser(c, user.id) !== storeId) return { ok: false, error: 'المتجر غير مصرح به' };
+
+ const { deleteVoucher } = await import('@/app/dashboard/accounting/vouchers/voucher-actions');
+ const res = await deleteVoucher(voucherId);
+ if (!res.success) {
+   return { ok: false, error: res.error || 'تعذر حذف سند القبض' };
+ }
+
+ try {
+   for (const path of ['/dashboard/accounting/receipts', '/dashboard/accounting/treasury', '/dashboard/accounting/journal', '/dashboard/customers', '/dashboard/customers/ledger', '/dashboard/accounting/invoices']) {
+     revalidatePath(path);
+   }
+ } catch {}
+
+ return { ok: true };
+}

@@ -8,6 +8,9 @@ import {
 } from '@/lib/shamel/gdrive'
 import { executeHybridSync } from '@/lib/shamel/hybrid-sync'
 
+export const maxDuration = 300
+export const dynamic = 'force-dynamic'
+
 export async function GET() {
   try {
     const supabase = createClient()

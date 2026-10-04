@@ -63,6 +63,27 @@ export async function executeHybridSync(
   supabase: SupabaseClient,
   storeId: string
 ): Promise<HybridSyncResult> {
+  // First attempt: High-performance atomic SQL execution in PostgreSQL
+  try {
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('shamel_execute_hybrid_sync', {
+      p_store_id: storeId,
+    })
+    if (!rpcErr && rpcData) {
+      return {
+        customersMatchedByPhone: Number(rpcData.customersMatchedByPhone || 0),
+        customersInserted: Number(rpcData.customersInserted || 0),
+        customersUpdated: Number(rpcData.customersUpdated || 0),
+        productsInserted: Number(rpcData.productsInserted || 0),
+        productsUpdated: Number(rpcData.productsUpdated || 0),
+      }
+    }
+    if (rpcErr) {
+      console.warn('SQL hybrid sync RPC error, falling back to batch processor:', rpcErr.message)
+    }
+  } catch (rpcEx: any) {
+    console.warn('SQL hybrid sync RPC exception, falling back to batch processor:', rpcEx?.message)
+  }
+
   const result: HybridSyncResult = {
     customersMatchedByPhone: 0,
     customersInserted: 0,
@@ -116,6 +137,7 @@ export async function executeHybridSync(
   }
 
   const customersToInsert: any[] = []
+  const customersToUpdate: Array<{ id: string; patch: any }> = []
 
   for (const sc of allShamelCustomers) {
     if (sc.code.startsWith('S')) continue
@@ -126,9 +148,9 @@ export async function executeHybridSync(
 
     const existingByCode = byShamelCode.get(sc.code)
     if (existingByCode) {
-      await supabase
-        .from('customers')
-        .update({
+      customersToUpdate.push({
+        id: existingByCode.id,
+        patch: {
           name: sc.name,
           phone: sc.phone || existingByCode.phone,
           address: sc.address || existingByCode.address,
@@ -136,9 +158,8 @@ export async function executeHybridSync(
           last_order_at: lastOrderIso || existingByCode.last_order_at,
           last_payment_at: lastPaymentIso || existingByCode.last_payment_at,
           updated_at: new Date().toISOString(),
-        })
-        .eq('id', existingByCode.id)
-      result.customersUpdated++
+        },
+      })
       continue
     }
 
@@ -146,17 +167,17 @@ export async function executeHybridSync(
     const existingByPhone = normPhone.length >= 7 ? byNormPhone.get(normPhone) : null
 
     if (existingByPhone) {
-      await supabase
-        .from('customers')
-        .update({
+      customersToUpdate.push({
+        id: existingByPhone.id,
+        patch: {
           shamel_code: sc.code,
           address: existingByPhone.address || sc.address || undefined,
           balance: shamelBalance,
           last_order_at: lastOrderIso || existingByPhone.last_order_at,
           last_payment_at: lastPaymentIso || existingByPhone.last_payment_at,
           updated_at: new Date().toISOString(),
-        })
-        .eq('id', existingByPhone.id)
+        },
+      })
 
       existingByPhone.shamel_code = sc.code
       byShamelCode.set(sc.code, existingByPhone)
@@ -177,6 +198,15 @@ export async function executeHybridSync(
     }
   }
 
+  // Execute customer updates concurrently in chunks
+  for (let i = 0; i < customersToUpdate.length; i += 30) {
+    const chunk = customersToUpdate.slice(i, i + 30)
+    await Promise.all(
+      chunk.map(u => supabase.from('customers').update(u.patch).eq('id', u.id))
+    )
+    result.customersUpdated += chunk.length
+  }
+
   for (let i = 0; i < customersToInsert.length; i += 200) {
     const chunk = customersToInsert.slice(i, i + 200)
     const { error: insertErr } = await supabase.from('customers').insert(chunk)
@@ -194,7 +224,7 @@ export async function executeHybridSync(
   while (true) {
     const { data, error } = await supabase
       .from('shamel_stock')
-      .select('code, name, barcode, price, cost_price')
+      .select('code, name, barcode, price, cost_price, quantity')
       .eq('store_id', storeId)
       .range(page * 1000, (page + 1) * 1000 - 1)
     if (error) throw new Error(`فشل جلب أصناف الشامل: ${error.message}`)
@@ -232,6 +262,7 @@ export async function executeHybridSync(
   }
 
   const productsToInsert: any[] = []
+  const productsToUpdate: Array<{ id: string; patch: any }> = []
 
   for (const stk of allShamelStock) {
     const existing = productByCode.get(stk.code) || (stk.barcode ? productByBarcode.get(stk.barcode) : null)
@@ -240,9 +271,9 @@ export async function executeHybridSync(
 
     if (existing) {
       const newPrice = cost > 0 ? calculateSellPrice(cost) : (stk.price > 0 ? stk.price : existing.price)
-      await supabase
-        .from('products')
-        .update({
+      productsToUpdate.push({
+        id: existing.id,
+        patch: {
           name: stk.name,
           sku: stk.code,
           shamel_code: stk.code,
@@ -253,9 +284,8 @@ export async function executeHybridSync(
           track_stock: true,
           status: inStockQty > 0 ? 'active' : 'hidden',
           updated_at: new Date().toISOString(),
-        })
-        .eq('id', existing.id)
-      result.productsUpdated++
+        },
+      })
     } else if (inStockQty > 0) {
       // Synchronize only products that have available stock
       const cleanCode = (stk.code || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
@@ -277,6 +307,15 @@ export async function executeHybridSync(
         status: 'active',
       })
     }
+  }
+
+  // Execute product updates concurrently in chunks
+  for (let i = 0; i < productsToUpdate.length; i += 25) {
+    const chunk = productsToUpdate.slice(i, i + 25)
+    await Promise.all(
+      chunk.map(u => supabase.from('products').update(u.patch).eq('id', u.id))
+    )
+    result.productsUpdated += chunk.length
   }
 
   for (let i = 0; i < productsToInsert.length; i += 200) {

@@ -17,6 +17,8 @@ export interface Product {
   cost_price?: number | null
   barcode?: string | null
   thumbnail_url: string | null
+  stock_quantity?: number | null
+  track_stock?: boolean | null
 }
 
 export interface Customer {
@@ -34,6 +36,8 @@ interface LineItem {
   quantity: number
   unit_price: number
   cost_price?: number
+  stock_quantity?: number | null
+  track_stock?: boolean | null
 }
 
 let keySeq = 0
@@ -125,9 +129,21 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
   const [discountType, setDiscountType]   = useState<'amount' | 'percent'>('amount')
   const [discountValue, setDiscountValue] = useState<number>(prefill?.discountAmount || 0)
 
+  // Helper: Calculate default due date (1 month from date)
+  const addOneMonth = (dateStr: string) => {
+    try {
+      const d = new Date(dateStr)
+      if (isNaN(d.getTime())) return ''
+      d.setMonth(d.getMonth() + 1)
+      return d.toISOString().split('T')[0]
+    } catch {
+      return ''
+    }
+  }
+
   // ── الإجماليات ────────────────────────────────────────────────
   const [issueDate, setIssueDate]           = useState(businessDay().date)
-  const [dueDate, setDueDate]               = useState('')
+  const [dueDate, setDueDate]               = useState(() => addOneMonth(businessDay().date))
   const [notes, setNotes]                   = useState(prefill?.notes || '')
   const [saving, setSaving]                 = useState(false)
   const [error, setError]                   = useState('')
@@ -151,34 +167,82 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
   function restoreLocalDraft(){try{const v=JSON.parse(sessionStorage.getItem(draftKey)||'null');if(!v||!Array.isArray(v.items))throw Error();setItems(v.items.map((i:LineItem)=>({...i,key:keySeq++})));setSelectedCustomer(v.selectedCustomer||null);setCustomerMode(v.customerMode||null);setCustomerName(v.customerName||'');setCustomerPhone(v.customerPhone||'');setCustomerAddress(v.customerAddress||'');setIssueDate(v.issueDate||businessDay().date);setDueDate(v.dueDate||'');setNotes(v.notes||'');setDiscountType(v.discountType==='percent'?'percent':'amount');setDiscountValue(Number(v.discountValue)||0);setCollectionMode(v.collectionMode==='partial'?'partial':v.collectionMode==='none'?'none':'full');setAmountPaid(v.amountPaid||'');setCashBoxId(v.cashBoxId||cashBoxes[0]?.id||'');setReviewing(false);setDraftNotice('استُعيدت المسودة. راجع البنود والأسعار والزبون قبل الحفظ.')}catch{setDraftNotice('تعذر استعادة المسودة.')}}
   const fmt      = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })
 
-  // ── Debounced searches ────────────────────────────────────────
+  // ── Debounced searches (البحث الذكي متعدد الكلمات والمقاطع) ────
 
   const searchCustomers = useDebounce(async (q: string) => {
-    if (!q.trim()) { setCustomerResults([]); return }
-    const version=customerVersion.current
-    if(previewData){setCustomerResults(previewData.customers.filter(c=>`${c.name} ${c.phone||''}`.includes(q)));return}
-    const { data,error:searchError } = await supabase
+    const raw = q.trim()
+    if (!raw) { setCustomerResults([]); return }
+    const version = customerVersion.current
+    const tokens = raw.split(/\s+/).filter(Boolean)
+    if (tokens.length === 0) { setCustomerResults([]); return }
+
+    if (previewData) {
+      setCustomerResults(
+        previewData.customers.filter(c => {
+          const target = `${c.name} ${c.phone || ''}`.toLowerCase()
+          return tokens.every(token => target.includes(token.toLowerCase()))
+        })
+      )
+      return
+    }
+
+    let query = supabase
       .from('customers')
       .select('id, name, phone, balance')
       .eq('store_id', storeId)
-      .or(`name.ilike.%${q.replace(/[,()%]/g,'')}%,phone.ilike.%${q.replace(/[,()%]/g,'')}%`)
-      .limit(6)
-    if(version===customerVersion.current){setCustomerResults((data as Customer[] | null) ?? []);if(searchError)setError('تعذر البحث عن الزبون.')}
-  }, 250)
+
+    // Filter by each token as an AND condition across (name OR phone)
+    for (const t of tokens) {
+      const safe = t.replace(/[,()%]/g, '')
+      if (safe) {
+        query = query.or(`name.ilike.%${safe}%,phone.ilike.%${safe}%`)
+      }
+    }
+
+    const { data, error: searchError } = await query.limit(8)
+    if (version === customerVersion.current) {
+      setCustomerResults((data as Customer[] | null) ?? [])
+      if (searchError) setError('تعذر البحث عن الزبون.')
+    }
+  }, 200)
 
   const searchProducts = useDebounce(async (q: string) => {
-    if (!q.trim()) { setProductResults([]); return }
-    const version=productVersion.current
-    if(previewData){setProductResults(previewData.products.filter(p=>`${p.name} ${p.sku||''} ${p.barcode||''}`.includes(q)));return}
-    const { data,error:searchError } = await supabase
+    const raw = q.trim()
+    if (!raw) { setProductResults([]); return }
+    const version = productVersion.current
+    const tokens = raw.split(/\s+/).filter(Boolean)
+    if (tokens.length === 0) { setProductResults([]); return }
+
+    if (previewData) {
+      setProductResults(
+        previewData.products.filter(p => {
+          const target = `${p.name} ${p.sku || ''} ${p.barcode || ''}`.toLowerCase()
+          return tokens.every(token => target.includes(token.toLowerCase()))
+        })
+      )
+      return
+    }
+
+    let query = supabase
       .from('products')
-      .select('id, name, sku, barcode, price, cost_price, thumbnail_url')
+      .select('id, name, sku, barcode, price, cost_price, thumbnail_url, stock_quantity, track_stock')
       .eq('store_id', storeId)
       .eq('is_active', true)
-      .or(`name.ilike.%${q.replace(/[,()%]/g,'')}%,sku.ilike.%${q.replace(/[,()%]/g,'')}%,barcode.ilike.%${q.replace(/[,()%]/g,'')}%`)
-      .limit(6)
-    if(version===productVersion.current){setProductResults((data as Product[] | null) ?? []);if(searchError)setError('تعذر البحث عن المنتج.')}
-  }, 250)
+
+    // Filter by each token as an AND condition across (name OR sku OR barcode)
+    for (const t of tokens) {
+      const safe = t.replace(/[,()%]/g, '')
+      if (safe) {
+        query = query.or(`name.ilike.%${safe}%,sku.ilike.%${safe}%,barcode.ilike.%${safe}%`)
+      }
+    }
+
+    const { data, error: searchError } = await query.limit(8)
+    if (version === productVersion.current) {
+      setProductResults((data as Product[] | null) ?? [])
+      if (searchError) setError('تعذر البحث عن المنتج.')
+    }
+  }, 200)
 
   // ── البنود ───────────────────────────────────────────────────
 
@@ -194,6 +258,8 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
         quantity: 1,
         unit_price: p.price,
         cost_price: Number(p.cost_price || 0),
+        stock_quantity: p.stock_quantity,
+        track_stock: p.track_stock,
       },
     ])
     setReviewing(false)
@@ -230,7 +296,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
     if(validation){setError(validation);return}
     if(total<=0){setError('الإجمالي يجب أن يكون موجباً.');return}
     if(!Number.isFinite(effectivePaid)||effectivePaid<0||effectivePaid>total||(collectionMode==='partial'&&(effectivePaid<=0||effectivePaid>=total))){setError('الدفعة الجزئية يجب أن تكون أكبر من صفر وأقل من الإجمالي.');return}
-    if(remaining>0&&!selectedCustomer){setError('اختر زبوناً مسجلاً للفاتورة غير المسددة بالكامل.');return}
+    if(remaining>0&&!selectedCustomer&&!(customerMode==='manual'&&customerName.trim())){setError('اختر زبوناً مسجلاً أو أدخل اسم الزبون للفاتورة غير المسددة بالكامل.');return}
     if(effectivePaid>0&&!cashBoxId){setError('اختر صندوق قبض نقدي.');return}
     if(!reviewing){setReviewing(true);return}
     if(previewData){setError('معاينة فقط؛ لم تُحفظ فاتورة أو دفعة.');return}
@@ -408,11 +474,15 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="mb-1 block text-xs text-slate-400">تاريخ الإصدار *</label>
-            <input aria-label="تاريخ الإصدار" type="date" value={issueDate} onChange={e => setIssueDate(e.target.value)} required
+            <input aria-label="تاريخ الإصدار" type="date" value={issueDate} onChange={e => {
+              const newIssue = e.target.value
+              setIssueDate(newIssue)
+              setDueDate(addOneMonth(newIssue))
+            }} required
               className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white outline-none focus:border-sky-500/50 [color-scheme:dark]" />
           </div>
           <div>
-            <label className="mb-1 block text-xs text-slate-400">تاريخ الاستحقاق</label>
+            <label className="mb-1 block text-xs text-slate-400">تاريخ الاستحقاق (افتراضياً شهر)</label>
             <input aria-label="تاريخ الاستحقاق" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
               className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white outline-none focus:border-sky-500/50 [color-scheme:dark]" />
           </div>
@@ -448,7 +518,19 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-white">{p.name}</p>
-                    {p.sku && <p className="text-xs text-slate-500" dir="ltr">{p.sku}</p>}
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {p.sku && <span className="text-xs text-slate-500" dir="ltr">{p.sku}</span>}
+                      {p.track_stock !== false && (
+                        <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+                          (p.stock_quantity ?? 0) > 0
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                        }`}>
+                          <span>المتوفر:</span>
+                          <span className="font-mono font-bold" dir="ltr">{p.stock_quantity ?? 0}</span>
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <span className="shrink-0 text-sm font-medium text-sky-400" dir="ltr">{fmt(p.price)}</span>
                 </button>
@@ -484,6 +566,8 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
                   <input
                     aria-label={`كمية ${item.name||'البند'}`} type="number" min="0.01" step="any"
                     value={item.quantity}
+                    onFocus={e => e.target.select()}
+                    onClick={e => (e.target as HTMLInputElement).select()}
                     onChange={e => updateItem(item.key, 'quantity', Number(e.target.value))}
                     dir="ltr"
                     className="mt-0.5 w-16 block rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-center text-sm text-white outline-none focus:border-sky-500/50"
@@ -491,10 +575,21 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
                 </div>
                 <span className="mb-1.5 text-slate-600">×</span>
                 <div className="flex-1">
-                  <label className="text-[10px] font-medium text-slate-500">السعر ({currencyCode})</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-medium text-slate-500">السعر ({currencyCode})</label>
+                    {item.track_stock !== false && item.stock_quantity !== undefined && item.stock_quantity !== null && (
+                      <span className={`text-[10px] font-medium px-1.5 py-0.2 rounded ${
+                        Number(item.stock_quantity) > 0 ? 'text-emerald-400 bg-emerald-500/10' : 'text-amber-400 bg-amber-500/10'
+                      }`}>
+                        المتاح: <b dir="ltr">{item.stock_quantity}</b>
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="number" min="0" step="0.01"
                     aria-label={`سعر ${item.name||'البند'}`} value={item.unit_price || ''}
+                    onFocus={e => e.target.select()}
+                    onClick={e => (e.target as HTMLInputElement).select()}
                     onChange={e => updateItem(item.key, 'unit_price', Math.max(0, parseFloat(e.target.value) || 0))}
                     placeholder="0"
                     dir="ltr"
@@ -531,7 +626,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
                 <th className="px-3 py-2.5 text-right text-xs text-slate-400">الوصف</th>
                 <th className="w-16 px-2 py-2.5 text-center text-xs text-slate-400">الكمية</th>
                 <th className={showInternal?"w-24 px-2 py-2.5 text-left text-xs text-slate-400":styles.cost}>التكلفة</th>
-                <th className="w-24 px-2 py-2.5 text-left text-xs text-slate-400">سعر البيع</th>
+                <th className="w-40 px-2 py-2.5 text-left text-xs text-slate-400">سعر البيع والمتاح</th>
                 <th className="w-24 px-2 py-2.5 text-left text-xs text-slate-400">الإجمالي</th>
                 <th className={showInternal?"w-24 px-2 py-2.5 text-left text-xs text-slate-400":styles.cost}>الربح</th>
                 <th className="w-8" />
@@ -558,6 +653,8 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
                       <input
                         aria-label={`كمية ${item.name||'البند'}`} type="number" min="0.01" step="any"
                         value={item.quantity}
+                        onFocus={e => e.target.select()}
+                        onClick={e => (e.target as HTMLInputElement).select()}
                         onChange={e => updateItem(item.key, 'quantity', Number(e.target.value))}
                         dir="ltr"
                         className="w-14 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-center text-sm text-white outline-none focus:border-sky-500/50"
@@ -567,6 +664,8 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
                       <input
                         type="number" min="0" step="0.01"
                         value={item.cost_price || ''}
+                        onFocus={e => e.target.select()}
+                        onClick={e => (e.target as HTMLInputElement).select()}
                         onChange={e => updateItem(item.key, 'cost_price', Math.max(0, parseFloat(e.target.value) || 0))}
                         placeholder="0"
                         dir="ltr"
@@ -574,14 +673,31 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
                       />
                     </td>
                     <td className="px-2 py-2 text-left">
-                      <input
-                        type="number" min="0" step="0.01"
-                        aria-label={`سعر ${item.name||'البند'}`} value={item.unit_price || ''}
-                        onChange={e => updateItem(item.key, 'unit_price', Math.max(0, parseFloat(e.target.value) || 0))}
-                        placeholder="0"
-                        dir="ltr"
-                        className="w-20 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-left text-sm text-white font-mono outline-none focus:border-sky-500/50"
-                      />
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number" min="0" step="0.01"
+                          aria-label={`سعر ${item.name||'البند'}`} value={item.unit_price || ''}
+                          onFocus={e => e.target.select()}
+                          onClick={e => (e.target as HTMLInputElement).select()}
+                          onChange={e => updateItem(item.key, 'unit_price', Math.max(0, parseFloat(e.target.value) || 0))}
+                          placeholder="0"
+                          dir="ltr"
+                          className="w-20 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-left text-sm text-white font-mono outline-none focus:border-sky-500/50"
+                        />
+                        {item.track_stock !== false && item.stock_quantity !== undefined && item.stock_quantity !== null && (
+                          <span
+                            title={`المخزون المتاح: ${item.stock_quantity}`}
+                            className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap ${
+                              Number(item.stock_quantity) > 0
+                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                            }`}
+                          >
+                            <span className="text-[10px] text-slate-400">متاح:</span>
+                            <span className="font-mono font-bold" dir="ltr">{item.stock_quantity}</span>
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-2 py-2 text-left text-sm font-semibold text-white font-mono" dir="ltr">
                       {fmt(lineTotal)}

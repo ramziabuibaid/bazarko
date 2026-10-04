@@ -8,6 +8,13 @@ import {allRows} from '@/lib/dashboard/load-simple-dashboard'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import PosReceiptModal, { ReceiptData } from './PosReceiptModal'
+import ProductAttributePillFilters, {
+  type ProductAttributeFilters,
+  getProductType,
+  getProductBrand,
+  getProductSize,
+  getProductColor,
+} from '@/components/dashboard/products/ProductAttributePillFilters'
 
 export interface Product {
   id: string
@@ -21,6 +28,10 @@ export interface Product {
   track_stock: boolean
   thumbnail_url: string | null
   category_id?: string | null
+  brand_id?: string | null
+  categories?: { id: string; name: string } | null
+  brands?: { id: string; name: string } | null
+  specifications?: Array<{ key: string; value: string }> | null
 }
 
 export interface Category {
@@ -99,6 +110,14 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
   const [loadingCatalog, setLoadingCatalog] = useState(true)
 
+  // فلترة الخصائص (النوع، العلامة التجارية، الحجم، اللون) مثل صفحة المنتجات
+  const [attrFilters, setAttrFilters] = useState<ProductAttributeFilters>({
+    type: null,
+    brand: null,
+    size: null,
+    color: null,
+  })
+
   // البحث اللحظي التراكمي
   const [productQuery, setProductQuery] = useState('')
 
@@ -141,7 +160,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
       if(previewCatalog){setAllProducts(previewCatalog.products);setCategories(previewCatalog.categories);setLoadingCatalog(false);return}
       try {
         const [products,cats]=await Promise.all([
-          allRows<Product>((from,to)=>supabase.from('products').select('id, name, price, cost_price, compare_price, sku, barcode, stock_available, track_stock, thumbnail_url, category_id').eq('store_id',storeId).eq('is_active',true).order('name').order('id').range(from,to)),
+          allRows<Product>((from,to)=>supabase.from('products').select('id, name, price, cost_price, compare_price, sku, barcode, stock_available, track_stock, thumbnail_url, category_id, brand_id, categories:categories(id, name), brands:brands(id, name), specifications').eq('store_id',storeId).eq('is_active',true).order('name').order('id').range(from,to)),
           allRows<Category>((from,to)=>supabase.from('categories').select('id, name, sort_order').eq('store_id',storeId).eq('is_active',true).order('sort_order').order('id').range(from,to)),
         ])
         if(isMounted){setAllProducts(products);setCategories(cats);setCatalogError('')}
@@ -153,9 +172,21 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
     return () => { isMounted = false }
   }, [storeId])
 
-  // فلترة الأصناف لحظياً وتراكمياً حسب التصنيف والبحث
+  // فلترة الأصناف لحظياً وتراكمياً حسب التصنيف والبحث وخصائص المنتجات (نوع، علامة تجارية، حجم، لون)
   const filteredProducts = allProducts.filter(p => {
     if (selectedCategory !== 'all' && p.category_id !== selectedCategory) {
+      return false
+    }
+    if (attrFilters.type && getProductType(p as any) !== attrFilters.type) {
+      return false
+    }
+    if (attrFilters.brand && getProductBrand(p as any) !== attrFilters.brand) {
+      return false
+    }
+    if (attrFilters.size && getProductSize(p as any) !== attrFilters.size) {
+      return false
+    }
+    if (attrFilters.color && getProductColor(p as any) !== attrFilters.color) {
       return false
     }
     if (!productQuery.trim()) return true
@@ -190,8 +221,14 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
       .eq('store_id', storeId)
       .eq('is_active', true)
 
-    if (debouncedCustomer.trim()) {
-      query = query.or(`name.ilike.%${debouncedCustomer.replace(/[,()%]/g,'')}%,phone.ilike.%${debouncedCustomer.replace(/[,()%]/g,'')}%`)
+    const tokens = debouncedCustomer.trim().split(/\s+/).filter(Boolean)
+    if (tokens.length > 0) {
+      for (const t of tokens) {
+        const safe = t.replace(/[,()%]/g, '')
+        if (safe) {
+          query = query.or(`name.ilike.%${safe}%,phone.ilike.%${safe}%`)
+        }
+      }
     }
 
     query
@@ -474,7 +511,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
         <div className={posPresentation?styles.catalog:"lg:col-span-7 xl:col-span-8 space-y-4"}>
 
           {/* شريط البحث اللحظي التراكمي وتصنيفات المنتجات */}
-          <div className="rounded-2xl border border-white/10 bg-slate-900/90 p-4 space-y-3">
+          <div className={`${posPresentation ? 'sticky top-1 z-10 backdrop-blur-md shadow-xl ' : ''}rounded-2xl border border-white/10 bg-slate-900/95 p-4 space-y-3`}>
             {/* حقل البحث اللحظي */}
             <div className="relative">
               <input
@@ -498,42 +535,53 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
               )}
             </div>
 
-            {/* شريط تبويبات التصنيفات */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
-              <button
-                type="button"
-                onClick={() => setSelectedCategory('all')}
-                className={`shrink-0 px-3.5 py-1.5 rounded-xl font-bold transition ${
-                  selectedCategory === 'all'
-                    ? 'bg-sky-500 text-slate-950 shadow-sm'
-                    : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white border border-white/5'
-                }`}
-              >
-                الكل 🌟 ({allProducts.length})
-              </button>
+            {/* شريط تبويبات التصنيفات (في النموذج العادي فقط، في POS نكتفي بفلاتر الخصائص) */}
+            {!posPresentation && (
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategory('all')}
+                  className={`shrink-0 px-3.5 py-1.5 rounded-xl font-bold transition ${
+                    selectedCategory === 'all'
+                      ? 'bg-sky-500 text-slate-950 shadow-sm'
+                      : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white border border-white/5'
+                  }`}
+                >
+                  الكل 🌟 ({allProducts.length})
+                </button>
 
-              {categories.map(cat => {
-                const count = allProducts.filter(p => p.category_id === cat.id).length
-                return (
-                  <button
-                    key={cat.id}
-                    type="button"
-                    onClick={() => setSelectedCategory(cat.id)}
-                    className={`shrink-0 px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 ${
-                      selectedCategory === cat.id
-                        ? 'bg-sky-500 text-slate-950 shadow-sm'
-                        : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white border border-white/5'
-                    }`}
-                  >
-                    <span>{cat.name}</span>
-                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                      selectedCategory === cat.id ? 'bg-slate-950/30 text-slate-950' : 'bg-slate-700 text-slate-400'
-                    }`}>
-                      {count}
-                    </span>
-                  </button>
-                )
-              })}
+                {categories.map(cat => {
+                  const count = allProducts.filter(p => p.category_id === cat.id).length
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setSelectedCategory(cat.id)}
+                      className={`shrink-0 px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 ${
+                        selectedCategory === cat.id
+                          ? 'bg-sky-500 text-slate-950 shadow-sm'
+                          : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white border border-white/5'
+                      }`}
+                    >
+                      <span>{cat.name}</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                        selectedCategory === cat.id ? 'bg-slate-950/30 text-slate-950' : 'bg-slate-700 text-slate-400'
+                      }`}>
+                        {count}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* شريط فلترة الخصائص (النوع، العلامة التجارية، الحجم، اللون) */}
+            <div className={!posPresentation ? "pt-2 border-t border-white/5" : "pt-1"}>
+              <ProductAttributePillFilters
+                products={allProducts as any}
+                filters={attrFilters}
+                onChange={setAttrFilters}
+              />
             </div>
           </div>
 
@@ -546,15 +594,19 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
           ) : filteredProducts.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-white/10 bg-slate-900/40 p-12 text-center">
               <span className="text-4xl">🔍</span>
-              <p className="mt-2 text-sm text-slate-300 font-bold">لا توجد أصناف مطابقة للبحث</p>
-              <p className="text-xs text-slate-500 mt-1">جرب كلمات أخرى أو قم بإلغاء الفلترة</p>
-              {productQuery && (
+              <p className="mt-2 text-sm text-slate-300 font-bold">لا توجد أصناف مطابقة للبحث أو الفلاتر</p>
+              <p className="text-xs text-slate-500 mt-1">جرب كلمات أخرى أو قم بإلغاء الفلاتر المحددة</p>
+              {(productQuery || attrFilters.type || attrFilters.brand || attrFilters.size || attrFilters.color || selectedCategory !== 'all') && (
                 <button
                   type="button"
-                  onClick={() => setProductQuery('')}
+                  onClick={() => {
+                    setProductQuery('')
+                    setSelectedCategory('all')
+                    setAttrFilters({ type: null, brand: null, size: null, color: null })
+                  }}
                   className="mt-3 text-xs text-sky-400 underline font-bold"
                 >
-                  إعادة عرض كافة الأصناف
+                  إعادة عرض كافة الأصناف ومسح الفلاتر
                 </button>
               )}
             </div>
@@ -576,7 +628,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
                     aria-label={`إضافة ${product.name}`}
                     key={product.id}
                     onClick={() => !isOutOfStock && addProduct(product)}
-                    className={`${posPresentation?styles.product:''} group relative flex flex-col justify-between p-3 rounded-2xl border text-right transition duration-150 select-none cursor-pointer ${
+                    className={`${posPresentation?styles.product:'p-3 rounded-2xl'} group relative flex flex-col justify-between border text-right transition duration-150 select-none cursor-pointer ${
                       isOutOfStock
                         ? 'border-white/5 bg-slate-900/40 opacity-50 cursor-not-allowed'
                         : inCartQty > 0
@@ -592,16 +644,16 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
                     )}
 
                     <div>
-                      {/* صورة الصنف */}
-                      <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-slate-950 mb-2.5 border border-white/5">
+                      {/* صورة الصنف بالحجم الكامل غير مقصوصة */}
+                      <div className="relative aspect-square w-full rounded-xl overflow-hidden bg-slate-950 mb-2 border border-white/5 flex items-center justify-center p-1.5 product-img-box">
                         {product.thumbnail_url ? (
                           <img
                             src={product.thumbnail_url}
                             alt={product.name}
-                            className="h-full w-full object-cover group-hover:scale-105 transition duration-300"
+                            className="max-h-full max-w-full object-contain group-hover:scale-105 transition duration-300"
                           />
                         ) : (
-                          <div className="flex h-full w-full items-center justify-center text-2xl text-slate-600">
+                          <div className="flex h-full w-full items-center justify-center text-3xl text-slate-600">
                             📦
                           </div>
                         )}
@@ -615,32 +667,32 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
                       </div>
 
                       {/* اسم الصنف وكوده */}
-                      <h3 className="font-bold text-white text-xs sm:text-sm line-clamp-2 group-hover:text-sky-300 transition">
+                      <h3 className="font-bold text-white text-xs line-clamp-2 group-hover:text-sky-300 transition leading-snug">
                         {product.name}
                       </h3>
                       {product.sku && (
-                        <p className="text-[11px] text-slate-400 font-mono mt-0.5 truncate" dir="ltr">
+                        <p className="text-[10px] text-slate-400 font-mono mt-0.5 truncate" dir="ltr">
                           #{product.sku}
                         </p>
                       )}
                     </div>
 
                     {/* السعر والمخزون (المحور 16: السعر الأصلي أولاً ثم الصافي) */}
-                    <div className="mt-3 pt-2 border-t border-white/5 flex items-end justify-between gap-1">
+                    <div className="mt-2 pt-1.5 border-t border-white/5 flex items-end justify-between gap-1">
                       <div>
                         {hasDiscount && (
-                          <span className="block text-[11px] line-through text-slate-400 font-mono">
+                          <span className="block text-[10px] line-through text-slate-400 font-mono">
                             {fmt(product.compare_price!)} {currencyCode}
                           </span>
                         )}
-                        <span className="text-sm font-black font-mono text-emerald-400">
+                        <span className="text-xs sm:text-sm font-black font-mono text-emerald-400">
                           {fmt(product.price)} <span className="text-[10px] text-emerald-400/80">{currencyCode}</span>
                         </span>
                       </div>
 
                       <div className="text-left">
                         {product.track_stock ? (
-                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                          <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
                             isOutOfStock
                               ? 'bg-rose-500/20 text-rose-300'
                               : 'bg-emerald-500/20 text-emerald-300'
@@ -658,7 +710,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
               })}
             </div>
           )}
-          {posPresentation&&<div className={styles.footer}><span>لم تجد المنتج؟</span><Link href="/dashboard/products/new">＋ إضافة منتج</Link><button onClick={()=>{setProductQuery('');setSelectedCategory('all')}}>مسح الفلاتر</button></div>}
+          {posPresentation&&<div className={styles.footer}><span>لم تجد المنتج؟</span><Link href="/dashboard/products/new">＋ إضافة منتج</Link><button onClick={()=>{setProductQuery('');setSelectedCategory('all');setAttrFilters({type:null,brand:null,size:null,color:null})}}>مسح الفلاتر</button></div>}
         </div>
 
         {/* ── العمود الجانبي (سلة الطلب والدفع الفوري) - 5 أعمدة ── */}
@@ -701,6 +753,8 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
                             type="number"
                             aria-label={`سعر ${item.name}`}
                             value={item.unitPrice}
+                            onFocus={e => e.target.select()}
+                            onClick={e => (e.target as HTMLInputElement).select()}
                             onChange={e => updatePrice(item.productId, e.target.value)}
                             min="0"
                             step="0.01"
@@ -895,7 +949,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
               )}
             </div>
 
-            {posPresentation&&<><div className={styles.methods}><button type="button" aria-pressed={mode==='pos'} onClick={()=>{setMode('pos');setPaymentMethod('cash')}}>نقد</button><button type="button" aria-pressed={mode==='account'} onClick={()=>{setMode('account');setPaymentMethod('credit')}}>على الحساب</button><button disabled title="تسجل عبر مسار سندات القبض">شيك</button><button disabled title="تسجل عبر مسار سندات القبض">مختلط</button><button disabled title="تسجل عبر مسار سندات القبض">تحويل بنكي</button></div>{mode==='pos'&&<div className={styles.tender}><label>المبلغ المستلم<input aria-label="المبلغ المستلم نقداً" type="number" min="0" step="0.01" value={tender} placeholder={String(totalAmount)} onChange={e=>setTender(e.target.value)}/></label><label>الباقي للزبون<strong>{fmt(cash.change)} {currencyCode}</strong></label></div>}<div className={styles.hold}><button type="button" disabled={submitting||!!receiptData||!items.length} onClick={holdSale}>تعليق البيع</button>{held&&<button type="button" disabled={loadingCatalog} onClick={resumeSale}>استعادة السلة المعلقة</button>}{held&&<button type="button" onClick={()=>{try{sessionStorage.removeItem(`bazarko.pos.held.${storeId}`);setHeld(null);setHoldNotice('حُذفت السلة المعلقة.')}catch{setHoldNotice('تعذر حذف السلة المعلقة.')}}}>حذف المعلقة</button>}</div><p role="status" className={styles.notice}>{holdNotice}</p></>}
+            {posPresentation&&<><div className={styles.methods}><button type="button" aria-pressed={mode==='pos'} onClick={()=>{setMode('pos');setPaymentMethod('cash')}}>نقد</button><button type="button" aria-pressed={mode==='account'} onClick={()=>{setMode('account');setPaymentMethod('credit')}}>على الحساب</button><button disabled title="تسجل عبر مسار سندات القبض">شيك</button><button disabled title="تسجل عبر مسار سندات القبض">مختلط</button><button disabled title="تسجل عبر مسار سندات القبض">تحويل بنكي</button></div>{mode==='pos'&&<div className={styles.tender}><label>المبلغ المستلم<input aria-label="المبلغ المستلم نقداً" type="number" min="0" step="0.01" value={tender} placeholder={String(totalAmount)} onFocus={e=>e.target.select()} onClick={e=>(e.target as HTMLInputElement).select()} onChange={e=>setTender(e.target.value)}/></label><label>الباقي للزبون<strong>{fmt(cash.change)} {currencyCode}</strong></label></div>}<div className={styles.hold}><button type="button" disabled={submitting||!!receiptData||!items.length} onClick={holdSale}>تعليق البيع</button>{held&&<button type="button" disabled={loadingCatalog} onClick={resumeSale}>استعادة السلة المعلقة</button>}{held&&<button type="button" onClick={()=>{try{sessionStorage.removeItem(`bazarko.pos.held.${storeId}`);setHeld(null);setHoldNotice('حُذفت السلة المعلقة.')}catch{setHoldNotice('تعذر حذف السلة المعلقة.')}}}>حذف المعلقة</button>}</div><p role="status" className={styles.notice}>{holdNotice}</p></>}
             {/* ── الأثر المحاسبي والقيود الآلية ── */}
             <details className="rounded-xl border border-sky-500/20 bg-sky-950/20 p-3 text-[11px] space-y-2"><summary>عرض الأثر المحاسبي التقديري</summary>
               <div className="flex items-center justify-between text-sky-300 font-bold border-b border-sky-500/20 pb-1">

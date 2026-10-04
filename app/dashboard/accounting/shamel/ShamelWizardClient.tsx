@@ -740,7 +740,15 @@ export default function ShamelWizardClient({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'sync_now' }),
       })
-      const data = await res.json()
+      
+      let data: any = {}
+      const text = await res.text()
+      try {
+        data = JSON.parse(text)
+      } catch {
+        throw new Error(text?.slice(0, 200) || `استجابة غير متوقعة من الخادم (رمز الحالة ${res.status})`)
+      }
+
       if (!res.ok) throw new Error(data.error || 'فشلت المزامنة')
       setSuccessMsg(data.message)
       if (data.config) {

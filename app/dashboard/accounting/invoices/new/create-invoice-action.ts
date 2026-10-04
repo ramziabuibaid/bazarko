@@ -20,12 +20,58 @@ export async function createSalesInvoice(storeId:string,requestId:string,input:S
  if(!input||!Array.isArray(input.items)||input.items.length>200)return {ok:false,error:'بنود الفاتورة غير صحيحة.'}
  const validation=validInvoiceInput(input.items,input.discountType,input.discountValue,input.issueDate,input.dueDate)
  if(validation)return {ok:false,error:validation}
+ let activeCustomerId = input.customerId
+ if (!activeCustomerId && input.customerName?.trim()) {
+   const trimmedName = input.customerName.trim()
+   const trimmedPhone = input.customerPhone?.trim() || null
+   const trimmedAddress = input.customerAddress?.trim() || null
+
+   const { data: existing } = await supabase
+     .from('customers')
+     .select('id')
+     .eq('store_id', storeId)
+     .eq('is_active', true)
+     .ilike('name', trimmedName)
+     .limit(1)
+
+   if (existing && existing.length > 0) {
+     activeCustomerId = existing[0].id
+   } else {
+     const { data: newCust, error: custErr } = await supabase
+       .from('customers')
+       .insert({
+         store_id: storeId,
+         name: trimmedName,
+         phone: trimmedPhone,
+         address: trimmedAddress,
+         customer_type: 'retail',
+         is_active: true,
+       })
+       .select('id')
+       .single()
+     if (!custErr && newCust?.id) {
+       activeCustomerId = newCust.id
+     }
+   }
+ }
+
+ const payloadWithCustomer: SalesInvoiceInput = {
+   ...input,
+   customerId: activeCustomerId,
+ }
+
  try{
-   const {data,error}=await supabase.rpc('create_sales_invoice_atomic',{p_store_id:storeId,p_request_id:requestId,p_payload:input})
+   const {data,error}=await supabase.rpc('create_sales_invoice_atomic',{p_store_id:storeId,p_request_id:requestId,p_payload:payloadWithCustomer})
    if(error)return {ok:false,error:error.message,uncertain:!error.code||!/^[0-9A-Z]{5}$/.test(error.code)}
    if(!data?.invoiceId)return {ok:false,error:'تعذر تأكيد نتيجة الحفظ؛ أعد المحاولة بنفس الطلب.',uncertain:true}
    // Cache invalidation must not turn a committed invoice into a failed save.
-   try{revalidatePath('/dashboard/accounting/invoices');revalidatePath('/dashboard/customers/ledger');revalidatePath('/dashboard/accounting/treasury');revalidatePath('/dashboard/products')}catch{}
+   try{
+     revalidatePath('/dashboard/accounting/invoices')
+     revalidatePath('/dashboard/customers')
+     revalidatePath('/dashboard/customers/ledger')
+     revalidatePath('/dashboard/accounting/treasury')
+     revalidatePath('/dashboard/products')
+   }catch{}
    return {ok:true,invoiceId:data.invoiceId}
  }catch{return {ok:false,error:'انقطع الاتصال أثناء الحفظ؛ أعد محاولة الطلب نفسه للتحقق من نتيجته.',uncertain:true}}
 }

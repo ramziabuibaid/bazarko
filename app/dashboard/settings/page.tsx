@@ -22,12 +22,20 @@ export default async function SettingsPage() {
       instagram, facebook, tiktok, telegram,
       business_hours, is_verified,
       secondary_currency_code, exchange_rate, prefer_secondary,
-      map_url, header_theme, footer_settings, modules
+      map_url, header_theme, footer_settings, modules, settings
     `)
     .eq('id', storeId)
     .single()
 
   if (!store) redirect('/onboarding')
+
+  // العملاء لربط زبون الكاش في الـ POS
+  const { data: customers } = await supabase
+    .from('customers')
+    .select('id, name, shamel_code, phone')
+    .eq('store_id', storeId)
+    .eq('is_active', true)
+    .order('name')
 
   // متوسط التقييمات
   const { data: reviews } = await supabase
@@ -70,6 +78,7 @@ export default async function SettingsPage() {
       <div className="max-w-3xl">
         <StoreSettingsForm
           store={store}
+          customers={customers || []}
           avgRating={avgRating}
           completedOrders={completedOrders ?? 0}
         />

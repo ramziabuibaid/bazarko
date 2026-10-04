@@ -77,7 +77,7 @@ export default async function TreasuryPage({ searchParams }: { searchParams: Sea
 
   const today = new Date().toISOString().split('T')[0]
 
-  const [{ data: todayMovements }, { data: recentMovements }, { data: sessions }] =
+  const [{ data: todayMovements }, { data: recentMovements }, { data: sessions }, { data: storeCustomers }] =
     await Promise.all([
       supabase
         .from('cash_movements')
@@ -87,7 +87,7 @@ export default async function TreasuryPage({ searchParams }: { searchParams: Sea
         .eq('date', today),
       supabase
         .from('cash_movements')
-        .select('id, direction, amount, source, party_name, payment_method, description, date, created_at')
+        .select('id, direction, amount, source, ref_id, party_name, payment_method, description, date, created_at')
         .eq('store_id', store.id)
         .eq('cash_box_id', currentBox.id)
         .order('created_at', { ascending: false })
@@ -100,7 +100,17 @@ export default async function TreasuryPage({ searchParams }: { searchParams: Sea
         .eq('status', 'closed')
         .order('closed_at', { ascending: false })
         .limit(5),
+      supabase
+        .from('customers')
+        .select('id, name')
+        .eq('store_id', store.id),
     ])
+
+  // Map customer names to their IDs for quick lookup
+  const customerMap = new Map<string, string>()
+  for (const c of storeCustomers ?? []) {
+    if (c.name) customerMap.set(c.name.trim().toLowerCase(), c.id)
+  }
 
   const todayIn = (todayMovements ?? [])
     .filter(m => m.direction === 'in')
@@ -465,33 +475,48 @@ export default async function TreasuryPage({ searchParams }: { searchParams: Sea
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
-                {(recentMovements ?? []).map(m => (
-                  <tr key={m.id} className="hover:bg-white/2 transition-colors">
-                    <td className="px-4 py-3 text-slate-300">
-                      {m.description}
-                      {m.party_name && (
-                        <span className="mr-1.5 text-xs text-slate-400">· {m.party_name}</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-400">
-                      <span className="rounded bg-white/5 px-2 py-0.5">
-                        {SOURCE_LABELS[m.source] ?? m.source}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-400 font-mono" dir="ltr">
-                      {m.date}
-                    </td>
-                    <td
-                      dir="ltr"
-                      className={`px-4 py-3 text-left font-bold tabular-nums ${
-                        m.direction === 'in' ? 'text-emerald-400' : 'text-red-400'
-                      }`}
-                    >
-                      {m.direction === 'in' ? '+' : '−'}
-                      {fmt(m.amount)}
-                    </td>
-                  </tr>
-                ))}
+                {(recentMovements ?? []).map(m => {
+                  const customerId = m.party_name ? customerMap.get(m.party_name.trim().toLowerCase()) : null
+                  return (
+                    <tr key={m.id} className="hover:bg-white/2 transition-colors">
+                      <td className="px-4 py-3 text-slate-300">
+                        {m.description}
+                        {m.party_name && (
+                          <span className="mr-1.5 text-xs text-slate-400">
+                            ·{' '}
+                            {customerId ? (
+                              <Link
+                                href={`/dashboard/customers/${customerId}`}
+                                className="text-sky-400 hover:underline font-medium"
+                              >
+                                {m.party_name}
+                              </Link>
+                            ) : (
+                              m.party_name
+                            )}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-400">
+                        <span className="rounded bg-white/5 px-2 py-0.5">
+                          {SOURCE_LABELS[m.source] ?? m.source}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-400 font-mono" dir="ltr">
+                        {m.date}
+                      </td>
+                      <td
+                        dir="ltr"
+                        className={`px-4 py-3 text-left font-bold tabular-nums ${
+                          m.direction === 'in' ? 'text-emerald-400' : 'text-red-400'
+                        }`}
+                      >
+                        {m.direction === 'in' ? '+' : '−'}
+                        {fmt(m.amount)}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

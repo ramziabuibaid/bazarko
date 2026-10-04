@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
 
   const { data: store } = await supabase
     .from('stores')
-    .select('id, name, currency_code, country_code, subdomain')
+    .select('id, name, currency_code, country_code, subdomain, settings')
     .eq('owner_id', user.id)
     .single()
 
@@ -85,22 +85,29 @@ export async function POST(req: NextRequest) {
     p_prefix: `ORD-${new Date().getFullYear()}-`,
   })
 
-  // بيانات الزبون (من سجل الزبون إذا account mode)
+  // بيانات الزبون (من سجل الزبون إذا account mode، أو من الإعداد الافتراضي للـ POS)
+  let resolvedCustomerId = customerId ?? null
   let resolvedName = customerName ?? ''
   let resolvedPhone = customerPhone ?? ''
   let resolvedEmail = customerEmail ?? ''
 
-  if (mode === 'account' && customerId) {
+  if (mode === 'pos' && !resolvedCustomerId && store.settings?.pos_default_customer_id) {
+    resolvedCustomerId = store.settings.pos_default_customer_id
+  }
+
+  if (resolvedCustomerId) {
     const { data: customer } = await supabase
       .from('customers')
       .select('name, phone, email')
-      .eq('id', customerId)
+      .eq('id', resolvedCustomerId)
       .single()
 
     if (customer) {
-      resolvedName = customer.name
-      resolvedPhone = customer.phone ?? ''
-      resolvedEmail = customerEmail || customer.email || ''
+      if (!resolvedName.trim() || mode === 'pos') {
+        resolvedName = customer.name
+      }
+      resolvedPhone = resolvedPhone || (customer.phone ?? '')
+      resolvedEmail = resolvedEmail || (customer.email ?? '')
     }
   }
 
@@ -121,7 +128,7 @@ export async function POST(req: NextRequest) {
       subtotal,
       total_amount: totalAmount,
       amount_paid: effectiveAmountPaid,
-      customer_id: customerId ?? null,
+      customer_id: resolvedCustomerId,
       customer_name: resolvedName || null,
       customer_phone: resolvedPhone || null,
       customer_email: resolvedEmail || null,
@@ -209,7 +216,7 @@ export async function POST(req: NextRequest) {
       store_id: store.id,
       invoice_number: invoiceNumber,
       order_id: order.id,
-      customer_id: customerId ?? null,
+      customer_id: resolvedCustomerId,
       customer_name: resolvedName || (mode === 'pos' ? 'عميل نقدي' : null),
       customer_phone: resolvedPhone || null,
       customer_address: address || null,
@@ -243,20 +250,65 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // ── تحديث الصندوق (نقد مقبوض في البيع النقدي أو الدفعة الفورية) ──
+  // ── تحديث الصندوق وسند القبض (نقد مقبوض في البيع النقدي أو الدفعة الفورية) ──
+  let receiptVoucherId: string | null = null
+
   if (effectiveAmountPaid > 0 && paymentMethod !== 'credit') {
     const methodMap: Record<string, 'cash' | 'bank' | 'card' | 'transfer'> = {
       cash: 'cash', bank_transfer: 'bank', check: 'bank', online: 'card',
     }
     const { data: boxId } = await supabase.rpc('ensure_cash_box', { p_store_id: store.id })
+
+    // إنشاء سند قبض (Receipt Voucher) لمبيعات الـ POS النقدية
+    if (mode === 'pos') {
+      try {
+        const { count: vCount } = await supabase
+          .from('vouchers')
+          .select('id', { count: 'exact', head: true })
+          .eq('store_id', store.id)
+          .eq('type', 'receipt')
+
+        const voucherNumber = `RCP-${String((vCount ?? 0) + 1).padStart(4, '0')}`
+
+        const { data: voucher } = await supabase
+          .from('vouchers')
+          .insert({
+            store_id: store.id,
+            voucher_number: voucherNumber,
+            type: 'receipt',
+            date: todayStr,
+            amount: effectiveAmountPaid,
+            cash_amount: effectiveAmountPaid,
+            checks_amount: 0,
+            cash_box_id: boxId || null,
+            customer_id: resolvedCustomerId,
+            party_name: resolvedName || 'زبون نقدي',
+            payment_method: 'cash',
+            category: 'مبيعات نقدية POS',
+            description: `قبض مبيعات نقدية POS #${order.order_number}`,
+            reference: order.order_number,
+            invoice_id: inv?.id || null,
+            created_by: user.id,
+          })
+          .select('id')
+          .maybeSingle()
+
+        if (voucher) {
+          receiptVoucherId = voucher.id
+        }
+      } catch (vErr) {
+        console.error('Error creating POS receipt voucher:', vErr)
+      }
+    }
+
     if (boxId) {
       await supabase.from('cash_movements').insert({
         store_id:       store.id,
         cash_box_id:    boxId,
         direction:      'in',
         amount:         effectiveAmountPaid,
-        source:         'order',
-        ref_id:         order.id,
+        source:         receiptVoucherId ? 'voucher' : 'order',
+        ref_id:         receiptVoucherId || order.id,
         party_name:     resolvedName || null,
         payment_method: methodMap[paymentMethod] ?? 'cash',
         description:    mode === 'pos' ? `مبيعات نقدية POS #${order.order_number}` : `دفعة نقدية طلبية #${order.order_number}`,
@@ -276,8 +328,8 @@ export async function POST(req: NextRequest) {
       invoiceNumber: inv?.invoice_number || null,
       date: todayStr,
       mode,
-      customerId: mode === 'account' ? (customerId ?? null) : null,
-      customerName: mode === 'account' ? resolvedName : 'عميل نقدي',
+      customerId: resolvedCustomerId,
+      customerName: resolvedName || 'عميل نقدي',
       totalAmount,
       totalCost,
       amountPaid: effectiveAmountPaid,

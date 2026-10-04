@@ -78,6 +78,13 @@ interface FooterSettings {
   copyright: string
 }
 
+interface StoreCustomerOption {
+  id: string
+  name: string
+  shamel_code?: string | null
+  phone?: string | null
+}
+
 interface Store {
   id: string
   name: string
@@ -105,10 +112,12 @@ interface Store {
   header_theme: string | null
   footer_settings: FooterSettings | null
   modules: Record<string, boolean> | null
+  settings?: Record<string, any> | null
 }
 
 interface Props {
   store: Store
+  customers?: StoreCustomerOption[]
   avgRating: number | null
   completedOrders: number
 }
@@ -120,7 +129,7 @@ function defaultDialCode(countryCode: string) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function StoreSettingsForm({ store, avgRating, completedOrders }: Props) {
+export default function StoreSettingsForm({ store, customers = [], avgRating, completedOrders }: Props) {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -147,6 +156,9 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
   const [secondaryCurrency, setSecondaryCurrency] = useState(store.secondary_currency_code ?? '')
   const [exchangeRate, setExchangeRate] = useState(store.exchange_rate ? String(store.exchange_rate) : '')
   const [preferSecondary, setPreferSecondary] = useState(store.prefer_secondary ?? false)
+  const [posDefaultCustomerId, setPosDefaultCustomerId] = useState<string>(
+    store.settings?.pos_default_customer_id ?? ''
+  )
 
   const defaultFooter: FooterSettings = {
     tagline: '', show_contact: true, show_social: true,
@@ -251,6 +263,11 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
     setSaving(true)
     setError('')
 
+    const updatedSettings = {
+      ...(store.settings || {}),
+      pos_default_customer_id: posDefaultCustomerId || null,
+    }
+
     const { error: err } = await createClient()
       .from('stores')
       .update({
@@ -273,6 +290,7 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
         prefer_secondary:        secondaryCurrency ? preferSecondary : false,
         footer_settings:         footer,
         modules:                 modules,
+        settings:                updatedSettings,
         updated_at:              new Date().toISOString(),
       })
       .eq('id', store.id)
@@ -774,6 +792,39 @@ export default function StoreSettingsForm({ store, avgRating, completedOrders }:
             </div>
           </div>
         )}
+      </div>
+
+      {/* ── إعدادات نقطة البيع (POS) والمبيعات النقدية ────────── */}
+      <div className="rounded-2xl border border-white/5 bg-slate-900 p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-lg">🖥️</span>
+          <h2 className="font-semibold text-white">إعدادات نقطة البيع (POS) والمبيعات النقدية</h2>
+        </div>
+        <p className="mb-4 text-xs text-slate-500">
+          حدد الزبون الافتراضي الذي يتم ربط مبيعات الكاش به في شاشة نقطة البيع وإنشاء سندات القبض باسمه تلقائياً
+        </p>
+
+        <div>
+          <label className="mb-1.5 block text-sm text-slate-400">الزبون الافتراضي للمبيعات النقدية (POS)</label>
+          <select
+            value={posDefaultCustomerId}
+            onChange={e => {
+              setPosDefaultCustomerId(e.target.value)
+              setSuccess(false)
+            }}
+            className={inputClass}
+          >
+            <option value="">-- بدون ربط بحساب زبون (عميل نقدي عام) --</option>
+            {customers.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.name} {c.shamel_code ? `(كود الشامل: ${c.shamel_code})` : ''} {c.phone ? `- ${c.phone}` : ''}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1.5 text-xs text-slate-500">
+            عند إنشاء طلبية كاش من نقطة البيع، سيتم توجيه الفاتورة وسند القبض إلى هذا الحساب لسهولة تتبعه في كشف الحساب والتقارير المالية.
+          </p>
+        </div>
       </div>
 
       {/* ── الوحدات المُفعّلة ──────────────────────────────── */}
