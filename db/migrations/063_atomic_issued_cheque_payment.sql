@@ -1,0 +1,181 @@
+BEGIN;
+ALTER TABLE public.checks ADD COLUMN IF NOT EXISTS payment_voucher_id uuid REFERENCES public.vouchers(id), ADD COLUMN IF NOT EXISTS payment_bank_account_id uuid REFERENCES public.bank_accounts(id), ADD COLUMN IF NOT EXISTS payment_payable_account_id uuid REFERENCES public.accounts(id), ADD COLUMN IF NOT EXISTS payment_counter_account_id uuid REFERENCES public.accounts(id), ADD COLUMN IF NOT EXISTS payment_purchase_id uuid REFERENCES public.purchase_invoices(id);
+ALTER TABLE public.check_operations ADD COLUMN IF NOT EXISTS payment_voucher_id uuid REFERENCES public.vouchers(id);
+CREATE OR REPLACE FUNCTION public.create_cheque_payment_atomic(p_store_id uuid,p_request_id uuid,p_payload jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+#variable_conflict use_variable
+DECLARE
+ actor uuid:=auth.uid(); old public.vouchers%ROWTYPE; supplier public.suppliers%ROWTYPE; inv public.purchase_invoices%ROWTYPE; box public.cash_boxes%ROWTYPE;
+ supplier_id uuid; purchase_id uuid; box_id uuid; counter_id uuid; cash_acc uuid; portfolio public.cash_boxes%ROWTYPE; portfolio_id uuid; payable_acc uuid; bank public.bank_accounts%ROWTYPE; bank_id uuid; bank_ids uuid[]:='{}'; bank_accs uuid[]:='{}'; check_data jsonb:='[]'; item jsonb; cash_amount numeric; cheque_amount numeric:=0; method text; check_amount numeric; number text; seen text[]:='{}'; issue_date date; due_date date; ids uuid[]; source_total numeric;
+ voucher_id uuid:=gen_random_uuid(); journal_id uuid; curr text; company_name text; party text; description text; reference text; role_name text;
+ payment_date date; amount numeric; available numeric; next_no bigint; voucher_no text; acc record;
+BEGIN
+ IF actor IS NULL OR NOT EXISTS(SELECT 1 FROM public.stores WHERE id=p_store_id AND owner_id=actor) AND NOT EXISTS(SELECT 1 FROM public.store_members WHERE store_id=p_store_id AND profile_id=actor AND is_active) THEN RAISE EXCEPTION 'غير مصرح بالصرف لهذا المتجر';END IF;
+ IF p_request_id IS NULL OR p_payload IS NULL OR jsonb_typeof(p_payload)<>'object' THEN RAISE EXCEPTION 'طلب الحفظ غير صحيح';END IF;
+ -- Purchases and their payment numbering share the same lock.
+ PERFORM pg_advisory_xact_lock(hashtextextended(p_store_id::text,55001));
+ SELECT * INTO old FROM public.vouchers WHERE store_id=p_store_id AND creation_request_id=p_request_id;
+ IF FOUND THEN
+  IF old.type<>'payment' OR old.payment_method NOT IN('cheque','split') OR old.creation_request_payload IS DISTINCT FROM p_payload THEN RAISE EXCEPTION 'طلب الحفظ سبق استخدامه ببيانات مختلفة';END IF;
+  RETURN jsonb_build_object('voucherId',old.id,'voucherNumber',old.voucher_number,'replayed',true);
+ END IF;
+ IF p_payload->>'partyType' IS NULL OR p_payload->>'partyType' NOT IN('supplier','other') THEN RAISE EXCEPTION 'حدد نوع المستفيد';END IF;
+ method:=p_payload->>'method';
+ IF method IS NULL OR method NOT IN('cheque','split') THEN RAISE EXCEPTION 'اختر صرف شيكات أو صرفاً مختلطاً';END IF;
+ IF coalesce(p_payload->>'amount','') !~ '^\d+(\.\d{1,2})?$' THEN RAISE EXCEPTION 'راجع الجزء النقدي';END IF;
+ cash_amount:=(p_payload->>'amount')::numeric;
+ IF (method='cheque' AND cash_amount<>0) OR (method='split' AND cash_amount<=0) OR cash_amount>999999999 THEN RAISE EXCEPTION 'راجع الجزء النقدي للصرف';END IF;
+ IF coalesce(p_payload->>'date','') !~ '^\d{4}-\d{2}-\d{2}$' THEN RAISE EXCEPTION 'تاريخ الصرف غير صحيح';END IF;
+ payment_date:=(p_payload->>'date')::date;description:=btrim(p_payload->>'description');reference:=nullif(btrim(p_payload->>'reference'),'');
+ IF coalesce(description,'')='' OR length(description)>1000 OR length(reference)>200 THEN RAISE EXCEPTION 'تحقق من البيان والمرجع';END IF;
+ PERFORM 1 FROM public.accounting_periods WHERE store_id=p_store_id FOR SHARE;
+ IF EXISTS(SELECT 1 FROM public.accounting_periods WHERE store_id=p_store_id AND is_closed AND payment_date BETWEEN start_date AND end_date) THEN RAISE EXCEPTION 'تاريخ الصرف ضمن فترة محاسبية مقفلة';END IF;
+ SELECT coalesce(currency_code,'ILS'),name INTO curr,company_name FROM public.stores WHERE id=p_store_id;
+ -- Bank accounts are selected from trusted rows; the payload cannot override their identity.
+ SELECT role INTO role_name FROM public.store_members WHERE store_id=p_store_id AND profile_id=actor AND is_active LIMIT 1;
+ IF NOT EXISTS(SELECT 1 FROM public.stores WHERE id=p_store_id AND owner_id=actor) AND coalesce(role_name,'') NOT IN('owner','admin') THEN RAISE EXCEPTION 'إصدار شيكات الشركة يتطلب صلاحية المالك أو المدير';END IF;
+ IF jsonb_typeof(p_payload->'cheques') IS DISTINCT FROM 'array' THEN RAISE EXCEPTION 'أضف شيكات الإصدار';END IF;
+ IF jsonb_array_length(p_payload->'cheques') NOT BETWEEN 1 AND 50 THEN RAISE EXCEPTION 'أضف من شيك واحد إلى 50 شيكاً';END IF;
+ IF EXISTS(SELECT 1 FROM jsonb_array_elements(p_payload->'cheques') c WHERE c->>'source' IS DISTINCT FROM 'issue') THEN RAISE EXCEPTION 'تظهير الوارد غير متاح للحفظ بعد؛ اختر الإصدار فقط';END IF;
+ -- Lock selected banks in a stable order, before their ledger accounts.
+ SELECT array_agg(DISTINCT (c->>'bankId')::uuid) INTO bank_ids FROM jsonb_array_elements(p_payload->'cheques') c;
+ PERFORM 1 FROM public.bank_accounts WHERE id=ANY(bank_ids) ORDER BY id FOR UPDATE;
+ FOR item IN SELECT * FROM jsonb_array_elements(p_payload->'cheques') LOOP
+  bank_id:=nullif(item->>'bankId','')::uuid;
+  SELECT * INTO bank FROM public.bank_accounts WHERE id=bank_id AND store_id=p_store_id AND is_active AND currency=curr;
+  IF NOT FOUND OR coalesce(btrim(bank.bank_name),'')='' OR coalesce(btrim(bank.account_number),'')='' OR length(bank.bank_name)>200 OR length(bank.account_number)>100 THEN RAISE EXCEPTION 'اختر حساب شركة بنكياً نشطاً بعملة المتجر وبيانات مكتملة';END IF;
+  bank_accs:=array_append(bank_accs,bank.account_id);
+  number:=btrim(item->>'number');
+  IF coalesce(number,'')='' OR length(number)>100 THEN RAISE EXCEPTION 'أدخل رقم الشيك ضمن الحدود';END IF;
+  -- Existing voucher and issued-bank indexes are deliberately preserved.
+  IF lower(number)=ANY(seen) THEN RAISE EXCEPTION 'رقم الشيك مكرر داخل السند';END IF;seen:=array_append(seen,lower(number));
+  IF EXISTS(SELECT 1 FROM public.checks ch WHERE ch.store_id=p_store_id AND ch.type='issued' AND lower(btrim(ch.bank_name))=lower(btrim(bank.bank_name)) AND lower(btrim(ch.check_number))=lower(number)) THEN RAISE EXCEPTION 'رقم الشيك صادر مسبقاً لدى البنك نفسه';END IF;
+  IF coalesce(item->>'amount','') !~ '^\d+(\.\d{1,2})?$' THEN RAISE EXCEPTION 'أدخل قيمة شيك موجبة بمنزلتين عشريتين';END IF;
+  check_amount:=(item->>'amount')::numeric;
+  IF check_amount<=0 OR check_amount>999999999 THEN RAISE EXCEPTION 'قيمة الشيك خارج الحدود';END IF;
+  IF coalesce(item->>'issueDate','') !~ '^\d{4}-\d{2}-\d{2}$' OR coalesce(item->>'dueDate','') !~ '^\d{4}-\d{2}-\d{2}$' THEN RAISE EXCEPTION 'راجع إصدار الشيك واستحقاقه';END IF;
+  issue_date:=(item->>'issueDate')::date;due_date:=(item->>'dueDate')::date;
+  IF issue_date>payment_date OR due_date<issue_date THEN RAISE EXCEPTION 'راجع إصدار الشيك واستحقاقه';END IF;
+  cheque_amount:=cheque_amount+check_amount;
+  check_data:=check_data||jsonb_build_array(jsonb_build_object('check_number',number,'bank_name',btrim(bank.bank_name),'bank_code',bank.bank_code,'branch_name',bank.branch_name,'drawer_name',company_name,'account_number',btrim(bank.account_number),'amount',check_amount,'currency',curr,'exchange_rate',1,'date',issue_date,'issue_date',issue_date,'due_date',due_date,'payment_bank_account_id',bank_id));
+ END LOOP;
+ amount:=cash_amount+cheque_amount;
+ IF amount>999999999 THEN RAISE EXCEPTION 'إجمالي السند خارج الحدود';END IF;
+ supplier_id:=nullif(p_payload->>'supplierId','')::uuid;purchase_id:=nullif(p_payload->>'purchaseId','')::uuid;
+ IF p_payload->>'partyType'='supplier' THEN
+  SELECT * INTO supplier FROM public.suppliers WHERE id=supplier_id AND store_id=p_store_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'اختر مورداً من المتجر';END IF;
+  IF coalesce(supplier.balance,0)::text IN('NaN','Infinity','-Infinity') THEN RAISE EXCEPTION 'رصيد المورد يحتاج مراجعة';END IF;
+  party:=supplier.name;
+  IF purchase_id IS NOT NULL THEN
+   SELECT * INTO inv FROM public.purchase_invoices WHERE id=purchase_id AND store_id=p_store_id AND purchase_invoices.supplier_id=supplier_id FOR UPDATE;
+   IF NOT FOUND OR inv.status<>'completed' OR inv.currency IS DISTINCT FROM curr OR inv.total_amount IS NULL OR inv.paid_amount IS NULL OR inv.total_amount::text IN('NaN','Infinity','-Infinity') OR inv.paid_amount::text IN('NaN','Infinity','-Infinity') OR inv.total_amount<=0 OR inv.paid_amount<0 OR inv.paid_amount>=inv.total_amount THEN RAISE EXCEPTION 'فاتورة الشراء غير متاحة أو لا تخص المورد أو عملتها غير مطابقة';END IF;
+   IF EXISTS(SELECT 1 FROM public.purchase_returns WHERE store_id=p_store_id AND purchase_invoice_id=purchase_id AND status='completed') THEN RAISE EXCEPTION 'فاتورة الشراء لها مرتجعات؛ راجع تسويتها قبل ربط الصرف';END IF;
+   IF payment_date<inv.invoice_date THEN RAISE EXCEPTION 'تاريخ الصرف لا يسبق فاتورة الشراء';END IF;
+   IF amount>inv.total_amount-inv.paid_amount THEN RAISE EXCEPTION 'المبلغ يتجاوز المتبقي على فاتورة الشراء';END IF;
+   SELECT array_agg(DISTINCT l.account_id),sum(l.credit-l.debit) INTO ids,source_total FROM public.journal_lines l JOIN public.journal_entries e ON e.id=l.journal_entry_id JOIN public.accounts a ON a.id=l.account_id
+   WHERE e.id=inv.journal_entry_id AND e.store_id=p_store_id AND e.status='posted' AND e.ref_id=inv.id AND e.source_type='purchase_invoice' AND a.store_id=p_store_id AND a.account_tag='SUPPLIER_PAYABLE';
+   IF coalesce(cardinality(ids),0)<>1 OR source_total IS DISTINCT FROM inv.total_amount THEN RAISE EXCEPTION 'قيد استحقاق فاتورة الشراء يحتاج مطابقة';END IF;
+   IF EXISTS(SELECT 1 FROM public.journal_lines WHERE journal_entry_id=inv.journal_entry_id AND currency IS DISTINCT FROM curr) THEN RAISE EXCEPTION 'عملة قيد فاتورة الشراء غير مطابقة';END IF;
+   counter_id:=ids[1];
+  ELSE
+   SELECT array_agg(id) INTO ids FROM public.accounts WHERE store_id=p_store_id AND is_active AND NOT is_group AND account_tag='SUPPLIER_PAYABLE' AND normal_balance='credit' AND currency=curr AND name=party;
+   IF coalesce(cardinality(ids),0)=0 THEN SELECT array_agg(id) INTO ids FROM public.accounts WHERE store_id=p_store_id AND is_active AND NOT is_group AND account_tag='SUPPLIER_PAYABLE' AND normal_balance='credit' AND currency=curr;END IF;
+   IF coalesce(cardinality(ids),0)<>1 THEN RAISE EXCEPTION 'حساب ذمة المورد غير محدد؛ اربط فاتورة صحيحة أو راجع المحاسب';END IF;
+   counter_id:=ids[1];
+  END IF;
+ ELSE
+  IF supplier_id IS NOT NULL OR purchase_id IS NOT NULL THEN RAISE EXCEPTION 'الجهة الأخرى لا ترتبط بمورد أو فاتورة';END IF;
+  party:=btrim(p_payload->>'partyName');counter_id:=nullif(p_payload->>'debitAccountId','')::uuid;
+  IF coalesce(party,'')='' OR length(party)>200 THEN RAISE EXCEPTION 'أدخل اسم المستفيد';END IF;
+ END IF;
+ portfolio_id:=nullif(p_payload->>'issuedPortfolioId','')::uuid;
+ box_id:=nullif(p_payload->>'boxId','')::uuid;
+ PERFORM 1 FROM public.cash_boxes WHERE id IN(portfolio_id,CASE WHEN cash_amount>0 THEN box_id END) ORDER BY id FOR UPDATE;
+ SELECT * INTO portfolio FROM public.cash_boxes WHERE id=portfolio_id AND store_id=p_store_id AND is_active AND type='checks_issued';
+ IF NOT FOUND THEN RAISE EXCEPTION 'اختر محفظة شيكات صادرة نشطة';END IF;
+ payable_acc:=portfolio.account_id;
+ IF cash_amount>0 THEN
+ box_id:=nullif(p_payload->>'boxId','')::uuid;
+ SELECT * INTO box FROM public.cash_boxes WHERE id=box_id AND store_id=p_store_id AND is_active AND type='cash' FOR UPDATE;
+ IF NOT FOUND THEN RAISE EXCEPTION 'اختر صندوقاً نقدياً نشطاً من المتجر';END IF;
+ SELECT role INTO role_name FROM public.store_members WHERE store_id=p_store_id AND profile_id=actor AND is_active LIMIT 1;
+ IF NOT EXISTS(SELECT 1 FROM public.stores WHERE id=p_store_id AND owner_id=actor) AND coalesce(role_name,'') NOT IN('owner','admin') AND NOT EXISTS(SELECT 1 FROM public.user_cash_box_permissions WHERE store_id=p_store_id AND user_id=actor AND cash_box_id=box_id AND can_payment) THEN RAISE EXCEPTION 'لا تملك صلاحية الصرف من الصندوق';END IF;
+ IF box.opening_balance::text IN('NaN','Infinity','-Infinity') OR EXISTS(SELECT 1 FROM public.cash_movements m WHERE m.cash_box_id=box_id AND (m.amount IS NULL OR m.amount<0 OR m.amount::text IN('NaN','Infinity','-Infinity') OR m.direction NOT IN('in','out') OR m.date IS NULL OR m.store_id<>p_store_id)) THEN RAISE EXCEPTION 'رصيد الصندوق وحركاته يحتاجان مراجعة';END IF;
+ -- Minimum balance from payment date onward prevents backdating into cash that arrived later.
+ WITH daily AS(SELECT m.date,sum(CASE WHEN m.direction='in' THEN m.amount ELSE -m.amount END) delta FROM public.cash_movements m WHERE m.cash_box_id=box_id GROUP BY m.date),
+ future AS(SELECT payment_date AS cash_day,coalesce(sum(delta),0) delta FROM daily WHERE date<=payment_date UNION ALL SELECT date,delta FROM daily WHERE date>payment_date)
+ SELECT min(box.opening_balance+running) INTO available FROM(SELECT sum(delta) OVER(ORDER BY cash_day ROWS UNBOUNDED PRECEDING) running FROM future) balances;
+ IF available IS NULL OR cash_amount>available THEN RAISE EXCEPTION 'المبلغ يتجاوز رصيد الصندوق في تاريخ الصرف أو حركة لاحقة';END IF;
+ cash_acc:=box.account_id;
+ END IF;
+ PERFORM 1 FROM public.accounts WHERE id=ANY(array_cat(ARRAY[cash_acc,counter_id,payable_acc],bank_accs)) ORDER BY id FOR UPDATE;
+ IF EXISTS(SELECT 1 FROM public.accounts WHERE id=ANY(array_cat(ARRAY[cash_acc,counter_id,payable_acc],bank_accs)) AND coalesce(balance,0)::text IN('NaN','Infinity','-Infinity')) THEN RAISE EXCEPTION 'رصيد حساب الترحيل يحتاج مراجعة';END IF;
+ IF cash_amount>0 AND NOT EXISTS(SELECT 1 FROM public.accounts WHERE id=cash_acc AND store_id=p_store_id AND is_active AND NOT is_group AND type='asset' AND currency=curr AND normal_balance='debit' AND account_tag IN('CASH','PETTY_CASH')) THEN RAISE EXCEPTION 'حساب الصندوق أو عملته غير صالح';END IF;
+ IF NOT EXISTS(SELECT 1 FROM public.accounts WHERE id=payable_acc AND store_id=p_store_id AND is_active AND NOT is_group AND type='liability' AND currency=curr AND normal_balance='credit' AND account_tag='CHECKS_PAYABLE') THEN RAISE EXCEPTION 'حساب محفظة الصادر أو عملته غير صالح';END IF;
+ IF EXISTS(SELECT 1 FROM public.bank_accounts b WHERE b.id=ANY(bank_ids) AND NOT EXISTS(SELECT 1 FROM public.accounts a WHERE a.id=b.account_id AND a.store_id=p_store_id AND a.is_active AND NOT a.is_group AND a.type='asset' AND a.currency=curr AND a.normal_balance='debit' AND a.account_tag='BANK')) THEN RAISE EXCEPTION 'حساب البنك المحاسبي أو عملته غير صالح';END IF;
+ IF NOT EXISTS(SELECT 1 FROM public.accounts WHERE id=counter_id AND store_id=p_store_id AND is_active AND NOT is_group AND currency=curr AND ((p_payload->>'partyType'='supplier' AND type='liability' AND account_tag='SUPPLIER_PAYABLE' AND normal_balance='credit') OR (p_payload->>'partyType'='other' AND type IN('expense','asset') AND normal_balance='debit' AND coalesce(account_tag,'') NOT IN('CASH','PETTY_CASH','BANK','CUSTOMER_RECEIVABLE','SUPPLIER_PAYABLE','CHECKS_PORTFOLIO')))) THEN RAISE EXCEPTION 'الحساب المقابل أو عملته غير صالح';END IF;
+ SELECT coalesce(max(substring(voucher_number FROM '^PAY-([0-9]+)$')::bigint),0)+1 INTO next_no FROM public.vouchers WHERE store_id=p_store_id;
+ voucher_no:='PAY-'||lpad(next_no::text,greatest(4,length(next_no::text)),'0');
+ INSERT INTO public.vouchers(id,store_id,voucher_number,type,date,amount,cash_amount,checks_amount,supplier_id,party_name,payment_method,cash_box_id,purchase_invoice_id,category,description,reference,created_by,checks_data,cheque_portfolio_id)
+ VALUES(voucher_id,p_store_id,voucher_no,'payment',payment_date,amount,cash_amount,cheque_amount,supplier_id,party,method,CASE WHEN cash_amount>0 THEN box_id ELSE portfolio_id END,purchase_id,CASE WHEN supplier_id IS NULL THEN 'صرف لجهة أخرى' ELSE 'دفعة للمورد' END,description,reference,actor,check_data,portfolio_id);
+ IF (SELECT count(*) FROM public.cash_movements m WHERE m.ref_id=voucher_id)<>(CASE WHEN cash_amount>0 THEN 1 ELSE 0 END) OR (cash_amount>0 AND NOT EXISTS(SELECT 1 FROM public.cash_movements m WHERE m.store_id=p_store_id AND m.ref_id=voucher_id AND m.cash_box_id=box_id AND m.direction='out' AND m.amount=cash_amount AND m.date=payment_date)) THEN RAISE EXCEPTION 'لم تتطابق حركة النقد مع السند';END IF;
+ IF (SELECT count(*) FROM public.checks ch WHERE ch.store_id=p_store_id AND ch.voucher_id=voucher_id)<>jsonb_array_length(check_data) OR (SELECT coalesce(sum(ch.amount),0) FROM public.checks ch WHERE ch.store_id=p_store_id AND ch.voucher_id=voucher_id)<>cheque_amount THEN RAISE EXCEPTION 'لم تتطابق الشيكات مع السند';END IF;
+ INSERT INTO public.journal_entries(store_id,entry_number,date,description,source,ref_id,source_type,source_id,source_number,source_url,accounting_rule,source_module,status,created_by)
+ VALUES(p_store_id,'JV-PAY-'||voucher_id::text,payment_date,description,'voucher',voucher_id,'payment_voucher',voucher_id,voucher_no,'/dashboard/accounting/payments/print/'||voucher_id::text,CASE WHEN supplier_id IS NULL THEN 'CHEQUE_PAYMENT_OTHER' ELSE 'SUPPLIER_PAYMENT_MADE' END,'TREASURY','posted',actor) RETURNING id INTO journal_id;
+ INSERT INTO public.journal_lines(journal_entry_id,account_id,debit,credit,currency,description,sort_order,account_tag_used,source_rule)
+ VALUES(journal_id,counter_id,amount,0,curr,description,1,CASE WHEN supplier_id IS NOT NULL THEN 'SUPPLIER_PAYABLE' END,'CHEQUE_PAYMENT_ATOMIC'),(journal_id,payable_acc,0,cheque_amount,curr,description,2,'CHECKS_PAYABLE','CHEQUE_PAYMENT_ATOMIC');
+ IF cash_amount>0 THEN INSERT INTO public.journal_lines(journal_entry_id,account_id,debit,credit,currency,description,sort_order,account_tag_used,source_rule) VALUES(journal_id,cash_acc,0,cash_amount,curr,description,3,'CASH','CHEQUE_PAYMENT_ATOMIC');END IF;
+ FOR item IN SELECT * FROM jsonb_array_elements(check_data) LOOP
+  UPDATE public.checks ch SET cashbox_id=portfolio_id,drawer_name=company_name,payee_name=party,payment_voucher_id=voucher_id,payment_bank_account_id=(item->>'payment_bank_account_id')::uuid,payment_payable_account_id=payable_acc,payment_counter_account_id=counter_id,payment_purchase_id=purchase_id WHERE ch.store_id=p_store_id AND ch.voucher_id=voucher_id AND ch.check_number=item->>'check_number';
+ END LOOP;
+ UPDATE public.check_operations op SET payment_voucher_id=voucher_id,journal_entry_id=journal_id WHERE op.store_id=p_store_id AND op.check_id IN(SELECT ch.id FROM public.checks ch WHERE ch.payment_voucher_id=voucher_id);
+ IF (SELECT count(*) FROM public.check_operations op WHERE op.payment_voucher_id=voucher_id AND op.journal_entry_id=journal_id)<>jsonb_array_length(check_data) THEN RAISE EXCEPTION 'لم تتطابق عمليات الإصدار مع القيد';END IF;
+ FOR acc IN SELECT account_id,sum(debit) debit,sum(credit) credit FROM public.journal_lines WHERE journal_entry_id=journal_id GROUP BY account_id LOOP UPDATE public.accounts SET balance=coalesce(balance,0)+CASE WHEN normal_balance='credit' THEN acc.credit-acc.debit ELSE acc.debit-acc.credit END WHERE id=acc.account_id;END LOOP;
+ IF supplier_id IS NOT NULL THEN UPDATE public.suppliers SET balance=coalesce(balance,0)-amount WHERE id=supplier_id;END IF;
+ IF purchase_id IS NOT NULL THEN UPDATE public.purchase_invoices SET paid_amount=inv.paid_amount+amount,payment_status=CASE WHEN inv.paid_amount+amount=inv.total_amount THEN 'paid' ELSE 'partial' END WHERE id=purchase_id;END IF;
+ UPDATE public.vouchers SET journal_entry_id=journal_id,creation_request_id=p_request_id,creation_request_payload=p_payload WHERE id=voucher_id;
+ INSERT INTO public.financial_audit_log(store_id,entity_type,entity_id,entity_label,action,actor_id,details) VALUES(p_store_id,'voucher',voucher_id,voucher_no,'create',actor,jsonb_build_object('atomic',true,'requestId',p_request_id,'amount',amount,'purchaseId',purchase_id));
+ RETURN jsonb_build_object('voucherId',voucher_id,'voucherNumber',voucher_no,'replayed',false);
+END $$;
+REVOKE ALL ON FUNCTION public.create_cheque_payment_atomic(uuid,uuid,jsonb) FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION public.create_cheque_payment_atomic(uuid,uuid,jsonb) TO authenticated;
+
+-- Protect both linked checks and their initial issuance history, including legacy RPC writers.
+CREATE OR REPLACE FUNCTION public.guard_atomic_payment_cheque() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public AS $$
+BEGIN
+ IF TG_OP<>'INSERT' AND OLD.payment_voucher_id IS NOT NULL THEN RAISE EXCEPTION 'شيك صرف ذري؛ يلزم مسار تسديد أو عكس مرتبط مستقل';END IF;
+ IF TG_OP='DELETE' THEN RETURN OLD;END IF;
+ IF EXISTS(SELECT 1 FROM public.vouchers v WHERE v.id=NEW.voucher_id AND v.type='payment' AND v.creation_request_id IS NOT NULL) THEN RAISE EXCEPTION 'لا تضف أو تغير شيكاً في سند صرف مكتمل';END IF;
+ IF NEW.payment_voucher_id IS NOT NULL OR NEW.payment_bank_account_id IS NOT NULL OR NEW.payment_payable_account_id IS NOT NULL OR NEW.payment_counter_account_id IS NOT NULL OR NEW.payment_purchase_id IS NOT NULL THEN
+  IF current_user<>pg_get_userbyid((SELECT proowner FROM pg_proc WHERE oid='public.create_cheque_payment_atomic(uuid,uuid,jsonb)'::regprocedure)) OR NOT EXISTS(SELECT 1 FROM public.vouchers v WHERE v.id=NEW.payment_voucher_id AND v.id=NEW.voucher_id AND v.store_id=NEW.store_id AND v.type='payment' AND v.payment_method IN('cheque','split') AND v.creation_request_id IS NULL) THEN RAISE EXCEPTION 'لا تغير ربط شيك الصرف الذري مباشرة';END IF;
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS guard_atomic_payment_cheque ON public.checks;
+CREATE TRIGGER guard_atomic_payment_cheque BEFORE INSERT OR UPDATE OR DELETE ON public.checks FOR EACH ROW EXECUTE FUNCTION public.guard_atomic_payment_cheque();
+CREATE OR REPLACE FUNCTION public.guard_payment_cheque_operation() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public AS $$
+DECLARE linked uuid;
+BEGIN
+ IF TG_OP<>'INSERT' AND OLD.payment_voucher_id IS NOT NULL THEN RAISE EXCEPTION 'عملية إصدار الشيك الذرية لا تقبل التعديل أو الحذف';END IF;
+ IF TG_OP='DELETE' THEN RETURN OLD;END IF;
+ SELECT payment_voucher_id INTO linked FROM public.checks WHERE id=NEW.check_id;
+ IF linked IS NOT NULL OR NEW.payment_voucher_id IS NOT NULL THEN
+  IF current_user<>pg_get_userbyid((SELECT proowner FROM pg_proc WHERE oid='public.create_cheque_payment_atomic(uuid,uuid,jsonb)'::regprocedure)) OR linked IS DISTINCT FROM NEW.payment_voucher_id OR NOT EXISTS(SELECT 1 FROM public.vouchers v JOIN public.journal_entries j ON j.ref_id=v.id AND j.id=NEW.journal_entry_id AND j.store_id=v.store_id AND j.status='posted' WHERE v.id=linked AND v.store_id=NEW.store_id AND v.type='payment' AND v.creation_request_id IS NULL) THEN RAISE EXCEPTION 'استخدم مسار عملية شيك الصرف المرتبط';END IF;
+ END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS guard_payment_cheque_operation ON public.check_operations;
+CREATE TRIGGER guard_payment_cheque_operation BEFORE INSERT OR UPDATE OR DELETE ON public.check_operations FOR EACH ROW EXECUTE FUNCTION public.guard_payment_cheque_operation();
+CREATE OR REPLACE FUNCTION public.execute_check_lifecycle_operation(p_check_id uuid,p_op_type text,p_date date,p_target_bank_id uuid DEFAULT NULL,p_target_cashbox_id uuid DEFAULT NULL,p_target_supplier_id uuid DEFAULT NULL,p_notes text DEFAULT NULL,p_actor_id uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE linked boolean; sid uuid; payment_link uuid;
+BEGIN
+ SELECT receipt_settlement_active,store_id,payment_voucher_id INTO linked,sid,payment_link FROM public.checks WHERE id=p_check_id;
+ IF auth.uid() IS NULL OR sid IS NULL OR NOT (EXISTS(SELECT 1 FROM public.stores WHERE id=sid AND owner_id=auth.uid()) OR EXISTS(SELECT 1 FROM public.store_members WHERE store_id=sid AND profile_id=auth.uid() AND is_active)) THEN RAISE EXCEPTION 'غير مصرح بعملية الشيك';END IF;
+ IF payment_link IS NOT NULL THEN RAISE EXCEPTION 'شيك صرف ذري؛ يلزم مسار تسديد أو عكس مرتبط مستقل';END IF;
+ IF linked IS NOT NULL THEN RAISE EXCEPTION 'استخدم مسار التحصيل والإعادة الذري بمعرف طلب للشيك المرتبط';END IF;
+ RETURN public.execute_check_lifecycle_operation_legacy(p_check_id,p_op_type,p_date,p_target_bank_id,p_target_cashbox_id,p_target_supplier_id,p_notes,auth.uid());
+END $$;
+NOTIFY pgrst,'reload schema';
+COMMIT;

@@ -36,7 +36,7 @@ export default async function PrintPaymentPage({ params }: { params: { id: strin
     bank: 'تحويل بنكي',
     card: 'بطاقة ائتمانية',
     transfer: 'تحويل إلكتروني',
-    cheque: 'شيكات مصرفية صادرة',
+    cheque: 'شيكات (إصدار / تظهير)',
     split: 'نقدي + شيكات (دفع مركب)',
   }
 
@@ -139,11 +139,11 @@ export default async function PrintPaymentPage({ params }: { params: { id: strin
 
               {checks.length > 0 && (
                 <div className="space-y-1.5">
-                  <span className="font-bold text-xs text-slate-700 block">بيانات الشيكات الصادرة:</span>
+                  <span className="font-bold text-xs text-slate-700 block">بيانات الشيكات:</span>
                   <table className="w-full text-right text-xs border border-slate-200 bg-white">
                     <thead>
                       <tr className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700">
-                        <th className="p-1.5">رقم الشيك</th>
+                        <th className="p-1.5">المصدر</th><th className="p-1.5">رقم الشيك</th>
                         <th className="p-1.5">البنك</th>
                         <th className="p-1.5">تاريخ الاستحقاق</th>
                         <th className="p-1.5">المستفيد</th>
@@ -153,7 +153,7 @@ export default async function PrintPaymentPage({ params }: { params: { id: strin
                     <tbody className="divide-y divide-slate-100 font-mono">
                       {checks.map((chk: any, idx: number) => (
                         <tr key={idx}>
-                          <td className="p-1.5 font-bold" dir="ltr">{chk.check_number}</td>
+                          <td className="p-1.5 font-sans">{chk.source==='endorse'?'تظهير وارد':'إصدار'}</td><td className="p-1.5 font-bold" dir="ltr">{chk.check_number}</td>
                           <td className="p-1.5 font-sans">{chk.bank_name}</td>
                           <td className="p-1.5">{chk.due_date}</td>
                           <td className="p-1.5 font-sans">{chk.payee_name || '—'}</td>

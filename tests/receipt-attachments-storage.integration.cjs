@@ -1,0 +1,10 @@
+// A synthetic byte fixture only. No financial records; remove the test object via Storage API.
+const {createClient}=require('@supabase/supabase-js'),{randomUUID}=require('node:crypto'),assert=require('node:assert/strict');require('@next/env').loadEnvConfig(process.cwd());
+(async()=>{const url=process.env.NEXT_PUBLIC_SUPABASE_URL,admin=createClient(url,process.env.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false}}),anon=createClient(url,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,{auth:{persistSession:false}}),name='__integration_probe__/'+randomUUID()+'.pdf',bucket='receipt-attachments',bytes=Buffer.from('%PDF-1.4\nSynthetic storage probe\n%%EOF\n');let attempted=false;try{
+ const {data:config,error:configError}=await admin.storage.getBucket(bucket);assert.equal(configError,null);assert.equal(config.public,false);assert.equal(config.file_size_limit,5242880);
+ attempted=true;const {error:uploadError}=await admin.storage.from(bucket).upload(name,bytes,{contentType:'application/pdf',upsert:false});assert.equal(uploadError,null);
+ const {data,error}=await admin.storage.from(bucket).download(name);assert.equal(error,null);assert.deepEqual(Buffer.from(await data.arrayBuffer()),bytes);
+ assert.ok((await anon.storage.from(bucket).download(name)).error);assert.ok((await anon.storage.from(bucket).upload(name+'-denied',bytes,{contentType:'application/pdf',upsert:false})).error);
+ const publicResponse=await fetch(url+'/storage/v1/object/public/'+bucket+'/'+name);assert.ok(!publicResponse.ok);
+ console.log(JSON.stringify({privateBucket:true,serviceRoundTrip:true,anonymousDownloadDenied:true,anonymousUploadDenied:true,publicUrlDenied:true,financialWrites:0}));
+ }finally{if(attempted){const {error}=await admin.storage.from(bucket).remove([name,name+'-denied']);if(error)throw Error('Probe cleanup failed: '+error.message);const {data,error:listError}=await admin.storage.from(bucket).list('__integration_probe__',{search:name.split('/')[1]});if(listError||data?.length)throw Error('Probe cleanup verification failed');console.log(JSON.stringify({probeCleaned:true}))}}})().catch(e=>{console.error(e.message);process.exitCode=1});

@@ -187,7 +187,8 @@ function normalizePaymentMethod(method?: string | null): 'cash' | 'cheque' | 'sp
  * والربط الاختياري بالفواتير
  */
 export async function createVoucher(input: CreateVoucherInput) {
-  if(input.type==='receipt' && ['cash','cheque','split'].includes(normalizePaymentMethod(input.payment_method))) return {success:false,error:'سجّل القبض النقدي أو الشيكات والمختلط من صفحة سندات القبض لضمان الحفظ الذري'}
+  if(input.type==='payment' && ['cash','cheque','split'].includes(normalizePaymentMethod(input.payment_method))) return {success:false,error:'سجّل الصرف النقدي أو إصدار الشيكات والمختلط من صفحة سندات الصرف لضمان الحفظ الذري'}
+  if(input.type==='receipt' && ['cash','cheque','split','bank'].includes(normalizePaymentMethod(input.payment_method))) return {success:false,error:'سجّل القبض النقدي أو البنكي أو الشيكات والمختلط من صفحة سندات القبض لضمان الحفظ الذري'}
   try {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()

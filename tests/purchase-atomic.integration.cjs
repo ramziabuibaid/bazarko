@@ -2,6 +2,7 @@
 const {Client}=require('pg'),fs=require('node:fs'),assert=require('node:assert/strict'),{randomUUID}=require('node:crypto');require('@next/env').loadEnvConfig(process.cwd())
 ;(async()=>{const c=new Client({connectionString:process.env.DATABASE_URL,connectionTimeoutMillis:15000,query_timeout:20000,application_name:'bazarko-rollback-invoice-test'});await c.connect();console.log('Connected; starting rollback test');let passed=0;try{
  await c.query('BEGIN');console.log('Transaction started');await c.query(fs.readFileSync('db/migrations/055_atomic_purchase_invoice.sql','utf8').replace(/^BEGIN;$/m,'').replace(/^COMMIT;$/m,''));
+ await c.query(fs.readFileSync('db/migrations/062_atomic_cash_payment.sql','utf8').replace(/^BEGIN;$/m,'').replace(/^COMMIT;$/m,''));
  console.log('Migration compiled');
  const actor=(await c.query('select owner_id from public.stores limit 1')).rows[0]?.owner_id;if(!actor)throw Error('Existing actor required for rollback fixture');
  const store=randomUUID(),customer=randomUUID(),product=randomUUID(),box=randomUUID();

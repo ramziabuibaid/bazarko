@@ -1,3 +1,4 @@
+import ReceiptAttachments from '@/components/dashboard/receipts/ReceiptAttachments'
 import PrintButton from "@/components/dashboard/PrintButton"
 import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
@@ -22,7 +23,7 @@ export default async function PrintReceiptPage({ params }: { params: { id: strin
     { data: voucher }
   ] = await Promise.all([
     supabase.from('stores').select('*').eq('id', storeId).single(),
-    supabase.from('vouchers').select('*, invoices(invoice_number), cash_boxes(name)').eq('id', params.id).eq('store_id', storeId).eq('type', 'receipt').single()
+    supabase.from('vouchers').select('*, invoices(invoice_number), cash_boxes(name), bank_accounts(bank_name,account_number)').eq('id', params.id).eq('store_id', storeId).eq('type', 'receipt').single()
   ])
 
   if (!store || !voucher) notFound()
@@ -38,6 +39,7 @@ export default async function PrintReceiptPage({ params }: { params: { id: strin
     customer = custData
   }
 
+  const {data:canManageFiles}=voucher.payment_method==='bank'?await supabase.rpc('can_manage_cash_permissions',{p_store_id:storeId}):{data:false}
   const amount = Number(voucher.amount || 0)
   const currency = store.currency_code || 'ILS'
   const tafqeetText = tafqeetCheque(amount, currency)
@@ -71,6 +73,7 @@ export default async function PrintReceiptPage({ params }: { params: { id: strin
         />
       </div>
 
+      {canManageFiles&&<div className="mx-auto max-w-3xl mb-6 print:hidden"><ReceiptAttachments storeId={storeId} voucherId={voucher.id}/></div>}
       {/* ── Official Paper Canvas ── */}
       <div id="receipt-print-canvas" className="mx-auto max-w-3xl rounded-2xl border-2 border-slate-900 bg-white p-8 shadow-md print:border-none print:shadow-none print:p-4">
         {/* Header */}
@@ -105,6 +108,7 @@ export default async function PrintReceiptPage({ params }: { params: { id: strin
           </div>
         </div>
 
+      {voucher.bank_accounts&&<p className="mx-auto max-w-3xl mb-4 rounded-xl bg-sky-50 p-4 text-sm">الحساب البنكي: {voucher.bank_accounts.bank_name} — {voucher.bank_accounts.account_number} · مرجع التحويل: {voucher.reference}</p>}
         {/* Voucher Body */}
         <div className="my-6 space-y-4 text-sm">
           {/* Received From */}

@@ -1,110 +1,34 @@
-import { createClient } from '@/lib/supabase/server'
-import { getStoreForUser } from '@/lib/supabase/getStore'
-import { redirect } from 'next/navigation'
-import Link from 'next/link'
-import VouchersTable from '@/components/dashboard/accounting/VouchersTable'
-import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
-
-import { getUserAllowedCashBoxes } from '@/app/dashboard/accounting/vouchers/voucher-actions'
-
-export const metadata = {
-  title: 'سندات الصرف المالي — Bazarko ERP',
-}
-
-export default async function PaymentsPage() {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-
-  const storeId = await getStoreForUser(supabase, user!.id)
-  if (!storeId) redirect('/onboarding')
-
-  const [
-    { data: store },
-    { data: vouchers },
-    { data: suppliers },
-    { data: customers },
-    cashBoxes,
-    { data: bankAccounts },
-    { data: journalEntries }
-  ] = await Promise.all([
-    supabase
-      .from('stores')
-      .select('id, currency_code, name, phone')
-      .eq('id', storeId)
-      .single(),
-    supabase
-      .from('vouchers')
-      .select('id, voucher_number, type, date, amount, cash_amount, checks_amount, checks_data, party_name, customer_id, supplier_id, invoice_id, purchase_invoice_id, payment_method, category, description, reference, cash_box_id, bank_account_id, purchase_invoices(invoice_number), cash_boxes(name)')
-      .eq('store_id', storeId)
-      .eq('type', 'payment')
-      .order('date', { ascending: false })
-      .order('created_at', { ascending: false }),
-    supabase
-      .from('suppliers')
-      .select('id, name, phone, balance')
-      .eq('store_id', storeId)
-      .order('name'),
-    supabase
-      .from('customers')
-      .select('id, name, phone, balance')
-      .eq('store_id', storeId)
-      .order('name'),
-    getUserAllowedCashBoxes(storeId, user.id, 'payment'),
-    supabase
-      .from('bank_accounts')
-      .select('id, bank_name, account_number, currency')
-      .eq('store_id', storeId)
-      .eq('is_active', true),
-    supabase
-      .from('journal_entries')
-      .select('id, entry_number, ref_id')
-      .eq('store_id', storeId)
-      .eq('source', 'voucher')
-      .eq('status', 'posted')
-  ])
-
-  const vouchersWithJournals = (vouchers ?? []).map(v => {
-    const je = (journalEntries || []).find(j => j.ref_id === v.id)
-    return {
-      ...v,
-      journal_entry_id: je?.id || null,
-      journal_entry_number: je?.entry_number || null,
-    }
-  })
-
-  if (!store) redirect('/onboarding')
-
-  return (
-    <div className="p-4 sm:p-6 space-y-4">
-      <div>
-        <BackToDashboardButton href="/dashboard/accounting-hub" label="العودة إلى لوحة الإدارة المالية والمحاسبية" />
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link href="/dashboard/accounting" className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-slate-400 hover:text-white">
-            ← المحاسبة
-          </Link>
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
-            <span>💸</span> سندات الصرف المالي
-          </h1>
-        </div>
-      </div>
-
-      <VouchersTable
-        vouchers={vouchersWithJournals}
-        type="payment"
-        storeId={store.id}
-        userId={user.id}
-        currencyCode={store.currency_code}
-        customers={customers ?? []}
-        suppliers={suppliers ?? []}
-        cashBoxes={cashBoxes ?? []}
-        bankAccounts={bankAccounts ?? []}
-        storeName={store.name}
-        storePhone={store.phone ?? undefined}
-      />
-    </div>
-  )
+import {redirect} from 'next/navigation'
+import {createClient} from '@/lib/supabase/server'
+import {getStoreForUser} from '@/lib/supabase/getStore'
+import {allRows} from '@/lib/dashboard/load-simple-dashboard'
+import {type PaymentBank,type EndorsableCheque} from '@/lib/payments/cheque-review'
+import Payments from '@/components/dashboard/payments/Payments'
+import {type Payment,type PaymentSupplier,type PaymentPurchase} from '@/lib/payments/presentation'
+export const metadata={title:'سندات الصرف — Bazarko'}
+export default async function Page({searchParams}:{searchParams?:{supplier_id?:string}}){
+ const c=createClient(),{data:{user}}=await c.auth.getUser();if(!user)redirect('/login');const id=await getStoreForUser(c,user.id);if(!id)redirect('/onboarding')
+ const {data:store,error}=await c.from('stores').select('currency_code,owner_id').eq('id',id).single();if(error||!store)throw Error('تعذر تحميل المتجر');const currency=store.currency_code||'ILS'
+ const [payments,suppliers,purchases,boxes,accounts,journals,movements,members,permissions,returns,banks,checks,receipts]=await Promise.all([
+ allRows<Payment>((a,b)=>c.from('vouchers').select('id,voucher_number,date,created_at,amount,cash_amount,checks_amount,payment_method,party_name,supplier_id,description,reference,cash_box_id,purchase_invoice_id,journal_entry_id').eq('store_id',id).eq('type','payment').order('id').range(a,b)),
+ allRows<PaymentSupplier>((a,b)=>c.from('suppliers').select('id,name,phone,balance').eq('store_id',id).order('id').range(a,b)),
+ allRows<PaymentPurchase>((a,b)=>c.from('purchase_invoices').select('id,supplier_id,invoice_number,invoice_date,total_amount,paid_amount,status,currency,journal_entry_id').eq('store_id',id).order('id').range(a,b)),
+ allRows<{id:string;name:string;type:string;account_id:string;opening_balance:number}>((a,b)=>c.from('cash_boxes').select('id,name,type,account_id,opening_balance').eq('store_id',id).eq('is_active',true).in('type',['cash','checks_received','checks_issued']).order('id').range(a,b)),
+ allRows<{id:string;code:string;name:string;type:string;normal_balance:string;account_tag:string|null}>((a,b)=>c.from('accounts').select('id,code,name,type,normal_balance,account_tag').eq('store_id',id).eq('is_active',true).eq('is_group',false).eq('currency',currency).order('id').range(a,b)),
+ allRows<{id:string;ref_id:string|null;source:string}>((a,b)=>c.from('journal_entries').select('id,ref_id,source').eq('store_id',id).eq('status','posted').order('id').range(a,b)),
+ allRows<{ref_id:string|null;cash_box_id:string;direction:string;amount:number}>((a,b)=>c.from('cash_movements').select('id,ref_id,cash_box_id,direction,amount').eq('store_id',id).order('id').range(a,b)),
+ allRows<{role:string}>((a,b)=>c.from('store_members').select('id,role').eq('store_id',id).eq('profile_id',user.id).eq('is_active',true).order('id').range(a,b)),
+ allRows<{cash_box_id:string;can_payment:boolean}>((a,b)=>c.from('user_cash_box_permissions').select('id,cash_box_id,can_payment').eq('store_id',id).eq('user_id',user.id).order('id').range(a,b)),
+ allRows<{purchase_invoice_id:string}>((a,b)=>c.from('purchase_returns').select('id,purchase_invoice_id').eq('store_id',id).eq('status','completed').order('id').range(a,b)),
+ allRows<PaymentBank&{account_id:string}>((a,b)=>c.from('bank_accounts').select('id,bank_name,account_number,currency,account_id').eq('store_id',id).eq('is_active',true).eq('currency',currency).order('id').range(a,b)),
+ allRows<Omit<EndorsableCheque,'postedReceipt'|'receivedDate'>>((a,b)=>c.from('checks').select('id,check_number,bank_name,account_number,amount,currency,issue_date,due_date,cashbox_id,receipt_portfolio_account_id,receipt_settlement_active,type,status,voucher_id,payment_voucher_id').eq('store_id',id).order('id').range(a,b)),
+ allRows<{id:string;date:string;journal_entry_id:string;cheque_portfolio_id:string}>((a,b)=>c.from('vouchers').select('id,date,journal_entry_id,cheque_portfolio_id').eq('store_id',id).eq('type','receipt').not('creation_request_id','is',null).order('id').range(a,b))])
+ const privileged=store.owner_id===user.id||members.some(x=>['owner','admin'].includes(x.role)),allowed=boxes.filter(b=>b.type==='cash'&&accounts.some(a=>a.id===b.account_id&&a.type==='asset'&&a.normal_balance==='debit'&&['CASH','PETTY_CASH'].includes(a.account_tag||''))&&(privileged||permissions.some(p=>p.cash_box_id===b.id&&p.can_payment)))
+ const portfolios=boxes.filter(b=>['checks_received','checks_issued'].includes(b.type)&&accounts.some(a=>a.id===b.account_id&&(b.type==='checks_received'?a.type==='asset'&&a.normal_balance==='debit'&&a.account_tag==='CHECKS_PORTFOLIO':a.type==='liability'&&a.normal_balance==='credit'&&a.account_tag==='CHECKS_PAYABLE'))&&(privileged||permissions.some(p=>p.cash_box_id===b.id&&p.can_payment))).map(b=>({id:b.id,name:b.name,account_id:b.account_id,type:b.type as 'checks_received'|'checks_issued'}))
+ const paymentBanks=privileged?banks.filter(b=>b.account_number?.trim()&&accounts.some(a=>a.id===b.account_id&&a.type==='asset'&&a.normal_balance==='debit'&&a.account_tag==='BANK')):[]
+ const incoming=checks.filter(ch=>ch.type==='received'&&portfolios.some(p=>p.id===ch.cashbox_id)).map(ch=>{const receipt=receipts.find(r=>r.id===ch.voucher_id&&r.cheque_portfolio_id===ch.cashbox_id);return {...ch,receivedDate:receipt?.date||'',postedReceipt:!!receipt&&journals.some(j=>j.id===receipt.journal_entry_id&&j.ref_id===receipt.id&&j.source==='voucher')}})
+ const cashBoxes=allowed.map(b=>({id:b.id,name:b.name,balance:Math.round((Number(b.opening_balance)+movements.filter(m=>m.cash_box_id===b.id).reduce((sum,m)=>sum+(m.direction==='in'?1:-1)*Number(m.amount),0))*100)/100}))
+ for(const p of payments){const cash=movements.filter(m=>m.ref_id===p.id&&m.direction==='out');const chequeRows=checks.filter(ch=>ch.payment_voucher_id===p.id||(ch.type==='issued'&&ch.voucher_id===p.id));p.actualCheques=chequeRows.reduce((n,ch)=>n+Number(ch.amount),0);p.chequeCount=chequeRows.length;p.actualCash=cash.reduce((sum,m)=>sum+Number(m.amount),0);p.movementCount=cash.length;p.postedJournalId=journals.find(j=>j.id===p.journal_entry_id&&j.ref_id===p.id&&j.source==='voucher')?.id||journals.find(j=>j.ref_id===p.id&&j.source==='voucher')?.id||null;p.boxName=boxes.find(b=>b.id===p.cash_box_id)?.name;p.purchaseNumber=purchases.find(x=>x.id===p.purchase_invoice_id)?.invoice_number}
+ for(const p of purchases){p.hasReturns=returns.some(r=>r.purchase_invoice_id===p.id);p.postedJournalId=journals.find(j=>j.id===p.journal_entry_id&&j.ref_id===p.id)?.id||null}
+ return <div className="p-4 sm:p-6"><Payments banks={paymentBanks} portfolios={portfolios} incoming={incoming} issued={checks.filter(ch=>privileged&&ch.type==='issued').map(ch=>({check_number:ch.check_number,bank_name:ch.bank_name,account_number:ch.account_number}))} storeId={id} payments={payments} suppliers={suppliers} purchases={purchases} boxes={cashBoxes} debitAccounts={accounts.filter(a=>['expense','asset'].includes(a.type)&&a.normal_balance==='debit'&&!['CASH','PETTY_CASH','BANK','CUSTOMER_RECEIVABLE','SUPPLIER_PAYABLE','CHECKS_PORTFOLIO'].includes(a.account_tag||'')).map(a=>({id:a.id,name:a.name,code:a.code}))} currency={currency} initialSupplier={suppliers.some(x=>x.id===searchParams?.supplier_id)?searchParams?.supplier_id:undefined}/></div>
 }

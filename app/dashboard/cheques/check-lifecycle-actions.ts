@@ -58,6 +58,7 @@ export async function previewCheckAccounting(
       .single()
 
     if (!check) return { success: false, error: 'الشيك غير موجود' }
+    if (check.payment_voucher_id) return {success:false,error:'شيك صرف مرتبط؛ التسديد والعكس يحتاجان مساراً محاسبياً مستقلاً'}
     if (check.receipt_settlement_active != null) return linkedChequeOperation(input,crypto.randomUUID(),false)
 
     let debitName = ''
@@ -220,12 +221,13 @@ export async function executeCheckOperation(
     // التحقق من الصلاحيات ووجود الشيك
     const { data: check } = await supabase
       .from('checks')
-      .select('id, check_number, amount, receipt_settlement_active')
+      .select('id, check_number, amount, receipt_settlement_active, payment_voucher_id')
       .eq('id', input.checkId)
       .eq('store_id', storeId)
       .single()
 
     if (!check) return { success: false, error: 'الشيك غير موجود' }
+    if (check.payment_voucher_id) return {success:false,error:'شيك صرف مرتبط؛ التسديد والعكس يحتاجان مساراً محاسبياً مستقلاً'}
     if (check.receipt_settlement_active != null) return {success:false,error:'استخدم التحصيل أو الإعادة المرتبطين بمعرف طلب لضمان عدم التكرار'}
 
     // استدعاء الإجراء المخزن الذري

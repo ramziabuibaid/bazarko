@@ -12,6 +12,7 @@ import { executeCheckOperation, getCheckAuditHistory } from './check-lifecycle-a
 
 interface CheckItem {
   receipt_settlement_active?:boolean|null
+  payment_voucher_id?:string|null
   id: string
   store_id: string
   type: 'received' | 'issued'
@@ -740,8 +741,9 @@ export default function ChequesClient({
                       <td className="p-3.5 text-center">
                         <div className="flex items-center justify-center flex-wrap gap-1">
                           {/* المرحلة 1: في الحافظة */}
+                          {check.payment_voucher_id&&<Link href={`/dashboard/accounting/payments/print/${check.payment_voucher_id}`} className="rounded-lg bg-purple-500/15 px-2 py-1 text-xs text-purple-300">{check.type==='received'?'سند تظهير مرتبط':'سند إصدار مرتبط · التسديد غير متاح بعد'}</Link>}
                           {check.receipt_settlement_active != null && check.status === 'in_portfolio' && <><button onClick={()=>setShowOpModal({check,opType:'collect'})} className="rounded-lg bg-emerald-500/15 px-2 py-1 text-xs text-emerald-300">تحصيل مرتبط</button><button onClick={()=>setShowOpModal({check,opType:'return_to_customer'})} className="rounded-lg bg-amber-500/15 px-2 py-1 text-xs text-amber-300">إعادة للمصدر</button></>}
-                          {check.receipt_settlement_active == null && check.status === 'in_portfolio' && (
+                          {!check.payment_voucher_id && check.receipt_settlement_active == null && check.status === 'in_portfolio' && (
                             <>
                               <button
                                 onClick={() => setShowOpModal({ check, opType: 'deposit' })}

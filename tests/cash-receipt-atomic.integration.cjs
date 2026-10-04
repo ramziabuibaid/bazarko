@@ -2,7 +2,7 @@
 const {Client}=require('pg'),fs=require('node:fs'),assert=require('node:assert/strict'),{randomUUID}=require('node:crypto');require('@next/env').loadEnvConfig(process.cwd());
 (async()=>{const c=new Client({connectionString:process.env.DATABASE_URL,connectionTimeoutMillis:15000,query_timeout:25000,application_name:'bazarko-receipt-rollback-test'});await c.connect();let passed=0;try{
  await c.query('BEGIN');await c.query("SET LOCAL lock_timeout='5s'");
- for(const f of ['054_atomic_sales_invoice.sql','057_atomic_cash_receipt.sql','058_atomic_cheque_receipt.sql','059_atomic_receipt_cheque_lifecycle.sql'])await c.query(fs.readFileSync('db/migrations/'+f,'utf8').replace(/^BEGIN;$/m,'').replace(/^COMMIT;$/m,''));
+ for(const f of ['054_atomic_sales_invoice.sql','057_atomic_cash_receipt.sql','058_atomic_cheque_receipt.sql','059_atomic_receipt_cheque_lifecycle.sql','062_atomic_cash_payment.sql'])await c.query(fs.readFileSync('db/migrations/'+f,'utf8').replace(/^BEGIN;$/m,'').replace(/^COMMIT;$/m,''));
  const actor=(await c.query('select owner_id from stores limit 1')).rows[0]?.owner_id;if(!actor)throw Error('Existing actor required');const store=randomUUID(),customer=randomUUID(),box=randomUUID(),tags={};
  await c.query("insert into stores(id,owner_id,country_code,name,subdomain,currency_code) values($1,$2,'PS','Rollback receipt fixture',$3,'ILS')",[store,actor,'rollback-'+store]);
  await c.query("insert into store_members(store_id,profile_id,role,is_active) values($1,$2,'owner',true) on conflict do nothing",[store,actor]);
