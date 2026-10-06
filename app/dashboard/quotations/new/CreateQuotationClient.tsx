@@ -142,6 +142,19 @@ export default function CreateQuotationClient({ store, customers, products, prev
   const [isSearchingCustomers, setIsSearchingCustomers] = useState(false)
   const customerSearchVersion = useRef(0)
 
+  // New Customer Modal & Form State
+  const [showAddCustomerModal, setShowAddCustomerModal] = useState(false)
+  const [newCustName, setNewCustName] = useState('')
+  const [newCustPhone, setNewCustPhone] = useState('')
+  const [newCustAddress, setNewCustAddress] = useState('')
+  const [newCustNotes, setNewCustNotes] = useState('')
+  const [custSaving, setCustSaving] = useState(false)
+  const [custModalError, setCustModalError] = useState('')
+  const [duplicateWarning, setDuplicateWarning] = useState<{
+    phone: string
+    customer: Customer
+  } | null>(null)
+
   // Product Autocomplete Search State
   const [productSearch, setProductSearch] = useState('')
   const [showProductDropdown, setShowProductDropdown] = useState(false)
@@ -294,6 +307,117 @@ export default function CreateQuotationClient({ store, customers, products, prev
       return tokens.every(t => target.includes(t))
     }).slice(0, 25)
   }, [customerSearch, customers, allCustomersMap])
+
+  // التحقق من تكرار رقم هاتف الزبون
+  const checkPhoneDuplicate = useCallback(async (rawPhone: string): Promise<Customer | null> => {
+    const cleanDigits = rawPhone.replace(/\D/g, '')
+    if (!cleanDigits || cleanDigits.length < 7) {
+      return null
+    }
+
+    // 1. فحص القائمة المحلية في الذاكرة
+    const localMatch = Array.from(allCustomersMap.values()).find(c => {
+      const d = (c.phone || '').replace(/\D/g, '')
+      if (!d) return false
+      return d === cleanDigits || d.endsWith(cleanDigits) || cleanDigits.endsWith(d)
+    })
+    if (localMatch) return localMatch
+
+    // 2. استعلام قاعدة البيانات في Supabase للتأكد من عدم وجود زبون بنفس الرقم
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('id, name, phone, balance')
+        .eq('store_id', store.id)
+        .or(`phone.eq.${rawPhone.trim()},phone.ilike.%${cleanDigits.slice(-7)}%`)
+        .limit(5)
+
+      if (!error && data && data.length > 0) {
+        const dbMatch = (data as Customer[]).find(c => {
+          const d = (c.phone || '').replace(/\D/g, '')
+          return d && (d === cleanDigits || d.endsWith(cleanDigits) || cleanDigits.endsWith(d))
+        })
+        if (dbMatch) return dbMatch
+      }
+    } catch {}
+
+    return null
+  }, [allCustomersMap, store.id, supabase])
+
+  const handleNewCustPhoneChange = async (val: string) => {
+    setNewCustPhone(val)
+    setCustModalError('')
+    if (val.trim().length >= 7) {
+      const dup = await checkPhoneDuplicate(val)
+      if (dup) {
+        setDuplicateWarning({ phone: val.trim(), customer: dup })
+      } else {
+        setDuplicateWarning(null)
+      }
+    } else {
+      setDuplicateWarning(null)
+    }
+  }
+
+  const handleCreateCustomer = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (custSaving) return
+    const name = newCustName.trim()
+    if (!name) {
+      setCustModalError('يرجى إدخال اسم العميل')
+      return
+    }
+
+    const phone = newCustPhone.trim()
+    if (phone) {
+      const dup = await checkPhoneDuplicate(phone)
+      if (dup) {
+        setDuplicateWarning({ phone, customer: dup })
+        setCustModalError(`⚠️ تنبيه: رقم الموبايل (${phone}) مسجل مسبقاً باسم العميل «${dup.name}». يرجى استخدام رقم آخر أو اختيار الزبون المسجل.`)
+        return
+      }
+    }
+
+    setCustSaving(true)
+    setCustModalError('')
+
+    try {
+      const { data: newCust, error: err } = await supabase
+        .from('customers')
+        .insert({
+          store_id: store.id,
+          name,
+          phone: phone || null,
+          address: newCustAddress.trim() || null,
+          notes: newCustNotes.trim() || null,
+          customer_type: 'retail',
+          balance: 0,
+          credit_limit: 0,
+        })
+        .select('id, name, phone, balance')
+        .single()
+
+      if (err) throw err
+
+      if (newCust) {
+        // تحديث قائمة العملاء وتحديد العميل الجديد فوراً
+        setSearchedCustomers(prev => [newCust as Customer, ...prev])
+        setCustomerId(newCust.id)
+        setShowAddCustomerModal(false)
+        setNewCustName('')
+        setNewCustPhone('')
+        setNewCustAddress('')
+        setNewCustNotes('')
+        setDuplicateWarning(null)
+        setCustomerSearch('')
+        setShowCustomerDropdown(false)
+      }
+    } catch (err: any) {
+      setCustModalError(err.message || 'تعذر إضافة العميل. يرجى التحقق من البيانات والمحاولة مجدداً.')
+    } finally {
+      setCustSaving(false)
+    }
+  }
 
   // Combined Product Directory
   const allProductsMap = useMemo(() => {
@@ -827,7 +951,25 @@ export default function CreateQuotationClient({ store, customers, products, prev
 
             {/* اختيار العميل بالبحث الذكي اللحظي */}
             <div className="relative">
-              <label className="mb-1 block text-xs font-semibold text-slate-300">العميل المستهدف (اختياري)</label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-semibold text-slate-300">العميل المستهدف (اختياري)</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewCustName(customerSearch.trim())
+                    setNewCustPhone('')
+                    setNewCustAddress('')
+                    setNewCustNotes('')
+                    setCustModalError('')
+                    setDuplicateWarning(null)
+                    setShowAddCustomerModal(true)
+                  }}
+                  className="inline-flex items-center gap-1 text-xs font-bold text-sky-400 hover:text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/20 px-2.5 py-1 rounded-lg transition cursor-pointer"
+                >
+                  <span>👤＋</span> إضافة زبون جديد
+                </button>
+              </div>
+
               {customerId && selectedCustomer ? (
                 <div className="flex items-center justify-between rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-xs text-white">
                   <div className="flex items-center gap-3">
@@ -875,6 +1017,33 @@ export default function CreateQuotationClient({ store, customers, products, prev
                   />
                   {showCustomerDropdown && (
                     <div className="absolute z-30 mt-1 max-h-60 w-full overflow-y-auto rounded-xl border border-white/10 bg-slate-800 shadow-2xl divide-y divide-white/5">
+                      {/* خيار إضافة زبون جديد فوراً بالاسم المكتوب */}
+                      {customerSearch.trim() && (
+                        <button
+                          type="button"
+                          onMouseDown={e => {
+                            e.preventDefault()
+                            setNewCustName(customerSearch.trim())
+                            setNewCustPhone('')
+                            setNewCustAddress('')
+                            setNewCustNotes('')
+                            setCustModalError('')
+                            setDuplicateWarning(null)
+                            setShowAddCustomerModal(true)
+                            setShowCustomerDropdown(false)
+                          }}
+                          className="w-full flex items-center justify-between p-2.5 text-right text-xs bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 font-bold border-b border-sky-500/20 transition group"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm">👤＋</span>
+                            <span>إضافة زبون جديد باسم: <b className="text-white underline group-hover:text-sky-200">«{customerSearch.trim()}»</b></span>
+                          </div>
+                          <span className="text-[10px] bg-sky-500/20 text-sky-200 px-2 py-0.5 rounded border border-sky-500/30 font-mono">
+                            إضافة +
+                          </span>
+                        </button>
+                      )}
+
                       {customerSearch.trim() && (
                         <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 bg-slate-900/60 flex items-center justify-between">
                           <span>العملاء المطابقون ({filteredCustomers.length})</span>
@@ -923,8 +1092,25 @@ export default function CreateQuotationClient({ store, customers, products, prev
                           </button>
                         ))
                       ) : (
-                        <div className="p-3 text-center text-xs text-slate-400">
-                          {isSearchingCustomers ? 'جاري البحث في قاعدة بيانات العملاء...' : 'لا يوجد عميل مطابق للبحث'}
+                        <div className="p-4 text-center text-xs text-slate-400 space-y-2.5">
+                          <p>{isSearchingCustomers ? 'جاري البحث في قاعدة بيانات العملاء...' : 'لا يوجد عميل مطابق للبحث'}</p>
+                          <button
+                            type="button"
+                            onMouseDown={e => {
+                              e.preventDefault()
+                              setNewCustName(customerSearch.trim())
+                              setNewCustPhone('')
+                              setNewCustAddress('')
+                              setNewCustNotes('')
+                              setCustModalError('')
+                              setDuplicateWarning(null)
+                              setShowAddCustomerModal(true)
+                              setShowCustomerDropdown(false)
+                            }}
+                            className="inline-flex items-center gap-1.5 text-xs text-sky-300 hover:text-white bg-sky-600 hover:bg-sky-500 px-3.5 py-1.5 rounded-xl font-bold transition shadow cursor-pointer"
+                          >
+                            <span>👤＋</span> إضافة «{customerSearch.trim() || 'زبون جديد'}» الآن
+                          </button>
                         </div>
                       )}
                     </div>
@@ -1489,6 +1675,175 @@ export default function CreateQuotationClient({ store, customers, products, prev
           )}
         </aside>
       </form>
+
+      {/* ── نافذة إضافة زبون جديد مع فحص تكرار رقم الهاتف ── */}
+      {showAddCustomerModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3 sm:p-4 backdrop-blur-sm"
+          onClick={() => {
+            if (!custSaving) setShowAddCustomerModal(false)
+          }}
+        >
+          <div
+            className="relative w-full max-w-lg rounded-2xl border border-white/10 bg-slate-900 p-5 sm:p-6 shadow-2xl space-y-4 text-white"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">👤＋</span>
+                <h3 className="font-bold text-base text-white">إضافة عميل / زبون جديد</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddCustomerModal(false)}
+                className="text-slate-400 hover:text-white text-lg w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white/10 transition cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {custModalError && (
+              <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300 font-bold">
+                {custModalError}
+              </div>
+            )}
+
+            {/* تحذير وتنبيه فوري عند تكرار رقم الهاتف */}
+            {duplicateWarning && (
+              <div className="rounded-xl border border-amber-500/40 bg-amber-950/40 p-3.5 space-y-2.5 text-xs">
+                <div className="flex items-start gap-2.5 text-amber-300 font-bold">
+                  <span className="text-xl shrink-0">⚠️</span>
+                  <div className="space-y-1">
+                    <p className="leading-relaxed">
+                      رقم الهاتف (<span dir="ltr" className="font-mono text-white font-black">{duplicateWarning.phone}</span>) مسجل مسبقاً في النظام لزبون آخر:
+                    </p>
+                    <p className="text-white text-sm font-black flex items-center gap-2">
+                      <span>«{duplicateWarning.customer.name}»</span>
+                      {duplicateWarning.customer.balance !== undefined && (
+                        <span className="text-amber-400 font-mono text-xs font-normal">
+                          [الرصيد: {fmt(duplicateWarning.customer.balance)} {store.currency_code}]
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+                <div className="pt-2 border-t border-amber-500/20">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomerId(duplicateWarning.customer.id)
+                      setShowAddCustomerModal(false)
+                      setNewCustName('')
+                      setNewCustPhone('')
+                      setDuplicateWarning(null)
+                      setCustomerSearch('')
+                      setShowCustomerDropdown(false)
+                    }}
+                    className="w-full rounded-xl bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-black py-2.5 px-3 text-xs transition flex items-center justify-center gap-2 shadow-md cursor-pointer"
+                  >
+                    <span>✓</span>
+                    <span>اختيار هذا الزبون الموجود مباشرة ({duplicateWarning.customer.name})</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateCustomer} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block mb-1 text-slate-300 font-semibold">
+                  اسم العميل / المؤسسة <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  value={newCustName}
+                  onChange={e => {
+                    setNewCustName(e.target.value)
+                    setCustModalError('')
+                  }}
+                  placeholder="مثال: شركة النور أو أحمد محمد..."
+                  className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500 placeholder-slate-500"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 text-slate-300 font-semibold">
+                  رقم الموبايل / الجوال (يفضل لإرسال العرض عبر واتساب)
+                </label>
+                <input
+                  type="tel"
+                  dir="ltr"
+                  value={newCustPhone}
+                  onChange={e => handleNewCustPhoneChange(e.target.value)}
+                  onBlur={() => {
+                    if (newCustPhone.trim()) {
+                      handleNewCustPhoneChange(newCustPhone.trim())
+                    }
+                  }}
+                  placeholder="مثال: 0599123456 أو 0569123456"
+                  className={`w-full rounded-xl border p-2.5 text-xs text-white outline-none font-mono transition placeholder-slate-500 ${
+                    duplicateWarning
+                      ? 'border-amber-500 bg-amber-950/20 focus:border-amber-400'
+                      : 'border-white/10 bg-slate-800 focus:border-sky-500'
+                  }`}
+                />
+                {duplicateWarning ? (
+                  <p className="mt-1 text-[11px] text-amber-400 font-bold">
+                    ⚠️ هذا الرقم ينتمي للعميل «{duplicateWarning.customer.name}». يمكنك اختياره أعلاه أو تصحيح الرقم.
+                  </p>
+                ) : (
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    يقوم النظام تلقائياً بالتحقق من عدم تكرار رقم الموبايل مع أي زبون آخر مسجل.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block mb-1 text-slate-300 font-semibold">العنوان / المدينة (اختياري)</label>
+                <input
+                  type="text"
+                  value={newCustAddress}
+                  onChange={e => setNewCustAddress(e.target.value)}
+                  placeholder="مثال: نابلس - رفيديا أو رام الله..."
+                  className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500 placeholder-slate-500"
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 text-slate-300 font-semibold">ملاحظات عن العميل (اختياري)</label>
+                <textarea
+                  rows={2}
+                  value={newCustNotes}
+                  onChange={e => setNewCustNotes(e.target.value)}
+                  placeholder="أي تفاصيل إضافية..."
+                  className="w-full resize-none rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500 placeholder-slate-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-white/10">
+                <button
+                  type="button"
+                  disabled={custSaving}
+                  onClick={() => setShowAddCustomerModal(false)}
+                  className="rounded-xl border border-white/10 bg-slate-800 px-4 py-2 text-xs font-bold text-slate-300 hover:bg-slate-700 transition cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={custSaving}
+                  className="rounded-xl bg-sky-500 hover:bg-sky-400 active:bg-sky-600 px-5 py-2 text-xs font-bold text-slate-950 transition flex items-center gap-1.5 shadow cursor-pointer disabled:opacity-50"
+                >
+                  {custSaving ? 'جارٍ الإضافة…' : '✓ حفظ وتحديد الزبون'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
