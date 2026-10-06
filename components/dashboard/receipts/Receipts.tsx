@@ -111,12 +111,28 @@ export default function Receipts({receipts,customers,invoices,cashBoxes,creditAc
  const box=cashBoxes.find(b=>b.id===form.boxId);
  const money=(n:number)=>`${n.toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2})} ${currency}`;
 
- function change<K extends keyof CashReview>(field:K,value:CashReview[K]){
-   if(saving||uncertain||saved)return;
-   pending.current=null;
-   setForm({...form,[field]:value,...(field==='customerId'?{invoiceId:''}:{})});
-   setReview(false);setMessage('')
- }
+  function change<K extends keyof CashReview>(
+    fieldOrPartial: K | Partial<CashReview>,
+    value?: CashReview[K]
+  ) {
+    if (saving || uncertain || saved) return;
+    pending.current = null;
+    if (typeof fieldOrPartial === 'string') {
+      const field = fieldOrPartial;
+      setForm(prev => ({
+        ...prev,
+        [field]: value,
+        ...(field === 'customerId' ? { invoiceId: '' } : {})
+      }));
+    } else {
+      setForm(prev => ({
+        ...prev,
+        ...fieldOrPartial
+      }));
+    }
+    setReview(false);
+    setMessage('');
+  }
 
  const filteredCustomers=(()=>{
    const q=customerQuery.trim();
@@ -133,16 +149,15 @@ export default function Receipts({receipts,customers,invoices,cashBoxes,creditAc
      .filter(i=>i.customer_id===c.id&&!['draft','cancelled'].includes(i.status)&&Number(i.total)>Number(i.amount_paid))
      .sort((a,b)=>a.issue_date.localeCompare(b.issue_date));
    const oldest=custInvs[0];
-   change('customerId',c.id);
-   change('partyName',c.name);
-   if(oldest){
-     change('invoiceId',oldest.id);
-     if(!form.amount){
-       change('amount',String(Math.max(0,Number(oldest.total)-Number(oldest.amount_paid))));
-     }
-   }else{
-     change('invoiceId','');
+   const updates: Partial<CashReview> = {
+     customerId: c.id,
+     partyName: c.name,
+     invoiceId: oldest ? oldest.id : ''
+   };
+   if (oldest && !form.amount) {
+     updates.amount = String(Math.max(0, Number(oldest.total) - Number(oldest.amount_paid)));
    }
+   change(updates);
    setCustomerQuery('');
    setShowCustomerDropdown(false);
  }
@@ -242,7 +257,7 @@ export default function Receipts({receipts,customers,invoices,cashBoxes,creditAc
                          {customer.phone && <span className="text-xs text-slate-400 mr-2" dir="ltr">{customer.phone}</span>}
                          <span className="text-xs text-amber-300 mr-3">الرصيد: {money(Number(customer.balance))}</span>
                        </div>
-                       <button type="button" onClick={()=>{change('customerId','');change('invoiceId','');setShowCustomerDropdown(true)}} className="text-xs text-sky-400 hover:underline">تغيير العميل</button>
+                       <button type="button" onClick={()=>{change({customerId:'',partyName:'',invoiceId:''});setShowCustomerDropdown(true)}} className="text-xs text-sky-400 hover:underline">تغيير العميل</button>
                      </div>
                    ) : (
                      <div>
@@ -261,6 +276,7 @@ export default function Receipts({receipts,customers,invoices,cashBoxes,creditAc
                                <button
                                  key={c.id}
                                  type="button"
+                                 onMouseDown={e=>{e.preventDefault();selectCustomer(c)}}
                                  onClick={()=>selectCustomer(c)}
                                  className="w-full text-right p-3 hover:bg-slate-700 flex items-center justify-between transition-colors"
                                >

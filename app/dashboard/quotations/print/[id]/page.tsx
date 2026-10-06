@@ -34,23 +34,61 @@ export default async function PrintQuotationPage({ params }: { params: { id: str
 
   const currency = store.currency_code || 'ILS'
   const currencySymbol = currency === 'ILS' ? '₪' : currency === 'USD' ? '$' : currency === 'JOD' ? 'د.أ' : currency
-  const tafqeetText = tafqeetCheque(Number(quote.total_amount), currency)
 
-  const subtotal = (quote.items || []).reduce((acc: number, item: any) => acc + Number(item.total_price || (item.quantity * item.unit_price)), 0)
-  const discount = Number(quote.discount_amount || 0)
+  // Parse metadata from notes
+  let meta: any = {}
+  try {
+    const match = (quote.notes || '').match(/\[\[META:([\s\S]*?)\]\]/)
+    if (match && match[1]) {
+      meta = JSON.parse(match[1])
+    }
+  } catch {}
+
+  const gifts: Record<string, boolean> = meta.gifts || {}
+  const specialDiscount: number = Number(meta.specialDiscount || 0)
+  const specialDiscountType: 'amount' | 'percent' = meta.specialDiscountType === 'percent' ? 'percent' : 'amount'
+
+  const items = (quote.items || []).map((i: any) => ({
+    ...i,
+    is_gift: !!gifts[i.id]
+  }))
+
+  const subtotal = items.reduce((acc: number, item: any) => acc + Number(item.total_price || (item.quantity * item.unit_price)), 0)
+  const giftDiscount = items.filter((i: any) => i.is_gift).reduce((acc: number, item: any) => acc + Number(item.total_price || (item.quantity * item.unit_price)), 0)
+  const discount = Number(quote.discount || quote.discount_amount || 0)
   const total = Number(quote.total_amount || (subtotal - discount))
+
+  const tafqeetText = tafqeetCheque(total, currency)
+  const cleanNotes = quote.notes ? quote.notes.replace(/\n?\[\[META:[\s\S]*?\]\]/g, '').trim() : ''
+
+  // Generate public share link
+  const country = store.country_code ? store.country_code.toLowerCase() : 'ps'
+  const sub = store.subdomain || 'store'
 
   return (
     <div className="min-h-screen bg-slate-100 p-4 sm:p-8 text-slate-900 font-sans print:p-0 print:bg-white" dir="rtl">
       {/* ── Top Toolbar ── */}
-      <div className="mx-auto mb-6 flex max-w-4xl items-center justify-between rounded-xl bg-slate-900 p-4 text-white shadow-lg print:hidden">
+      <div className="mx-auto mb-6 flex max-w-4xl flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-900 p-4 text-white shadow-lg print:hidden">
         <Link
           href="/dashboard/quotations"
           className="text-xs font-bold text-slate-300 hover:text-white transition"
         >
           ← العودة لعروض الأسعار
         </Link>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={`/dashboard/quotations/${quote.id}/edit`}
+            className="rounded-lg bg-amber-500/20 border border-amber-400/40 px-3.5 py-2 text-xs font-bold text-amber-300 hover:bg-amber-500/30 transition flex items-center gap-1.5"
+          >
+            <span>✏️</span> تعديل عرض السعر
+          </Link>
+          <Link
+            href={`/store/${country}/${sub}/quotation/${quote.id}`}
+            target="_blank"
+            className="rounded-lg bg-sky-600/30 border border-sky-400/40 px-3.5 py-2 text-xs font-bold text-sky-200 hover:bg-sky-600/50 transition flex items-center gap-1.5"
+          >
+            <span>🔗</span> فتح الرابط العام للزبون
+          </Link>
           <Link
             href={`/dashboard/accounting/invoices/new?from_quotation=${quote.id}`}
             className="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 transition"
@@ -81,8 +119,8 @@ export default async function PrintQuotationPage({ params }: { params: { id: str
             <div>
               <h1 className="text-2xl font-black text-slate-950">{store.name}</h1>
               <p className="text-xs text-slate-600 mt-0.5">{store.address || 'فلسطين'}</p>
-              {store.phone && <p className="text-xs text-slate-600">هاتف: {store.phone}</p>}
-              {store.tax_number && <p className="text-xs text-slate-600">الرقم الضريبي / المشتغل: {store.tax_number}</p>}
+              {store.phone && <p className="text-xs text-slate-600" dir="ltr">هاتف: {store.phone}</p>}
+              {store.tax_number && <p className="text-xs text-slate-600">الرقم الضريبي: {store.tax_number}</p>}
               {store.email && <p className="text-xs text-slate-600">بريد: {store.email}</p>}
             </div>
           </div>
@@ -135,19 +173,37 @@ export default async function PrintQuotationPage({ params }: { params: { id: str
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 text-slate-800">
-            {(quote.items || []).map((item: any, idx: number) => (
-              <tr key={item.id} className="hover:bg-slate-50">
-                <td className="p-2.5 text-center font-mono text-slate-500">{idx + 1}</td>
-                <td className="p-2.5 font-bold text-slate-950">{item.product_name}</td>
-                <td className="p-2.5 text-center font-mono font-bold text-slate-900" dir="ltr">{Number(item.quantity).toLocaleString('en-GB')}</td>
-                <td className="p-2.5 text-left font-mono text-slate-900" dir="ltr">
-                  {Number(item.unit_price).toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currencySymbol}
-                </td>
-                <td className="p-2.5 text-left font-mono font-bold text-slate-950" dir="ltr">
-                  {Number(item.total_price || (item.quantity * item.unit_price)).toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currencySymbol}
-                </td>
-              </tr>
-            ))}
+            {items.map((item: any, idx: number) => {
+              const lineTotal = Number(item.total_price || (item.quantity * item.unit_price))
+              return (
+                <tr key={item.id} className={`hover:bg-slate-50 ${item.is_gift ? 'bg-amber-50/50' : ''}`}>
+                  <td className="p-2.5 text-center font-mono text-slate-500">{idx + 1}</td>
+                  <td className="p-2.5 font-bold text-slate-950">
+                    <div className="flex items-center gap-2">
+                      <span>{item.product_name}</span>
+                      {item.is_gift && (
+                        <span className="text-[10px] bg-amber-500/10 text-amber-800 border border-amber-500/30 rounded px-1.5 py-0.2 font-black">
+                          🎁 هدية مجانية
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="p-2.5 text-center font-mono font-bold text-slate-900" dir="ltr">
+                    {Number(item.quantity).toLocaleString('en-GB')}
+                  </td>
+                  <td className="p-2.5 text-left font-mono text-slate-900" dir="ltr">
+                    {Number(item.unit_price).toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currencySymbol}
+                  </td>
+                  <td className="p-2.5 text-left font-mono font-bold text-slate-950" dir="ltr">
+                    {item.is_gift ? (
+                      <span className="text-emerald-700">0.00 {currencySymbol} (مشمول بالهدية)</span>
+                    ) : (
+                      <span>{lineTotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currencySymbol}</span>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
 
@@ -156,9 +212,9 @@ export default async function PrintQuotationPage({ params }: { params: { id: str
           <div className="flex-1 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs space-y-2 w-full sm:w-auto">
             <span className="font-bold text-slate-900 block">المبلغ الإجمالي كتابة بالحروف:</span>
             <p className="font-bold text-slate-800 leading-relaxed text-sm">{tafqeetText}</p>
-            {quote.notes && (
+            {cleanNotes && (
               <div className="pt-2 border-t border-slate-200 text-slate-600">
-                <span className="font-semibold text-slate-700">ملاحظات:</span> {quote.notes}
+                <span className="font-semibold text-slate-700">ملاحظات:</span> {cleanNotes}
               </div>
             )}
             {quote.terms && (
@@ -168,23 +224,48 @@ export default async function PrintQuotationPage({ params }: { params: { id: str
             )}
           </div>
 
-          <div className="w-full sm:w-72 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs space-y-2">
+          <div className="w-full sm:w-80 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs space-y-2">
             <div className="flex justify-between text-slate-600">
-              <span>المجموع الفرعي:</span>
+              <span>المجموع الأصلي للبنود:</span>
               <span className="font-mono font-bold text-slate-900" dir="ltr">
                 {subtotal.toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currencySymbol}
               </span>
             </div>
-            {discount > 0 && (
-              <div className="flex justify-between text-rose-600">
-                <span>الخصم الممنوح:</span>
+
+            {giftDiscount > 0 && (
+              <div className="flex justify-between text-amber-700 bg-amber-50 p-1.5 rounded-lg border border-amber-200/50">
+                <span>🎁 خصم الهدايا المجانية:</span>
                 <span className="font-mono font-bold" dir="ltr">
-                  - {discount.toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currencySymbol}
+                  - {giftDiscount.toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currencySymbol}
                 </span>
               </div>
             )}
-            <div className="flex justify-between border-t-2 border-slate-300 pt-2 text-sm font-black text-slate-950">
-              <span>صافي عرض السعر:</span>
+
+            {specialDiscount > 0 && (
+              <div className="flex justify-between text-rose-600 bg-rose-50 p-1.5 rounded-lg border border-rose-200/50">
+                <span>✨ الخصم الخاص الممنوح {specialDiscountType === 'percent' ? `(${meta.specialDiscountValue || ''}%)` : ''}:</span>
+                <span className="font-mono font-bold" dir="ltr">
+                  - {specialDiscount.toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currencySymbol}
+                </span>
+              </div>
+            )}
+
+            {discount > 0 && (
+              <div className="flex justify-between text-slate-600 pt-1 text-[11px] border-t border-slate-200">
+                <span>إجمالي الخصومات والهدايا:</span>
+                <span className="font-mono font-bold text-emerald-700" dir="ltr">
+                  - {discount.toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currencySymbol}
+                  {subtotal > 0 && (
+                    <span className="text-[10px] text-slate-500 mr-1">
+                      ({Math.round((discount / subtotal) * 100)}%)
+                    </span>
+                  )}
+                </span>
+              </div>
+            )}
+
+            <div className="flex justify-between border-t-2 border-slate-900 pt-2 text-sm font-black text-slate-950">
+              <span>صافي عرض السعر المطلوب:</span>
               <span className="font-mono text-base text-sky-900" dir="ltr">
                 {total.toLocaleString('en-GB', { minimumFractionDigits: 2 })} {currencySymbol}
               </span>

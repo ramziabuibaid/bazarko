@@ -71,6 +71,32 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: S
       .single()
 
     if (quote) {
+      let meta: any = {}
+      try {
+        const match = (quote.notes || '').match(/\[\[META:([\s\S]*?)\]\]/)
+        if (match && match[1]) meta = JSON.parse(match[1])
+      } catch {}
+
+      const cleanNotes = quote.notes
+        ? quote.notes.replace(/\n?\[\[META:[\s\S]*?\]\]/g, '').trim()
+        : ''
+
+      // Fetch cost_price and sku for catalog products if any
+      const productIds = (quote.items || [])
+        .map((i: any) => i.product_id)
+        .filter(Boolean)
+
+      let productMap = new Map<string, { cost_price: number; sku: string }>()
+      if (productIds.length > 0) {
+        const { data: prods } = await supabase
+          .from('products')
+          .select('id, cost_price, sku')
+          .in('id', productIds)
+        if (prods) {
+          prods.forEach(p => productMap.set(p.id, { cost_price: Number(p.cost_price || 0), sku: p.sku || '' }))
+        }
+      }
+
       prefill = {
         quotationId:     quote.id,
         quotationNumber: quote.quotation_number,
@@ -78,14 +104,18 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: S
         customerName:    (quote.customer as any)?.name || '',
         customerPhone:   (quote.customer as any)?.phone || '',
         discountAmount:  Number(quote.discount || 0),
-        notes:           quote.notes || `فاتورة صادرة بناءً على عرض السعر رقم #${quote.quotation_number}`,
-        items: (quote.items || []).map((i: any) => ({
-          product_id: i.product_id || null,
-          name:       i.product_name,
-          sku:        '',
-          quantity:   Number(i.quantity || 1),
-          unit_price: Number(i.unit_price || 0),
-        })),
+        notes:           cleanNotes || `فاتورة صادرة بناءً على عرض السعر رقم #${quote.quotation_number}`,
+        items: (quote.items || []).map((i: any) => {
+          const prodInfo = i.product_id ? productMap.get(i.product_id) : null
+          return {
+            product_id: i.product_id || null,
+            name:       i.product_name,
+            sku:        prodInfo?.sku || '',
+            quantity:   Number(i.quantity || 1),
+            unit_price: Number(i.unit_price || 0),
+            cost_price: prodInfo?.cost_price || 0,
+          }
+        }),
       }
     }
   }

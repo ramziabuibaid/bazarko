@@ -23,9 +23,9 @@ export default async function QuotationsPage() {
     { data: store },
     { data: quotations, error: quotationError }
   ] = await Promise.all([
-    supabase.from('stores').select('id, name, currency_code, plan').eq('id', storeId).single(),
+    supabase.from('stores').select('id, name, currency_code, plan, subdomain, country_code').eq('id', storeId).single(),
     allRows<QuoteRow>((from,to)=>supabase.from('quotations').select('id, quotation_number, issue_date, valid_until, status, total_amount, currency, customer:customers(name, phone)').eq('store_id',storeId).order('issue_date',{ascending:false}).order('id').range(from,to)).then(data=>({data,error:null})).catch(()=>({data:null,error:true}))
   ])
 
-  return <FeatureGate plan={store?.plan} featureName="عروض الأسعار الرسمية" featureDescription="إنشاء عروض رسمية وتحويلها إلى فواتير"><BackToDashboardButton href="/dashboard/sales" label="العودة إلى إدارة المبيعات"/><QuotationsList quotes={(quotations || []) as QuoteRow[]} today={businessDay().date} error={!!quotationError}/></FeatureGate>
+  return <FeatureGate plan={store?.plan} featureName="عروض الأسعار الرسمية" featureDescription="إنشاء عروض رسمية وتحويلها إلى فواتير"><BackToDashboardButton href="/dashboard/sales" label="العودة إلى إدارة المبيعات"/><QuotationsList quotes={(quotations || []) as QuoteRow[]} today={businessDay().date} error={!!quotationError} storeInfo={store ? { subdomain: store.subdomain, country_code: store.country_code } : undefined}/></FeatureGate>
 }
