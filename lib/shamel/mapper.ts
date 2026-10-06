@@ -162,16 +162,37 @@ export function processShamelArchive(files: Map<string, ExtractedFile>): ShamelP
   const stransFile = files.get('strans.dat')
   const invoiceItems = stransFile ? parseInvoiceItems(stransFile.data) : []
 
-  // Enrich products with cost prices from invoice items if missing
-  const itemPriceMap = new Map<string, number>()
-  for (const it of invoiceItems) {
-    if (it.item_code && it.price > 0 && !itemPriceMap.has(it.item_code)) {
-      itemPriceMap.set(it.item_code, it.price)
+  // Enrich products with cost prices ONLY from purchase/incoming transactions (H, B, مشتريات)
+  // CRITICAL: NEVER use sales invoices ('I' مبيعات) or sales returns as cost prices!
+  // Sort descending by date so we capture the LATEST purchase cost (آخر سعر شراء).
+  const isPurchaseDoc = (doc: string): boolean => {
+    if (!doc) return false
+    const upper = doc.trim().toUpperCase()
+    const headerKind = headersMap?.get(doc)?.kind || headersMap?.get(upper)?.kind
+    if (headerKind) {
+      if (headerKind === 'مشتريات') return true
+      if (headerKind.includes('مبيع') || headerKind.includes('قبض') || headerKind.includes('صرف')) return false
+    }
+    // Prefix convention in Shamel ERP:
+    // 'H' = مشتريات / إرساليات وتحويلات واردة
+    // 'B' = بضاعة أول المدة / مشتريات
+    return upper.startsWith('H') || upper.startsWith('B')
+  }
+
+  const purchaseItems = invoiceItems
+    .filter(it => it.item_code && it.price > 0 && isPurchaseDoc(it.document))
+    .sort((a, b) => (b.day || '').localeCompare(a.day || ''))
+
+  const latestPurchaseCostMap = new Map<string, number>()
+  for (const it of purchaseItems) {
+    if (!latestPurchaseCostMap.has(it.item_code)) {
+      latestPurchaseCostMap.set(it.item_code, it.price)
     }
   }
+
   for (const p of products) {
-    if ((!p.cost_price || p.cost_price === 0) && itemPriceMap.has(p.code)) {
-      p.cost_price = itemPriceMap.get(p.code)!
+    if ((!p.cost_price || p.cost_price === 0) && latestPurchaseCostMap.has(p.code)) {
+      p.cost_price = latestPurchaseCostMap.get(p.code)!
     }
   }
 
