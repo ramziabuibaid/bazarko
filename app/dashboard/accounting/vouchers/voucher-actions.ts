@@ -52,8 +52,8 @@ export async function getUserAllowedCashBoxes(
 
   if (!allBoxes || allBoxes.length === 0) return []
 
-  // إذا كان المستخدم مالكاً أو مديراً للمتجر، تتاح له كافة الصناديق
-  if (member?.role === 'owner' || member?.role === 'admin') {
+  // إذا كان المستخدم مالكاً أو مديراً أو محاسباً للمتجر، تتاح له كافة الصناديق
+  if (member?.role === 'owner' || member?.role === 'admin' || member?.role === 'accountant') {
     return allBoxes
   }
 

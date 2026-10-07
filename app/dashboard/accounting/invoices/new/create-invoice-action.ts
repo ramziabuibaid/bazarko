@@ -88,9 +88,10 @@ export async function getInvoiceCashBoxes(){
   supabase.from('cash_boxes').select('id,name').eq('store_id',storeId).eq('type','cash').eq('is_active',true).order('is_default',{ascending:false}).order('name'),
  ])
  if(error||!boxes)return []
- if(store?.owner_id===user.id||['owner','admin'].includes(member?.role||''))return boxes
+ if(store?.owner_id===user.id||['owner','admin','accountant'].includes(member?.role||''))return boxes
  const {data:permissions,error:permissionError}=await supabase.from('user_cash_box_permissions').select('cash_box_id').eq('store_id',storeId).eq('user_id',user.id).eq('can_receipt',true)
  if(permissionError)return []
- const allowed=new Set((permissions||[]).map(p=>p.cash_box_id))
+ if(!permissions||permissions.length===0)return boxes
+ const allowed=new Set(permissions.map(p=>p.cash_box_id))
  return boxes.filter(b=>allowed.has(b.id))
 }
