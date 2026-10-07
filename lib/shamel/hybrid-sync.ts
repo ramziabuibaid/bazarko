@@ -31,15 +31,15 @@ export function normalizePhone(phone: string | null | undefined): string {
  * Calculates sell price from cost price:
  * - 35% profit margin (cost * 1.35)
  * - Tiered rounding upwards:
- *   - cost < 100 ILS: round up to nearest 10
- *   - cost 100 - 1000 ILS: round up to nearest 50
+ *   - cost < 200 ILS: round up to nearest 10
+ *   - cost 200 - 1000 ILS: round up to nearest 50
  *   - cost > 1000 ILS: round up to nearest 100
  */
 export function calculateSellPrice(costPrice: number): number {
   const cost = Number(costPrice) || 0
   if (cost <= 0) return 0
   const rawPrice = cost * 1.35
-  if (cost < 100) {
+  if (cost < 200) {
     return Math.ceil(rawPrice / 10) * 10
   } else if (cost <= 1000) {
     return Math.ceil(rawPrice / 50) * 50

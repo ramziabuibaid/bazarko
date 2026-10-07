@@ -14,12 +14,14 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
+import WhatsAppContactMenu from '@/components/whatsapp/WhatsAppContactMenu'
 
 interface Customer {
   id: string
   name: string
   phone: string | null
   balance?: number
+  whatsapp_prefix?: string | null
 }
 
 interface Product {
@@ -872,13 +874,15 @@ export default function CreateQuotationClient({ store, customers, products, prev
             >
               📋 نسخ الرابط
             </button>
-            <button
-              type="button"
-              onClick={shareWhatsApp}
-              className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow"
-            >
-              <span>💬</span> إرسال للزبون عبر واتساب
-            </button>
+            <WhatsAppContactMenu
+              phone={selectedCustomer?.phone}
+              customerName={selectedCustomer?.name}
+              customerId={selectedCustomer?.id}
+              defaultPrefix={selectedCustomer?.whatsapp_prefix as any}
+              message={`مرحباً ${selectedCustomer?.name || 'عزيزنا العميل'}،\nيسرنا تزويدكم بعرض السعر رقم #${createdQuote.number} بقيمة ${calculations.netTotal.toLocaleString('ar-u-nu-latn')} ${store.currency_code}.\nرابط المعاينة:\n${createdQuote.shareUrl}`}
+              label="إرسال للزبون عبر واتساب"
+              variant="button"
+            />
           </div>
 
           <div className="flex flex-wrap gap-3 pt-2">

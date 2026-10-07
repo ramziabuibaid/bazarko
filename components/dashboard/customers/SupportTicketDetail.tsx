@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import WhatsAppContactMenu from '@/components/whatsapp/WhatsAppContactMenu'
 
 interface Ticket {
   id: string
@@ -173,9 +174,16 @@ export default function SupportTicketDetail({
               <Link href={`/dashboard/customers/${ticket.customer_id}`}
                 className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/5">ملف الزبون</Link>
             )}
-            {waUrl && (
-              <a href={waUrl} target="_blank" rel="noopener noreferrer"
-                className="rounded-lg border border-emerald-500/20 px-3 py-1.5 text-xs text-emerald-400 hover:bg-emerald-500/10">واتساب</a>
+            {ticket.customer_phone && (
+              <WhatsAppContactMenu
+                phone={ticket.customer_phone}
+                customerId={ticket.customer_id}
+                customerName={ticket.customer_name}
+                message={`مرحباً ${ticket.customer_name || ''}، بخصوص تذكرة الدعم الفني: ${ticket.subject}...`}
+                label="واتساب"
+                variant="button"
+                buttonClassName="rounded-lg border border-emerald-500/20 px-3 py-1.5 text-xs text-emerald-400 hover:bg-emerald-500/10"
+              />
             )}
           </div>
         </div>

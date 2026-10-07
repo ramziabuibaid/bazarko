@@ -168,6 +168,30 @@ export async function POST(req: NextRequest) {
         // Save all parsed entities to the isolated store
         await saveIsolated('accounts', parsedData.accounts)
         await saveIsolated('customers', parsedData.customers)
+
+        // Preserve and enrich products cost_price if missing from parsed files (e.g. if strans.dat is empty or missing on Drive)
+        try {
+          const { data: existingStockCosts } = await supabase
+            .from('shamel_stock')
+            .select('code, cost_price, price')
+            .eq('store_id', storeId)
+            .gt('cost_price', 0)
+          if (existingStockCosts && existingStockCosts.length > 0) {
+            const costMap = new Map(existingStockCosts.map(c => [c.code, Number(c.cost_price)]))
+            const priceMap = new Map(existingStockCosts.filter(c => Number(c.price) > 0).map(c => [c.code, Number(c.price)]))
+            for (const p of parsedData.products) {
+              if ((!p.cost_price || p.cost_price === 0) && costMap.has(p.code)) {
+                p.cost_price = costMap.get(p.code)!
+              }
+              if ((!p.price || p.price === 0) && priceMap.has(p.code)) {
+                p.price = priceMap.get(p.code)!
+              }
+            }
+          }
+        } catch (enrichErr) {
+          console.warn('Cost price enrichment fallback warning:', enrichErr)
+        }
+
         await saveIsolated('stock', parsedData.products)
         await saveIsolated('cheques', parsedData.cheques)
         await saveIsolated('assets', parsedData.assets)

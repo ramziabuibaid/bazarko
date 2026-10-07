@@ -1,5 +1,6 @@
 import {getCustomerStatement} from '@/app/dashboard/customers/ledger/customer-statement-actions'
 import PrintButton from "@/components/dashboard/PrintButton"
+import WhatsAppContactMenu from "@/components/whatsapp/WhatsAppContactMenu"
 import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
@@ -32,8 +33,7 @@ export default async function PrintCustomerStatementPage({ params, searchParams 
   const fmt=(n:number)=>Number(n||0).toLocaleString('ar-u-nu-latn',{minimumFractionDigits:2,maximumFractionDigits:2})
   const {openingBalance,totalDebit:totalPeriodDebit,totalCredit:totalPeriodCredit,closingBalance:finalBalance}=result
   const rows=result.rows.map(row=>({...row,notes:row.description}))
-  const cleanPhone = customer.phone ? customer.phone.replace(/\D/g, '') : ''
-  const waText = encodeURIComponent(
+  const waMessage =
     `مرحباً ${customer.name} المحترم،\n` +
     `مرفق ملخص كشف الحساب المالي لدى ${store.name}:\n` +
     (fromDate || toDate ? `📅 الفترة: من ${fromDate || 'البداية'} إلى ${toDate || 'تاريخه'}\n` : '') +
@@ -42,7 +42,6 @@ export default async function PrintCustomerStatementPage({ params, searchParams 
     `➖ إجمالي الحركات الدائنة: ${fmt(totalPeriodCredit)} ${currency}\n` +
     `⚖️ صافي الرصيد المستحق: ${fmt(finalBalance)} ${currency}\n\n` +
     `شاكرين حسن تعاونكم معنا 🙏`
-  )
 
   return (
     <div className="min-h-screen bg-slate-100 p-4 sm:p-8 text-slate-900 font-sans print:p-0 print:bg-white" dir="rtl">
@@ -87,16 +86,17 @@ export default async function PrintCustomerStatementPage({ params, searchParams 
         </div>
 
         <div className="flex items-center gap-2">
-          {cleanPhone && (
-            <a
-              href={`https://wa.me/${cleanPhone}?text=${waText}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3.5 py-2 text-xs font-bold text-white transition flex items-center gap-1.5"
-            >
-              <span>💬</span>
-              <span>مشاركة عبر واتساب</span>
-            </a>
+          {customer.phone && (
+            <WhatsAppContactMenu
+              phone={customer.phone}
+              customerId={customer.id}
+              customerName={customer.name}
+              defaultPrefix={(customer as any).whatsapp_prefix}
+              message={waMessage}
+              label="مشاركة عبر واتساب"
+              variant="button"
+              buttonClassName="rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3.5 py-2 text-xs font-bold text-white transition flex items-center gap-1.5"
+            />
           )}
           <PrintButton
             label="🖨️ طباعة كشف الحساب الرسمى (PDF)"

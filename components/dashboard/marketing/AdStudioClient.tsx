@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import WhatsAppContactMenu from '@/components/whatsapp/WhatsAppContactMenu'
 
 interface Product {
   id: string
@@ -20,6 +21,7 @@ interface Customer {
   phone: string | null
   email: string | null
   balance: number
+  whatsapp_prefix?: string | null
 }
 
 interface AdCampaign {
@@ -522,14 +524,41 @@ export default function AdStudioClient({ store, products, customers, initialCamp
             </div>
           )}
 
-          {/* Big Green Send Button */}
-          <button
-            type="button"
-            onClick={handleSendWhatsApp}
-            className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black py-3 text-sm transition shadow-lg flex items-center justify-center gap-2"
-          >
-            <span>📱</span> إرسال عبر WhatsApp فوراً
-          </button>
+          {/* Big Green Send Button with Dual Prefixes */}
+          {targetPhone ? (
+            <WhatsAppContactMenu
+              phone={targetPhone}
+              customerId={activeCustomer?.id}
+              customerName={activeCustomer?.name}
+              defaultPrefix={activeCustomer?.whatsapp_prefix as any}
+              message={getPersonalizedText(activeCustomer?.name)}
+              label="📱 إرسال عبر WhatsApp فوراً"
+              variant="button"
+              className="w-full"
+              buttonClassName="w-full justify-center py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm shadow-lg transition"
+              onOpened={async () => {
+                const matching = campaigns.find(c => c.title === title)
+                if (matching) {
+                  await supabase
+                    .from('ads_campaigns')
+                    .update({
+                      total_sent: (matching.total_sent || 0) + 1,
+                      last_sent_at: new Date().toISOString(),
+                    })
+                    .eq('id', matching.id)
+                  setCampaigns(prev => prev.map(c => c.id === matching.id ? { ...c, total_sent: (c.total_sent || 0) + 1 } : c))
+                }
+              }}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => alert('يرجى تحديد زبون له رقم هاتف أو إدخال رقم الهاتف يدوياً')}
+              className="w-full rounded-xl bg-emerald-500/50 text-slate-950 font-black py-3 text-sm flex items-center justify-center gap-2 cursor-not-allowed"
+            >
+              <span>📱</span> إرسال عبر WhatsApp فوراً
+            </button>
+          )}
 
           <p className="text-[11px] text-slate-400 text-center leading-relaxed">
             يفتح واتساب مع الرسالة والنص والرابط جاهزاً للإرسال دون الحاجة لكتابة أي شيء.

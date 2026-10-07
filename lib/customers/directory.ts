@@ -1,5 +1,5 @@
 import {businessDay} from '@/lib/dashboard/simple-metrics'
-export interface DirectoryCustomer {id:string;name:string;phone:string|null;email:string|null;city:string|null;address:string|null;notes:string|null;social_url:string|null;credit_limit:number|null;balance:number;total_orders:number;customer_type:string;is_active:boolean;created_at:string;shamel_code?:string|null;last_order_at?:string|null;last_payment_at?:string|null}
+export interface DirectoryCustomer {id:string;name:string;phone:string|null;email:string|null;city:string|null;address:string|null;notes:string|null;social_url:string|null;credit_limit:number|null;balance:number;total_orders:number;customer_type:string;is_active:boolean;created_at:string;shamel_code?:string|null;last_order_at?:string|null;last_payment_at?:string|null;whatsapp_prefix?:string|null}
 export function whatsappNumber(phone:string|null,country='PS') {
  const digits=(phone||'').replace(/\D/g,'')
  if(digits.startsWith('00'))return digits.slice(2)

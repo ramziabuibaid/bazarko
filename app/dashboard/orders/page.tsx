@@ -40,7 +40,7 @@ export default async function OrdersPage({ searchParams }: Props) {
   let query = supabase
     .from('orders')
     .select(
-      'id, order_number, status, payment_method, payment_status, total_amount, shipping_city, customer_notes, created_at, customer_name, customer_phone',
+      'id, order_number, status, payment_method, payment_status, total_amount, shipping_city, customer_notes, created_at, customer_name, customer_phone, customer_id',
       { count: 'exact' }
     )
     .eq('store_id', store.id)

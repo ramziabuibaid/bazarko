@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { trackAction } from '@/lib/activity/track'
+import WhatsAppContactMenu from '@/components/whatsapp/WhatsAppContactMenu'
 
 interface OrderItem {
   id: string
@@ -31,6 +32,7 @@ interface Order {
   internal_notes: string | null
   customer_name: string | null
   customer_phone: string | null
+  customer_id?: string | null
   created_at: string
   updated_at: string
 }
@@ -288,14 +290,18 @@ export default function OrderDetail({ order, items, currencyCode, storeId }: Pro
               </a>
             )}
             {order.customer_phone && (
-              <a
-                href={`https://wa.me/${order.customer_phone.replace(/\D/g, '')}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-sm text-emerald-400 hover:underline"
-              >
-                <span>📱</span> تواصل عبر واتساب
-              </a>
+              <div className="pt-1">
+                <WhatsAppContactMenu
+                  phone={order.customer_phone}
+                  customerId={order.customer_id}
+                  customerName={order.customer_name}
+                  message={`مرحباً ${order.customer_name || ''}، بخصوص طلبكم رقم #${order.order_number}...`}
+                  label="تواصل عبر واتساب"
+                  variant="button"
+                  className="w-full"
+                  buttonClassName="w-full justify-center py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-sm font-semibold text-emerald-400"
+                />
+              </div>
             )}
           </div>
         </div>

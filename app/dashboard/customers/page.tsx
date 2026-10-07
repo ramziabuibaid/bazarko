@@ -10,7 +10,7 @@ export default async function CustomersPage({searchParams}:{searchParams:{q?:str
  const id=await getStoreForUser(db,user.id);if(!id)redirect('/onboarding')
  const {data:store}=await db.from('stores').select('id, name, currency_code, country_code').eq('id',id).single();if(!store)redirect('/onboarding')
  const [customers,orders]=await Promise.allSettled([
- allRows<DirectoryCustomer>((from,to)=>db.from('customers').select('id, name, phone, email, city, address, notes, credit_limit, social_url, balance, total_orders, customer_type, is_active, created_at, shamel_code, last_order_at, last_payment_at').eq('store_id',id).order('id').range(from,to)),
+ allRows<DirectoryCustomer>((from,to)=>db.from('customers').select('id, name, phone, email, city, address, notes, credit_limit, social_url, balance, total_orders, customer_type, is_active, created_at, shamel_code, last_order_at, last_payment_at, whatsapp_prefix').eq('store_id',id).order('id').range(from,to)),
  allRows<{customer_id:string|null;created_at:string}>((from,to)=>db.from('orders').select('customer_id, created_at').eq('store_id',id).not('customer_id','is',null).order('created_at',{ascending:false}).order('id').range(from,to)),
  ])
  const last:Record<string,string>={};if(orders.status==='fulfilled')for(const row of orders.value)if(row.customer_id&&!last[row.customer_id])last[row.customer_id]=row.created_at

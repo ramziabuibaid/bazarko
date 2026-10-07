@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { recordInvoicePayment } from '@/app/dashboard/accounting/invoices/invoice-actions'
 import { useToast } from '@/components/ui/Toast'
 import { useConfirm } from '@/components/ui/Confirm'
+import WhatsAppContactMenu from '@/components/whatsapp/WhatsAppContactMenu'
 
 interface Props {
   id: string
@@ -54,9 +55,14 @@ export default function InvoiceRowActions({
 
   return (
     <div className="flex items-center justify-end gap-1">
-      {open && phone && (
-        <a href={reminderUrl()} target="_blank" rel="noopener noreferrer" title="تذكير عبر واتساب"
-          className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-emerald-500/10 hover:text-emerald-400">📲</a>
+      {open && customerPhone && (
+        <WhatsAppContactMenu
+          phone={customerPhone}
+          customerName={customerName}
+          message={`مرحباً ${customerName ?? ''}،\nنذكّركم بفاتورة رقم ${invoiceNumber}.\nالمتبقّي: ${fmt(remaining)} ${currencyCode}` + (dueDate ? `\nتاريخ الاستحقاق: ${new Date(dueDate).toLocaleDateString('ar-u-nu-latn')}` : '') + `\n\n${storeName}`}
+          variant="icon"
+          buttonClassName="p-1.5 text-slate-400 hover:bg-emerald-500/10 hover:text-emerald-400 rounded-lg text-sm"
+        />
       )}
       {open && (
         <button onClick={markPaid} disabled={busy} title="تحديد كمدفوعة"

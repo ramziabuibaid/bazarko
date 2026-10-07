@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { businessDay, BUSINESS_TIME_ZONE } from '@/lib/dashboard/simple-metrics'
+import WhatsAppContactMenu from '@/components/whatsapp/WhatsAppContactMenu'
 
 interface Order {
   id: string
@@ -16,6 +17,7 @@ interface Order {
   customer_notes: string | null
   customer_name: string | null
   customer_phone: string | null
+  customer_id?: string | null
   created_at: string
 }
 
@@ -390,14 +392,14 @@ export default function OrdersTable({
                         >
                           <PhoneIcon size={15} />
                         </a>
-                        <a
-                          href={whatsappUrl(order.customer_phone)}
-                          target="_blank" rel="noopener noreferrer"
-                          className="flex h-9 w-9 items-center justify-center rounded-full border border-green-500/20 bg-green-500/10 text-green-400 transition-colors hover:border-green-500/40 hover:bg-green-500/20"
-                          title="واتساب"
-                        >
-                          <WhatsAppIcon size={15} />
-                        </a>
+                        <WhatsAppContactMenu
+                          phone={order.customer_phone}
+                          customerId={order.customer_id}
+                          customerName={order.customer_name}
+                          message={`مرحباً ${order.customer_name || ''}، بخصوص طلبكم رقم #${order.order_number}...`}
+                          variant="icon"
+                          buttonClassName="!h-9 !w-9 rounded-full border border-green-500/20 bg-green-500/10 text-green-400 transition-colors hover:border-green-500/40 hover:bg-green-500/20"
+                        />
                       </div>
                     )}
                   </div>
@@ -498,14 +500,14 @@ export default function OrdersTable({
                               >
                                 <PhoneIcon />
                               </a>
-                              <a
-                                href={whatsappUrl(order.customer_phone)}
-                                target="_blank" rel="noopener noreferrer"
-                                className="rounded-lg p-1.5 text-green-600 transition-colors hover:bg-green-500/10 hover:text-green-400"
-                                title="واتساب"
-                              >
-                                <WhatsAppIcon />
-                              </a>
+                              <WhatsAppContactMenu
+                                phone={order.customer_phone}
+                                customerId={order.customer_id}
+                                customerName={order.customer_name}
+                                message={`مرحباً ${order.customer_name || ''}، بخصوص طلبكم رقم #${order.order_number}...`}
+                                variant="icon"
+                                buttonClassName="rounded-lg p-1.5 text-green-600 hover:bg-green-500/10 hover:text-green-400"
+                              />
                             </>
                           )}
                           <Link

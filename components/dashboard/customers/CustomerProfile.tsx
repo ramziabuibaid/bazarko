@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createVoucher } from '@/app/dashboard/accounting/vouchers/voucher-actions'
 import CustomerShamelStatementView from './CustomerShamelStatementView'
+import WhatsAppContactMenu from '@/components/whatsapp/WhatsAppContactMenu'
 
 interface LedgerEntry {
   id: string
@@ -43,6 +44,7 @@ interface Customer {
   total_orders: number
   total_invoiced: number
   total_paid: number
+  whatsapp_prefix?: string | null
   customer_type: string
   is_active: boolean
   shamel_code?: string | null
@@ -199,19 +201,27 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
                 >
                   <span>📞</span> {customer.phone}
                 </a>
-                <a
-                  href={`https://wa.me/${customer.phone.replace(/\D/g, '')}`}
-                  target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-3 py-2 text-emerald-400 hover:bg-emerald-500/25 transition-colors"
-                >
-                  <span>💬</span> واتساب
-                </a>
+                <WhatsAppContactMenu
+                  phone={customer.phone}
+                  customerId={customer.id}
+                  customerName={customer.name}
+                  defaultPrefix={customer.whatsapp_prefix as any}
+                  variant="chips"
+                />
               </div>
             )}
             {customer.phone_alt && (
-              <a href={`tel:${customer.phone_alt}`} className="flex items-center gap-2 text-slate-400 hover:text-white" dir="ltr">
-                <span className="text-slate-500">📞</span> {customer.phone_alt}
-              </a>
+              <div className="flex items-center gap-2">
+                <a href={`tel:${customer.phone_alt}`} className="flex flex-1 items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-slate-400 hover:text-white transition-colors" dir="ltr">
+                  <span className="text-slate-500">📞</span> {customer.phone_alt}
+                </a>
+                <WhatsAppContactMenu
+                  phone={customer.phone_alt}
+                  customerId={customer.id}
+                  customerName={customer.name}
+                  variant="chips"
+                />
+              </div>
             )}
             {customer.email && (
               <p className="flex items-center gap-2 text-slate-300" dir="ltr">
@@ -289,15 +299,17 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
           {/* إجراءات سريعة */}
           <div className="mt-2 grid grid-cols-2 gap-2">
             {customer.balance > 0 && customer.phone && (
-              <a
-                href={`https://wa.me/${customer.phone.replace(/\D/g, '')}?text=${encodeURIComponent(
-                  `مرحباً ${customer.name}،\nنذكّركم بأن الذمة المستحقة لدينا هي ${customer.balance.toLocaleString('ar-u-nu-latn')} ${currencyCode}.\nشكراً لتعاونكم 🙏`
-                )}`}
-                target="_blank" rel="noopener noreferrer"
-                className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-500/15 py-2.5 text-sm text-emerald-400 hover:bg-emerald-500/25"
-              >
-                💬 تذكير واتساب
-              </a>
+              <WhatsAppContactMenu
+                phone={customer.phone}
+                customerId={customer.id}
+                customerName={customer.name}
+                defaultPrefix={customer.whatsapp_prefix as any}
+                message={`مرحباً ${customer.name}،\nنذكّركم بأن الذمة المستحقة لدينا هي ${customer.balance.toLocaleString('ar-u-nu-latn')} ${currencyCode}.\nشكراً لتعاونكم 🙏`}
+                label="💬 تذكير واتساب"
+                variant="button"
+                className="w-full"
+                buttonClassName="w-full justify-center py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-sm font-semibold text-emerald-400"
+              />
             )}
             <Link
               href={`/dashboard/accounting/invoices?customer=${customer.id}`}

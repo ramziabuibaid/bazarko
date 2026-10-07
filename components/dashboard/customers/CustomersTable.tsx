@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import ShamelStatementModal from '@/app/dashboard/accounting/shamel/components/ShamelStatementModal'
+import WhatsAppContactMenu from '@/components/whatsapp/WhatsAppContactMenu'
 
 interface Customer {
   id: string
@@ -27,6 +28,7 @@ interface Customer {
   shamel_code?: string | null
   last_order_at?: string | null
   last_payment_at?: string | null
+  whatsapp_prefix?: string | null
 }
 
 interface Props {
@@ -624,16 +626,14 @@ export default function CustomersTable({
                         <div className="flex items-center gap-2">
                           {c.phone ? (
                             <>
-                              {waNum&&<a
-                                href={`https://wa.me/${waNum}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="فتح واتساب"
-                                className="flex-shrink-0 rounded-lg bg-emerald-500/10 px-2 py-1 text-sm text-emerald-400 hover:bg-emerald-500/20 transition-colors"
-                              >
-                                💬
-                              </a>}
-                              <span className="text-sm text-slate-300" dir="ltr">{c.phone}</span>
+                              <WhatsAppContactMenu
+                                phone={c.phone}
+                                customerId={c.id}
+                                customerName={c.name}
+                                defaultPrefix={(c.whatsapp_prefix as any) || undefined}
+                                variant="chips"
+                              />
+                              <span className="text-sm text-slate-300 font-mono" dir="ltr">{c.phone}</span>
                             </>
                           ) : c.email ? (
                             <a

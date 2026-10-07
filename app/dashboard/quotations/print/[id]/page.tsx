@@ -1,4 +1,5 @@
 import PrintButton from "@/components/dashboard/PrintButton"
+import WhatsAppContactMenu from "@/components/whatsapp/WhatsAppContactMenu"
 import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
@@ -24,7 +25,7 @@ export default async function PrintQuotationPage({ params }: { params: { id: str
     supabase.from('stores').select('*').eq('id', storeId).single(),
     supabase
       .from('quotations')
-      .select('*, customer:customers(id, name, phone, address), items:quotation_items(*)')
+      .select('*, customer:customers(id, name, phone, address, whatsapp_prefix), items:quotation_items(*)')
       .eq('id', params.id)
       .eq('store_id', storeId)
       .single()
@@ -89,6 +90,15 @@ export default async function PrintQuotationPage({ params }: { params: { id: str
           >
             <span>🔗</span> فتح الرابط العام للزبون
           </Link>
+          <WhatsAppContactMenu
+            phone={quote.customer?.phone}
+            customerName={quote.customer?.name}
+            customerId={quote.customer?.id}
+            defaultPrefix={quote.customer?.whatsapp_prefix as any}
+            message={`مرحباً ${quote.customer?.name || 'عزيزنا العميل'}،\nيسرنا تزويدكم بعرض السعر رقم #${quote.quotation_number} بقيمة ${Number(quote.total_amount).toLocaleString('ar-u-nu-latn')} ${currency}.\nرابط المعاينة:\n${process.env.NEXT_PUBLIC_APP_URL || ''}/store/${country}/${sub}/quotation/${quote.id}`}
+            label="مشاركة عبر واتساب"
+            variant="button"
+          />
           <Link
             href={`/dashboard/accounting/invoices/new?from_quotation=${quote.id}`}
             className="rounded-lg bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 transition"

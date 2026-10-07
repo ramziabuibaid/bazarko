@@ -7,6 +7,7 @@ import {accountStats,calculateStatement,validStatementRange} from '@/lib/custome
 import {businessDay} from '@/lib/dashboard/simple-metrics'
 import {whatsappNumber} from '@/lib/customers/directory'
 import { getCustomerStatement, CustomerStatementResult, CustomerStatementRow } from '@/app/dashboard/customers/ledger/customer-statement-actions'
+import WhatsAppContactMenu from '@/components/whatsapp/WhatsAppContactMenu'
 
 
 export interface CustomerItem {
@@ -19,6 +20,7 @@ export interface CustomerItem {
   customer_type: string
   credit_limit?: number
   total_paid?: number
+  whatsapp_prefix?: string | null
 }
 
 interface Props {
@@ -178,11 +180,9 @@ export default function CustomerLedgerClient({
     }
   }
 
-  // رابط واتساب برسمي احترافي
-  function getWhatsAppShareUrl(customer: CustomerItem, statement?: CustomerStatementResult | null) {
-    if (!customer.phone) return null
-    const cleanPhone = whatsappNumber(customer.phone)
-    if (!cleanPhone) return null
+  // نص رسالة واتساب رسمية احترافية
+  function getWhatsAppShareText(customer: CustomerItem, statement?: CustomerStatementResult | null): string {
+    if (!customer.phone) return ''
 
     const opening = statement ? fmt(statement.openingBalance) : '0.00'
     const debits = statement ? fmt(statement.totalDebit) : '0.00'
@@ -197,7 +197,7 @@ export default function CustomerLedgerClient({
       ? `${window.location.origin}/dashboard/customers/${customer.id}/statement/print${fromDate || toDate ? `?from=${fromDate}&to=${toDate}` : ''}`
       : `/dashboard/customers/${customer.id}/statement/print`
 
-    const text = `مرحباً أخي الكريم / السادة: *${customer.name}* المحترمين،\n` +
+    return `مرحباً أخي الكريم / السادة: *${customer.name}* المحترمين،\n` +
       `نرفق لكم ملخص كشف الحساب المالي لدى *${storeName}*:\n\n` +
       dateNotice +
       `📌 الرصيد الافتتاحي: ${opening} ${currencyCode}\n` +
@@ -209,8 +209,14 @@ export default function CustomerLedgerClient({
       `📄 للاطلاع على تفاصيل الفواتير والسندات:\n` +
       `${printUrl}\n\n` +
       `شاكرين ومقدرين حسن تعاونكم معنا 🙏`
+  }
 
-    return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`
+  // رابط واتساب برسمي احترافي (fallback)
+  function getWhatsAppShareUrl(customer: CustomerItem, statement?: CustomerStatementResult | null) {
+    if (!customer.phone) return null
+    const cleanPhone = whatsappNumber(customer.phone)
+    if (!cleanPhone) return null
+    return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(getWhatsAppShareText(customer, statement))}`
   }
 
   return (
@@ -418,15 +424,16 @@ export default function CustomerLedgerClient({
                 </Link>
 
                 {selectedCustomer.phone && statementData?.success && !loadingStatement && (
-                  <a
-                    href={getWhatsAppShareUrl(selectedCustomer, statementData) || '#'}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3.5 py-2 text-xs font-bold text-white shadow transition"
-                  >
-                    <span>💬</span>
-                    <span>فتح رسالة واتساب</span>
-                  </a>
+                  <WhatsAppContactMenu
+                    phone={selectedCustomer.phone}
+                    customerId={selectedCustomer.id}
+                    customerName={selectedCustomer.name}
+                    defaultPrefix={selectedCustomer.whatsapp_prefix as any}
+                    message={getWhatsAppShareText(selectedCustomer, statementData)}
+                    label="مشاركة عبر واتساب"
+                    variant="button"
+                    buttonClassName="rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3.5 py-2 text-xs font-bold text-white shadow"
+                  />
                 )}
 
                 <Link
@@ -653,15 +660,13 @@ export default function CustomerLedgerClient({
                             >
                               {c.phone}
                             </a>
-                            <a
-                              href={`https://wa.me/${whatsappNumber(c.phone)||''}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-2 py-1 text-emerald-400 hover:bg-emerald-500/25 transition text-xs font-medium"
-                              title="فتح محادثة واتساب"
-                            >
-                              <span>💬</span>
-                            </a>
+                            <WhatsAppContactMenu
+                              phone={c.phone}
+                              customerId={c.id}
+                              customerName={c.name}
+                              defaultPrefix={c.whatsapp_prefix as any}
+                              variant="chips"
+                            />
                           </div>
                         ) : (
                           <span className="text-slate-500">—</span>

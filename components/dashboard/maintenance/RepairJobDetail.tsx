@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { uploadRepairPhoto } from '@/lib/supabase/storage'
 import { trackAction } from '@/lib/activity/track'
+import WhatsAppContactMenu from '@/components/whatsapp/WhatsAppContactMenu'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -445,10 +446,15 @@ export default function RepairJobDetail({
             <h2 className="mb-3 text-sm font-semibold text-white">الزبون</h2>
             <p className="font-medium text-white">{job.customer_name}</p>
             {job.customer_phone && (
-              <a href={`https://wa.me/${cleanPhone}`} target="_blank" rel="noopener noreferrer"
-                className="mt-1 flex items-center gap-1.5 text-sm text-green-400 hover:text-green-300" dir="ltr">
-                <span>💬</span> {job.customer_phone}
-              </a>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <span className="text-sm font-mono text-slate-300" dir="ltr">{job.customer_phone}</span>
+                <WhatsAppContactMenu
+                  phone={job.customer_phone}
+                  customerId={job.customer_id}
+                  customerName={job.customer_name}
+                  variant="chips"
+                />
+              </div>
             )}
 
             {/* QR + إشعارات */}
@@ -468,12 +474,17 @@ export default function RepairJobDetail({
                   </div>
                 )}
                 <div className="flex-1 space-y-1.5 min-w-0">
-                  {cleanPhone && (
-                    <a href={`https://wa.me/${cleanPhone}?text=${encodeURIComponent(notificationMsg)}`}
-                      target="_blank" rel="noopener noreferrer"
-                      className="flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 px-3 py-2 text-xs text-green-300 hover:bg-green-500/20 transition-colors">
-                      💬 إرسال عبر واتساب
-                    </a>
+                  {job.customer_phone && (
+                    <WhatsAppContactMenu
+                      phone={job.customer_phone}
+                      customerId={job.customer_id}
+                      customerName={job.customer_name}
+                      message={notificationMsg}
+                      label="💬 إرسال عبر واتساب"
+                      variant="button"
+                      className="w-full"
+                      buttonClassName="w-full flex items-center gap-2 rounded-lg border border-green-500/20 bg-green-500/10 px-3 py-2 text-xs text-green-300 hover:bg-green-500/20 transition-colors justify-center font-medium"
+                    />
                   )}
                   <a href={`https://t.me/share/url?url=${encodeURIComponent(trackingUrl)}&text=${encodeURIComponent(notificationMsg)}`}
                     target="_blank" rel="noopener noreferrer"
