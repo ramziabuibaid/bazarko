@@ -20,10 +20,12 @@ export default async function PrintReceiptPage({ params }: { params: { id: strin
 
   const [
     { data: store },
-    { data: voucher }
+    { data: voucher },
+    { data: dbChecks }
   ] = await Promise.all([
     supabase.from('stores').select('*').eq('id', storeId).single(),
-    supabase.from('vouchers').select('*, invoices(invoice_number), cash_boxes(name), bank_accounts(bank_name,account_number)').eq('id', params.id).eq('store_id', storeId).eq('type', 'receipt').single()
+    supabase.from('vouchers').select('*, invoices(invoice_number), cash_boxes(name), bank_accounts(bank_name,account_number)').eq('id', params.id).eq('store_id', storeId).eq('type', 'receipt').single(),
+    supabase.from('checks').select('check_number, bank_name, bank_code, branch_name, branch_code, account_number, drawer_name, amount, due_date').eq('voucher_id', params.id).eq('store_id', storeId)
   ])
 
   if (!store || !voucher) notFound()
@@ -53,7 +55,19 @@ export default async function PrintReceiptPage({ params }: { params: { id: strin
     split: 'نقدي + شيكات (دفع مركب)',
   }
 
-  const checks: any[] = voucher.checks_data || []
+  const rawChecks: any[] = (voucher.checks_data && voucher.checks_data.length > 0)
+    ? voucher.checks_data
+    : (dbChecks || [])
+
+  const checks = rawChecks.map((chk: any) => {
+    const matchingDbCheck = (dbChecks || []).find((dc: any) => String(dc.check_number) === String(chk.check_number))
+    return {
+      ...chk,
+      bank_code: chk.bank_code || matchingDbCheck?.bank_code || null,
+      branch_code: chk.branch_code || matchingDbCheck?.branch_code || null,
+      branch_name: chk.branch_name || matchingDbCheck?.branch_name || null,
+    }
+  })
 
   return (
     <div className="min-h-screen bg-slate-100 p-4 sm:p-8 text-slate-900 font-sans print:p-0 print:bg-white" dir="rtl">
@@ -159,7 +173,8 @@ export default async function PrintReceiptPage({ params }: { params: { id: strin
                     <thead>
                       <tr className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700">
                         <th className="p-1.5">رقم الشيك</th>
-                        <th className="p-1.5">البنك المسحوب عليه</th>
+                        <th className="p-1.5">البنك والفرع</th>
+                        <th className="p-1.5">كود البنك / الفرع</th>
                         <th className="p-1.5">تاريخ الاستحقاق</th>
                         <th className="p-1.5">الساحب</th>
                         <th className="p-1.5 text-left">المبلغ</th>
@@ -169,7 +184,19 @@ export default async function PrintReceiptPage({ params }: { params: { id: strin
                       {checks.map((chk: any, idx: number) => (
                         <tr key={idx}>
                           <td className="p-1.5 font-bold" dir="ltr">{chk.check_number}</td>
-                          <td className="p-1.5 font-sans">{chk.bank_name}</td>
+                          <td className="p-1.5 font-sans">
+                            <span className="font-semibold">{chk.bank_name}</span>
+                            {chk.branch_name && <span className="text-slate-500 text-[11px] block">{chk.branch_name}</span>}
+                          </td>
+                          <td className="p-1.5 font-mono text-[11px]" dir="ltr">
+                            {chk.bank_code ? (
+                              <span>
+                                {chk.bank_code} {chk.branch_code ? `/ ${chk.branch_code}` : ''}
+                              </span>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
                           <td className="p-1.5">{chk.due_date}</td>
                           <td className="p-1.5 font-sans">{chk.drawer_name || '—'}</td>
                           <td className="p-1.5 text-left font-bold" dir="ltr">

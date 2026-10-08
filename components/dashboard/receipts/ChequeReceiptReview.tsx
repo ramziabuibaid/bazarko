@@ -6,6 +6,7 @@ import {createChequeReceipt} from '@/app/dashboard/accounting/receipts/receipt-a
 import {businessDay} from '@/lib/dashboard/simple-metrics'
 import {type ReceiptCustomer,type ReceiptInvoice} from '@/lib/receipts/presentation'
 import {emptyCheque,chequeTotals,validateChequeReview,type ChequeReview,type ReceiptCheque} from '@/lib/receipts/cheque-review'
+import {PALESTINIAN_BANKS} from '@/lib/palestineBanks'
 import s from '@/components/dashboard/accounting/invoices-list.module.css'
 export default function ChequeReceiptReview({customers,invoices,cashBoxes,portfolios,creditAccounts,currency,storeId,preview,onBusyChange}:{storeId:string;preview:boolean;onBusyChange:(busy:boolean)=>void;customers:ReceiptCustomer[];invoices:ReceiptInvoice[];cashBoxes:{id:string;name:string}[];portfolios:{id:string;name:string}[];creditAccounts:{id:string;name:string;code:string}[];currency:string}){
  const today=businessDay().date,[input,setInput]=useState<ChequeReview>({partyType:'customer',customerId:'',partyName:'',date:today,amount:'0',boxId:'',invoiceId:'',description:'',reference:'',creditAccountId:'',method:'cheque',portfolioId:'',cheques:[emptyCheque(today)]}),[error,setError]=useState(''),[review,setReview]=useState(false);
@@ -103,7 +104,233 @@ export default function ChequeReceiptReview({customers,invoices,cashBoxes,portfo
 
  <label className="block">محفظة الشيكات الواردة<select aria-label="محفظة قبض الشيكات" className={field} value={input.portfolioId} onChange={e=>change({portfolioId:e.target.value})}><option value="">اختر محفظة مصرحاً بها</option>{portfolios.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>{!portfolios.length&&<p className="text-amber-300">لا توجد محفظة شيكات واردة نشطة بحساب مطابق وصلاحية قبض؛ راجع إعدادات الخزينة.</p>}
  {input.method==='split'&&<section className="border border-emerald-700 rounded-xl p-4 grid sm:grid-cols-2 gap-4"><label>الصندوق النقدي<select aria-label="صندوق القبض المختلط" className={field} value={input.boxId} onChange={e=>change({boxId:e.target.value})}><option value="">اختر الصندوق</option>{cashBoxes.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></label><label>الجزء النقدي<input aria-label="نقد القبض المختلط" inputMode="decimal" className={field} value={input.amount} onChange={e=>change({amount:e.target.value})}/></label></section>}
- <section className="space-y-4"><h3 className="font-bold text-purple-300">الشيكات المستلمة · العملة {currency} · دون تحويل عملات</h3>{input.cheques.map((c,i)=><article key={i} className="border border-purple-700 rounded-xl p-4"><div className="flex justify-between gap-4 mb-3"><h4>الشيك {i+1}</h4><button type="button" disabled={input.cheques.length===1} aria-label={`حذف الشيك ${i+1}`} onClick={()=>change({cheques:input.cheques.filter((_,n)=>n!==i)})}>حذف</button></div><div className="grid sm:grid-cols-2 gap-4">{([['check_number','رقم الشيك'],['bank_name','البنك'],['branch_name','الفرع (اختياري)'],['account_number','رقم حساب الساحب'],['drawer_name','اسم الساحب (اختياري)'],['amount','قيمة الشيك']] as const).map(([key,label])=><label key={key}>{label}<input aria-label={`${label} ${i+1}`} className={field} value={c[key]} inputMode={key==='amount'?'decimal':undefined} onChange={e=>cheque(i,{[key]:e.target.value})}/></label>)}{([['issue_date','تاريخ إصدار الشيك'],['due_date','تاريخ استحقاق الشيك']] as const).map(([key,label])=><label key={key}>{label}<input aria-label={`${label} ${i+1}`} type="date" className={field} value={c[key]} onChange={e=>cheque(i,{[key]:e.target.value})} onBlur={e=>cheque(i,{[key]:e.target.value})}/></label>)}</div></article>)}<button type="button" disabled={input.cheques.length>=50} className={s.primary} onClick={()=>change({cheques:[...input.cheques,emptyCheque(input.date)]})}>＋ إضافة شيك</button></section>
+ <section className="space-y-4">
+   <h3 className="font-bold text-purple-300">الشيكات المستلمة · العملة {currency} · دون تحويل عملات</h3>
+   {input.cheques.map((c, i) => {
+     const matchedBank = PALESTINIAN_BANKS.find(b => b.code === c.bank_code) || PALESTINIAN_BANKS.find(b => b.name === c.bank_name);
+     const isKnownBank = !!matchedBank;
+     return (
+       <article key={i} className="border border-purple-700/60 bg-slate-800/40 rounded-xl p-4 space-y-4">
+         <div className="flex justify-between items-center gap-4 border-b border-slate-700/60 pb-2">
+           <div className="flex items-center gap-2">
+             <span className="w-6 h-6 rounded-full bg-purple-600/30 text-purple-300 font-bold flex items-center justify-center text-xs">
+               {i + 1}
+             </span>
+             <h4 className="font-bold text-white text-sm">الشيك {i + 1}</h4>
+             {c.bank_code && (
+               <span className="font-mono text-xs px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                 كود بنك: {c.bank_code} {c.branch_code ? `· فرع: ${c.branch_code}` : ''}
+               </span>
+             )}
+           </div>
+           <button
+             type="button"
+             disabled={input.cheques.length === 1}
+             aria-label={`حذف الشيك ${i + 1}`}
+             className="text-xs text-rose-400 hover:text-rose-300 disabled:opacity-30 disabled:hover:text-rose-400 transition"
+             onClick={() => change({ cheques: input.cheques.filter((_, n) => n !== i) })}
+           >
+             حذف الشيك
+           </button>
+         </div>
+
+         {/* Bank & Bank Code */}
+         <div className="grid sm:grid-cols-3 gap-4">
+           <div className="sm:col-span-2">
+             <label className="block text-xs font-semibold mb-1 text-slate-300">اسم البنك المسحوب عليه *</label>
+             <select
+               aria-label={`بنك الشيك ${i + 1}`}
+               className={field}
+               value={c.bank_code || (matchedBank ? matchedBank.code : (c.bank_name ? 'OTHER' : ''))}
+               onChange={e => {
+                 const val = e.target.value;
+                 if (val === 'OTHER') {
+                   cheque(i, { bank_name: '', bank_code: '', branch_name: '', branch_code: '' });
+                 } else {
+                   const b = PALESTINIAN_BANKS.find(x => x.code === val);
+                   if (b) {
+                     cheque(i, {
+                       bank_name: b.name,
+                       bank_code: b.code,
+                       branch_name: '',
+                       branch_code: ''
+                     });
+                   } else {
+                     cheque(i, { bank_name: '', bank_code: '', branch_name: '', branch_code: '' });
+                   }
+                 }
+               }}
+             >
+               <option value="">-- اختر البنك من دليل سلطة النقد --</option>
+               {PALESTINIAN_BANKS.map(b => (
+                 <option key={b.code} value={b.code}>
+                   {b.name} (كود {b.code})
+                 </option>
+               ))}
+               <option value="OTHER">-- بنك آخر / إدخال يدوي --</option>
+             </select>
+             {(!isKnownBank && (c.bank_name || c.bank_code === '')) && (
+               <input
+                 type="text"
+                 placeholder="أدخل اسم البنك يدوياً"
+                 value={c.bank_name}
+                 onChange={e => cheque(i, { bank_name: e.target.value })}
+                 className={`${field} mt-2`}
+               />
+             )}
+           </div>
+
+           <div>
+             <label className="block text-xs font-semibold mb-1 text-slate-300">رقم/كود البنك</label>
+             <input
+               aria-label={`كود بنك الشيك ${i + 1}`}
+               type="text"
+               placeholder="كود البنك"
+               value={c.bank_code || ''}
+               readOnly={isKnownBank}
+               onChange={e => cheque(i, { bank_code: e.target.value })}
+               className={`${field} font-mono ${isKnownBank ? 'bg-slate-900 text-emerald-400 font-bold' : ''}`}
+             />
+           </div>
+         </div>
+
+         {/* Branch & Branch Code */}
+         <div className="grid sm:grid-cols-3 gap-4">
+           <div className="sm:col-span-2">
+             <label className="block text-xs font-semibold mb-1 text-slate-300">فرع البنك</label>
+             {matchedBank && matchedBank.branches.length > 0 ? (
+               <select
+                 aria-label={`فرع الشيك ${i + 1}`}
+                 className={field}
+                 value={c.branch_code || (matchedBank.branches.find(br => br.name === c.branch_name)?.code || '')}
+                 onChange={e => {
+                   const brCode = e.target.value;
+                   if (brCode === 'OTHER') {
+                     cheque(i, { branch_name: '', branch_code: '' });
+                   } else {
+                     const br = matchedBank.branches.find(x => x.code === brCode);
+                     if (br) {
+                       cheque(i, { branch_name: br.name, branch_code: br.code });
+                     } else {
+                       cheque(i, { branch_name: '', branch_code: '' });
+                     }
+                   }
+                 }}
+               >
+                 <option value="">-- اختر فرع البنك --</option>
+                 {matchedBank.branches.map(br => (
+                   <option key={br.code} value={br.code}>
+                     {br.name} (فرع {br.code})
+                   </option>
+                 ))}
+                 <option value="OTHER">-- فرع آخر / إدخال يدوي --</option>
+               </select>
+             ) : (
+               <input
+                 aria-label={`فرع الشيك ${i + 1}`}
+                 type="text"
+                 placeholder="اسم الفرع (اختياري)"
+                 value={c.branch_name}
+                 onChange={e => cheque(i, { branch_name: e.target.value })}
+                 className={field}
+               />
+             )}
+             {matchedBank && !matchedBank.branches.some(br => br.code === c.branch_code) && c.branch_code === '' && c.branch_name && (
+               <input
+                 type="text"
+                 placeholder="أدخل اسم الفرع يدوياً"
+                 value={c.branch_name}
+                 onChange={e => cheque(i, { branch_name: e.target.value })}
+                 className={`${field} mt-2`}
+               />
+             )}
+           </div>
+
+           <div>
+             <label className="block text-xs font-semibold mb-1 text-slate-300">رقم/كود الفرع</label>
+             <input
+               aria-label={`كود فرع الشيك ${i + 1}`}
+               type="text"
+               placeholder="كود الفرع"
+               value={c.branch_code || ''}
+               readOnly={!!(matchedBank && matchedBank.branches.some(br => br.code === c.branch_code))}
+               onChange={e => cheque(i, { branch_code: e.target.value })}
+               className={`${field} font-mono ${matchedBank && matchedBank.branches.some(br => br.code === c.branch_code) ? 'bg-slate-900 text-emerald-400 font-bold' : ''}`}
+             />
+           </div>
+         </div>
+
+         {/* Check Details */}
+         <div className="grid sm:grid-cols-2 gap-4">
+           <label>
+             رقم الشيك *
+             <input
+               aria-label={`رقم الشيك ${i + 1}`}
+               className={`${field} font-mono`}
+               value={c.check_number}
+               onChange={e => cheque(i, { check_number: e.target.value })}
+             />
+           </label>
+           <label>
+             قيمة الشيك *
+             <input
+               aria-label={`قيمة الشيك ${i + 1}`}
+               className={`${field} font-mono font-bold text-purple-300`}
+               inputMode="decimal"
+               value={c.amount}
+               onChange={e => cheque(i, { amount: e.target.value })}
+             />
+           </label>
+           <label>
+             رقم حساب الساحب *
+             <input
+               aria-label={`رقم حساب الساحب ${i + 1}`}
+               className={`${field} font-mono`}
+               value={c.account_number}
+               onChange={e => cheque(i, { account_number: e.target.value })}
+             />
+           </label>
+           <label>
+             اسم الساحب (اختياري)
+             <input
+               aria-label={`اسم الساحب ${i + 1}`}
+               className={field}
+               value={c.drawer_name}
+               onChange={e => cheque(i, { drawer_name: e.target.value })}
+             />
+           </label>
+         </div>
+
+         {/* Dates */}
+         <div className="grid sm:grid-cols-2 gap-4">
+           <label>
+             تاريخ إصدار الشيك *
+             <input
+               aria-label={`تاريخ إصدار الشيك ${i + 1}`}
+               type="date"
+               className={field}
+               value={c.issue_date}
+               onChange={e => cheque(i, { issue_date: e.target.value })}
+               onBlur={e => cheque(i, { issue_date: e.target.value })}
+             />
+           </label>
+           <label>
+             تاريخ استحقاق الشيك *
+             <input
+               aria-label={`تاريخ استحقاق الشيك ${i + 1}`}
+               type="date"
+               className={`${field} border-purple-500/50`}
+               value={c.due_date}
+               onChange={e => cheque(i, { due_date: e.target.value })}
+               onBlur={e => cheque(i, { due_date: e.target.value })}
+             />
+           </label>
+         </div>
+       </article>
+     );
+   })}
+   <button type="button" disabled={input.cheques.length>=50} className={s.primary} onClick={()=>change({cheques:[...input.cheques,emptyCheque(input.date)]})}>＋ إضافة شيك</button>
+ </section>
  {input.customerId&&<label className="block">ربط فاتورة (تم تحديد الأقدم تلقائياً)<select aria-label="فاتورة قبض الشيكات" value={input.invoiceId} className={field} onChange={e=>change({invoiceId:e.target.value})}><option value="">على حساب العميل دون فاتورة</option>{invoices.filter(v=>v.customer_id===input.customerId&&Number(v.total)>Number(v.amount_paid)&&!['draft','cancelled'].includes(v.status)).sort((a,b)=>a.issue_date.localeCompare(b.issue_date)).map((v, idx)=><option key={v.id} value={v.id}>{v.invoice_number} · {v.issue_date} · متبقٍ {money(Number(v.total)-Number(v.amount_paid))}{idx===0?' (الأقدم)':''}</option>)}</select></label>}
  <label className="block">البيان<textarea aria-label="بيان قبض الشيكات" className={field} rows={3} maxLength={1000} value={input.description} onChange={e=>change({description:e.target.value})}/></label><label className="block">المرجع (اختياري)<input aria-label="مرجع قبض الشيكات" maxLength={200} className={field} value={input.reference} onChange={e=>change({reference:e.target.value})}/></label>{error&&<p role="alert" className={s.error}>{error}</p>}<button type="submit" className={s.primary}>مراجعة قبض الشيكات</button></fieldset></form>
  <aside className="min-w-0 border border-slate-700 rounded-xl p-5 bg-slate-900 self-start space-y-4"><h3 className="text-xl font-bold">ملخص السند</h3><p>المستلم منه: <strong>{currentCustomer?.name||'لم يُحدد'}</strong></p><p>الجزء النقدي: <strong>{money(totals.cash)}</strong></p><p>الشيكات الاسمية: <strong className="text-purple-300">{money(totals.cheques)}</strong></p><p>عدد الشيكات: {input.cheques.length}</p><p>إجمالي السند: <strong className="text-sky-300">{money(totals.total)}</strong></p><p className={s.notice}>يدخل الجزء النقدي فقط إلى الصندوق. تحفظ الشيكات في المحفظة عند تنفيذ الاعتماد؛ لا تصبح نقداً عند الاستلام.</p>{review&&!saving&&!uncertain&&!saved&&<p role="status" className={s.settled}>اجتاز السند المراجعة. لم تُحفظ شيكات أو سند ولم تتغير أرصدة.</p>}{error&&(saving||uncertain||saved)&&<p role="alert" className={s.error}>{error}</p>}{saved&&<p role="status" className={s.settled}>حُفظ السند {saved.number}. <Link href={`/dashboard/accounting/receipts/print/${saved.id}`}>عرض / طباعة</Link> · <Link href="/dashboard/cheques">محفظة الشيكات</Link></p>}<button type="button" onClick={save} disabled={preview||saving||!!saved||(!review&&!uncertain)||(!pending.current&&uncertain)} className="w-full bg-purple-600 rounded-xl p-3 disabled:opacity-40">{saving?'جارٍ حفظ السند…':uncertain?'إعادة محاولة الطلب نفسه':preview?'معاينة فقط — لا حفظ مالي':'اعتماد سند الشيكات والمختلط'}</button><p className={s.hint}>المرفقات والحفظ كمسودة غير متاحين في هذه المرحلة.</p></aside></div></section>

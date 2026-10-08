@@ -25,7 +25,7 @@ export default async function ChequePrintPage({ params }: { params: { id: string
     supabase.from('stores').select('*').eq('id', storeId).single(),
     supabase
       .from('checks')
-      .select('*, customer:customers(id, name, phone, national_id), supplier:suppliers(id, name, phone), deposit_bank:bank_accounts(id, bank_name, account_number, branch_name)')
+      .select('*, customer:customers(id, name, phone, national_id), supplier:suppliers!checks_supplier_id_fkey(id, name, phone), deposit_bank:bank_accounts!checks_deposit_bank_account_id_fkey(id, bank_name, account_number, branch_name)')
       .eq('id', params.id)
       .eq('store_id', storeId)
       .single(),

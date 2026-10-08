@@ -1,7 +1,18 @@
 import {dateValid,validateCashReview,type ReceiptCustomer,type ReceiptInvoice,type CashReview} from './presentation'
-export interface ReceiptCheque {check_number:string;bank_name:string;branch_name:string;account_number:string;drawer_name:string;amount:string;issue_date:string;due_date:string}
+export interface ReceiptCheque {
+  check_number: string;
+  bank_name: string;
+  bank_code?: string;
+  branch_name: string;
+  branch_code?: string;
+  account_number: string;
+  drawer_name: string;
+  amount: string;
+  issue_date: string;
+  due_date: string;
+}
 export interface ChequeReview extends CashReview {method:'cheque'|'split';portfolioId:string;cheques:ReceiptCheque[]}
-export function emptyCheque(date:string):ReceiptCheque{return {check_number:'',bank_name:'',branch_name:'',account_number:'',drawer_name:'',amount:'',issue_date:date,due_date:''}}
+export function emptyCheque(date:string):ReceiptCheque{return {check_number:'',bank_name:'',bank_code:'',branch_name:'',branch_code:'',account_number:'',drawer_name:'',amount:'',issue_date:date,due_date:''}}
 export function chequeTotals(input:ChequeReview){const cheques=input.cheques.reduce((n,c)=>n+Math.round(Number(c.amount||0)*100),0),cash=input.method==='split'?Math.round(Number(input.amount||0)*100):0;return {cash:cash/100,cheques:cheques/100,total:(cash+cheques)/100}}
 export function validateChequeReview(input:ChequeReview,customers:ReceiptCustomer[],invoices:ReceiptInvoice[],boxes:{id:string}[],portfolios:{id:string}[],accounts:{id:string}[]){
  if(!['cheque','split'].includes(input.method))return 'اختر شيكات أو قبضاً مختلطاً';

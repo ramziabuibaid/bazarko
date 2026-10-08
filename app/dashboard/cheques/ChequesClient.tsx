@@ -172,7 +172,7 @@ export default function ChequesClient({
       if (searchQuery) {
         const q = searchQuery.toLowerCase()
         const matchesNumber = c.check_number.toLowerCase().includes(q)
-        const matchesBank = c.bank_name.toLowerCase().includes(q)
+        const matchesBank = c.bank_name.toLowerCase().includes(q) || (c.bank_code && c.bank_code.toLowerCase().includes(q)) || (c.branch_name && c.branch_name.toLowerCase().includes(q)) || (c.branch_code && c.branch_code.toLowerCase().includes(q))
         const matchesDrawer = (c.drawer_name || '').toLowerCase().includes(q)
         const matchesPayee = (c.payee_name || '').toLowerCase().includes(q)
         const matchesCustomer = (c.customer?.name || '').toLowerCase().includes(q)
@@ -293,7 +293,7 @@ export default function ChequesClient({
           images: imageUrls,
           notes: formData.notes.trim() || null,
         })
-        .select('*, customer:customers(id, name, phone), supplier:suppliers(id, name, phone)')
+        .select('*, customer:customers(id, name, phone), supplier:suppliers!checks_supplier_id_fkey(id, name, phone)')
         .single()
 
       if (insertErr) throw insertErr
@@ -671,9 +671,21 @@ export default function ChequesClient({
                       </td>
 
                       <td className="p-3.5">
-                        <p className="font-semibold text-white">{check.bank_name}</p>
-                        <p className="text-[11px] text-slate-400">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="font-semibold text-white">{check.bank_name}</p>
+                          {check.bank_code && (
+                            <span className="font-mono text-[10px] px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" title={`كود البنك: ${check.bank_code}`}>
+                              كود {check.bank_code}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
                           {check.branch_name || 'الفرع الرئيسي'}
+                          {check.branch_code && (
+                            <span className="font-mono text-[10px] text-slate-400 mr-1.5 font-medium">
+                              (فرع {check.branch_code})
+                            </span>
+                          )}
                           {check.cashbox_id && (
                             <span className="mr-1.5 text-[10px] text-sky-400 font-medium">
                               • {cashBoxes.find(b => b.id === check.cashbox_id)?.name || 'صندوق الشيكات'}

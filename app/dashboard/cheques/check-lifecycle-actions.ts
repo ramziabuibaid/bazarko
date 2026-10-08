@@ -52,7 +52,7 @@ export async function previewCheckAccounting(
 
     const { data: check } = await supabase
       .from('checks')
-      .select('*, customer:customers(id, name), supplier:suppliers(id, name)')
+      .select('*, customer:customers(id, name), supplier:suppliers!checks_supplier_id_fkey(id, name)')
       .eq('id', input.checkId)
       .eq('store_id', storeId)
       .single()
