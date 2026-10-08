@@ -185,7 +185,7 @@ export async function closeDailySession(
 // ── إدارة الصناديق وربطها بالحسابات ──────────────────────────────
 export async function createCashBox(input: {
   name: string
-  type: 'cash' | 'bank' | 'wallet' | 'personal' | 'checks_collection' | 'checks_received' | 'checks_issued'
+  type: 'cash' | 'bank' | 'wallet' | 'personal' | 'checks_collection' | 'checks_received' | 'checks_issued' | 'checks_returned'
   accountId?: string | null
   openingBalance?: number
   isDefault?: boolean
@@ -240,7 +240,7 @@ export async function createCashBox(input: {
 export async function updateCashBox(input: {
   id: string
   name: string
-  type: 'cash' | 'bank' | 'wallet' | 'personal' | 'checks_collection' | 'checks_received' | 'checks_issued'
+  type: 'cash' | 'bank' | 'wallet' | 'personal' | 'checks_collection' | 'checks_received' | 'checks_issued' | 'checks_returned'
   accountId?: string | null
   isDefault?: boolean
 }): Promise<Result> {

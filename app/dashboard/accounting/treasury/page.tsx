@@ -4,6 +4,7 @@ import { getAllCashBoxesWithBalances, getCashBalance, type CashBox } from '@/lib
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import TreasuryClient from '@/components/dashboard/accounting/TreasuryClient'
+import ReturnedChequesSection, { type ReturnedCheckItem } from '@/components/dashboard/accounting/ReturnedChequesSection'
 
 const SOURCE_LABELS: Record<string, string> = {
   voucher: 'سند',
@@ -21,12 +22,14 @@ const BOX_TYPE_BADGES: Record<string, { label: string; icon: string; cls: string
   personal: { label: 'شخصي', icon: '👤', cls: 'bg-purple-500/15 text-purple-400 border-purple-500/30' },
   checks_collection: { label: 'تحصيل شيكات', icon: '🧾', cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
   checks_received: { label: 'شيكات مقبوضة', icon: '📥', cls: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30' },
+  checks_returned: { label: 'شيكات راجعة', icon: '↩️', cls: 'bg-rose-500/15 text-rose-400 border-rose-500/30' },
   checks_issued: { label: 'شيكات صادرة', icon: '📤', cls: 'bg-rose-500/15 text-rose-400 border-rose-500/30' },
   wallet: { label: 'محفظة إلكترونية', icon: '📱', cls: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30' },
 }
 
 interface SearchParams {
   box_id?: string
+  tab?: 'boxes' | 'returned_checks'
 }
 
 export default async function TreasuryPage({ searchParams }: { searchParams: SearchParams }) {
@@ -77,7 +80,7 @@ export default async function TreasuryPage({ searchParams }: { searchParams: Sea
 
   const today = new Date().toISOString().split('T')[0]
 
-  const [{ data: todayMovements }, { data: recentMovements }, { data: sessions }, { data: storeCustomers }] =
+  const [{ data: todayMovements }, { data: recentMovements }, { data: sessions }, { data: storeCustomers }, { data: returnedChecksData }] =
     await Promise.all([
       supabase
         .from('cash_movements')
@@ -104,7 +107,57 @@ export default async function TreasuryPage({ searchParams }: { searchParams: Sea
         .from('customers')
         .select('id, name')
         .eq('store_id', store.id),
+      supabase
+        .from('checks')
+        .select(`
+          id,
+          check_number,
+          bank_name,
+          bank_code,
+          branch_name,
+          branch_code,
+          account_number,
+          drawer_name,
+          amount,
+          currency,
+          due_date,
+          issue_date,
+          status,
+          notes,
+          return_reason,
+          return_date,
+          cashbox_id,
+          customer:customers(id, name, phone),
+          voucher:vouchers!checks_voucher_id_fkey(id, voucher_number, date),
+          operations:check_operations(id, operation_type, operation_date, notes, created_at)
+        `)
+        .eq('store_id', store.id)
+        .in('status', ['bounced', 'returned', 'returned_to_customer', 'returned_to_drawer', 'supplier_returned'])
+        .order('due_date', { ascending: false }),
     ])
+
+  const returnedChecks: ReturnedCheckItem[] = (returnedChecksData ?? []).map((c: any) => ({
+    id: c.id,
+    check_number: c.check_number,
+    bank_name: c.bank_name,
+    bank_code: c.bank_code,
+    branch_name: c.branch_name,
+    branch_code: c.branch_code,
+    account_number: c.account_number,
+    drawer_name: c.drawer_name,
+    amount: Number(c.amount || 0),
+    currency: c.currency || store.currency_code,
+    due_date: c.due_date,
+    issue_date: c.issue_date,
+    status: c.status,
+    notes: c.notes,
+    return_reason: c.return_reason,
+    return_date: c.return_date,
+    cashbox_id: c.cashbox_id,
+    customer: c.customer,
+    voucher: c.voucher,
+    operations: c.operations,
+  }))
 
   // Map customer names to their IDs for quick lookup
   const customerMap = new Map<string, string>()
@@ -132,6 +185,8 @@ export default async function TreasuryPage({ searchParams }: { searchParams: Sea
     icon: '💰',
     cls: 'bg-white/10 text-white border-white/20',
   }
+
+  const activeTab = searchParams?.tab === 'returned_checks' || currentBox.type === 'checks_returned' ? 'returned_checks' : 'boxes'
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
@@ -164,8 +219,45 @@ export default async function TreasuryPage({ searchParams }: { searchParams: Sea
         </div>
       </div>
 
-      {/* بطاقات المؤشرات العامة لجميع الصناديق */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      {/* التبديل بين أقسام الخزينة والشيكات الراجعة */}
+      <div className="flex border-b border-white/10 gap-2 overflow-x-auto">
+        <Link
+          href={`/dashboard/accounting/treasury?tab=boxes${currentBox?.id ? `&box_id=${currentBox.id}` : ''}`}
+          className={`px-5 py-2.5 text-sm font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'boxes'
+              ? 'border-sky-500 text-sky-400 bg-sky-500/10 rounded-t-xl'
+              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
+          }`}
+        >
+          <span>🏦</span> الصناديق والخزائن ({boxes.length})
+        </Link>
+        <Link
+          href="/dashboard/accounting/treasury?tab=returned_checks"
+          className={`px-5 py-2.5 text-sm font-semibold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'returned_checks'
+              ? 'border-rose-500 text-rose-400 bg-rose-500/10 rounded-t-xl'
+              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
+          }`}
+        >
+          <span>↩️</span> قسم الشيكات الراجعة
+          <span
+            className={`rounded-full px-2 py-0.5 text-xs font-bold ${
+              returnedChecks.length > 0
+                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                : 'bg-white/10 text-slate-400'
+            }`}
+          >
+            {returnedChecks.length}
+          </span>
+        </Link>
+      </div>
+
+      {activeTab === 'returned_checks' ? (
+        <ReturnedChequesSection returnedChecks={returnedChecks} storeCurrency={cur} />
+      ) : (
+        <>
+          {/* بطاقات المؤشرات العامة لجميع الصناديق */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold text-emerald-400">إجمالي سيولة الخزائن والصناديق</p>
@@ -236,7 +328,7 @@ export default async function TreasuryPage({ searchParams }: { searchParams: Sea
             return (
               <Link
                 key={b.id}
-                href={`/dashboard/accounting/treasury?box_id=${b.id}`}
+                href={b.type === 'checks_returned' ? `/dashboard/accounting/treasury?tab=returned_checks&box_id=${b.id}` : `/dashboard/accounting/treasury?tab=boxes&box_id=${b.id}`}
                 className={`relative rounded-2xl border p-4 transition-all block text-right group ${
                   isSelected
                     ? 'border-sky-500 bg-sky-950/20 ring-1 ring-sky-500/40 shadow-lg shadow-sky-500/5'
@@ -522,6 +614,8 @@ export default async function TreasuryPage({ searchParams }: { searchParams: Sea
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   )
 }

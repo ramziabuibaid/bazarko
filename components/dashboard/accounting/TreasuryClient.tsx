@@ -21,6 +21,7 @@ export type CashBoxType =
   | 'checks_collection'
   | 'checks_received'
   | 'checks_issued'
+  | 'checks_returned'
 
 export const BOX_TYPE_OPTIONS: { value: CashBoxType; label: string; icon: string }[] = [
   { value: 'cash', label: 'نقد (صندوق رئيسي / فرعي)', icon: '💵' },
@@ -28,6 +29,7 @@ export const BOX_TYPE_OPTIONS: { value: CashBoxType; label: string; icon: string
   { value: 'personal', label: 'شخصي (عهد / مسحوبات شخصية)', icon: '👤' },
   { value: 'checks_collection', label: 'تحصيل شيكات برسم التحصيل', icon: '🧾' },
   { value: 'checks_received', label: 'شيكات مقبوضة (محفظة الشيكات)', icon: '📥' },
+  { value: 'checks_returned', label: 'شيكات راجعة (محفظة الشيكات المرتجعة)', icon: '↩️' },
   { value: 'checks_issued', label: 'شيكات صادرة للموردين', icon: '📤' },
   { value: 'wallet', label: 'محفظة إلكترونية / سداد رقمي', icon: '📱' },
 ]

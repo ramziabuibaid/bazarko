@@ -160,6 +160,8 @@ export default function ChequesClient({
     target_bank_account_id: bankAccounts[0]?.id || '',
     target_cashbox_id: cashBoxes[0]?.id || '',
     target_supplier_id: suppliers[0]?.id || '',
+    return_reason: 'عدم كفاية الرصيد',
+    custom_return_reason: '',
     notes: '',
     date: new Date().toISOString().slice(0, 10),
   })
@@ -452,15 +454,23 @@ export default function ChequesClient({
 
     const { check, opType } = showOpModal
 
+    const finalReason = opData.return_reason === 'أخرى'
+      ? (opData.custom_return_reason || opData.notes || 'أخرى')
+      : opData.return_reason
+
+    const combinedNotes = opType === 'bounce'
+      ? (opData.notes ? `${finalReason} — ${opData.notes}` : finalReason)
+      : opData.notes
+
     try {
       const res = await executeCheckOperation({
         checkId: check.id,
         operationType: opType as any,
         targetBankAccountId: (opType === 'deposit' || (opType === 'collect' && opData.collect_mode === 'bank')) ? opData.target_bank_account_id : undefined,
-        targetCashBoxId: (opType === 'transfer_cashbox' || (opType === 'collect' && opData.collect_mode === 'cash')) ? opData.target_cashbox_id : undefined,
+        targetCashBoxId: (opType === 'transfer_cashbox' || opType === 'bounce' || (opType === 'collect' && opData.collect_mode === 'cash')) ? opData.target_cashbox_id : undefined,
         targetSupplierId: opType === 'endorse' ? opData.target_supplier_id : undefined,
         operationDate: opData.date,
-        notes: opData.notes,
+        notes: combinedNotes,
       })
 
       if (!res.success) {
@@ -754,24 +764,71 @@ export default function ChequesClient({
                         <div className="flex items-center justify-center flex-wrap gap-1">
                           {/* المرحلة 1: في الحافظة */}
                           {check.payment_voucher_id&&<Link href={`/dashboard/accounting/payments/print/${check.payment_voucher_id}`} className="rounded-lg bg-purple-500/15 px-2 py-1 text-xs text-purple-300">{check.type==='received'?'سند تظهير مرتبط':'سند إصدار مرتبط · التسديد غير متاح بعد'}</Link>}
-                          {check.receipt_settlement_active != null && check.status === 'in_portfolio' && <><button onClick={()=>setShowOpModal({check,opType:'collect'})} className="rounded-lg bg-emerald-500/15 px-2 py-1 text-xs text-emerald-300">تحصيل مرتبط</button><button onClick={()=>setShowOpModal({check,opType:'return_to_customer'})} className="rounded-lg bg-amber-500/15 px-2 py-1 text-xs text-amber-300">إعادة للمصدر</button></>}
-                          {!check.payment_voucher_id && check.receipt_settlement_active == null && check.status === 'in_portfolio' && (
+                          {!check.payment_voucher_id && check.status === 'in_portfolio' && (
                             <>
+                              {/* 1. ترحيل (صناديق الترحيل فقط) */}
                               <button
-                                onClick={() => setShowOpModal({ check, opType: 'deposit' })}
-                                className="rounded-lg bg-sky-500/15 px-2 py-1 text-[11px] font-bold text-sky-400 hover:bg-sky-500/25 transition"
-                                title="إيداع برسم التحصيل"
+                                onClick={() => {
+                                  const transferBoxes = cashBoxes.filter(b => b.type !== 'checks_returned' && b.id !== check.cashbox_id)
+                                  setOpData(d => ({ ...d, target_cashbox_id: transferBoxes[0]?.id || '' }))
+                                  setShowOpModal({ check, opType: 'transfer_cashbox' })
+                                }}
+                                className="rounded-lg bg-slate-700/80 px-2 py-1 text-[11px] font-bold text-slate-200 hover:bg-slate-700 hover:text-white transition"
+                                title="ترحيل الشيك إلى صندوق أو خزينة أخرى (صناديق الترحيل فقط)"
                               >
-                                إيداع برسم التحصيل
+                                ترحيل
                               </button>
+
+                              {/* 2. إيداع (الحسابات البنكية فقط) */}
+                              <button
+                                onClick={() => {
+                                  setOpData(d => ({ ...d, target_bank_account_id: bankAccounts[0]?.id || '' }))
+                                  setShowOpModal({ check, opType: 'deposit' })
+                                }}
+                                className="rounded-lg bg-sky-500/15 px-2 py-1 text-[11px] font-bold text-sky-400 hover:bg-sky-500/25 transition"
+                                title="إيداع الشيك برسم التحصيل (الحسابات البنكية فقط)"
+                              >
+                                إيداع
+                              </button>
+
+                              {/* 3. إرجاع (صندوق الشيكات الراجعة فقط) */}
+                              <button
+                                onClick={() => {
+                                  const retBox = cashBoxes.find(b => b.type === 'checks_returned') || cashBoxes[0]
+                                  setOpData(d => ({
+                                    ...d,
+                                    target_cashbox_id: retBox?.id || '',
+                                    return_reason: 'عدم كفاية الرصيد',
+                                    custom_return_reason: '',
+                                  }))
+                                  setShowOpModal({ check, opType: 'bounce' })
+                                }}
+                                className="rounded-lg bg-rose-500/15 px-2 py-1 text-[11px] font-bold text-rose-400 hover:bg-rose-500/25 transition"
+                                title="إرجاع الشيك ونقله لصندوق الشيكات الراجعة بالخزينة"
+                              >
+                                إرجاع
+                              </button>
+
+                              {/* تحصيل الشيك */}
                               <button
                                 onClick={() => setShowOpModal({ check, opType: 'collect' })}
                                 className="rounded-lg bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-400 hover:bg-emerald-500/25 transition"
                                 title="تحصيل الشيك (بنكي أو نقدي)"
                               >
-                                تحصيل الشيك
+                                تحصيل
                               </button>
-                              {check.type === 'received' && (
+
+                              {check.receipt_settlement_active != null && (
+                                <button
+                                  onClick={() => setShowOpModal({ check, opType: 'return_to_customer' })}
+                                  className="rounded-lg bg-amber-500/15 px-2 py-1 text-[11px] font-bold text-amber-300 hover:bg-amber-500/25 transition"
+                                  title="إعادة الشيك للمصدر وإلغاء أثر القبض"
+                                >
+                                  إعادة للمصدر
+                                </button>
+                              )}
+
+                              {check.type === 'received' && check.receipt_settlement_active == null && (
                                 <button
                                   onClick={() => setShowOpModal({ check, opType: 'endorse' })}
                                   className="rounded-lg bg-purple-500/15 px-2 py-1 text-[11px] font-bold text-purple-400 hover:bg-purple-500/25 transition"
@@ -780,13 +837,6 @@ export default function ChequesClient({
                                   تجيير لمورد
                                 </button>
                               )}
-                              <button
-                                onClick={() => setShowOpModal({ check, opType: 'transfer_cashbox' })}
-                                className="rounded-lg bg-slate-700/60 px-2 py-1 text-[11px] font-bold text-slate-300 hover:bg-slate-700 transition"
-                                title="نقل الشيك إلى صندوق أو فرع آخر"
-                              >
-                                نقل لصندوق
-                              </button>
                             </>
                           )}
 
@@ -801,11 +851,20 @@ export default function ChequesClient({
                                 تأكيد تحصيل
                               </button>
                               <button
-                                onClick={() => setShowOpModal({ check, opType: 'bounce' })}
+                                onClick={() => {
+                                  const retBox = cashBoxes.find(b => b.type === 'checks_returned') || cashBoxes[0]
+                                  setOpData(d => ({
+                                    ...d,
+                                    target_cashbox_id: retBox?.id || '',
+                                    return_reason: 'عدم كفاية الرصيد',
+                                    custom_return_reason: '',
+                                  }))
+                                  setShowOpModal({ check, opType: 'bounce' })
+                                }}
                                 className="rounded-lg bg-rose-500/15 px-2 py-1 text-[11px] font-bold text-rose-400 hover:bg-rose-500/25 transition"
-                                title="تسجيل ارتداد / شيك راجع"
+                                title="تسجيل ارتداد ونقل لصندوق الشيكات الراجعة"
                               >
-                                تسجيل راجع
+                                إرجاع الشيك
                               </button>
                             </>
                           )}
@@ -1152,22 +1211,21 @@ export default function ChequesClient({
       )}
 
       {/* ── Modal: تنفيذ عملية على الشيك مع المعادلة المحاسبية المزدوجة ── */}
-      <LinkedChequeOperation storeId={store.id} selection={showOpModal?.check.receipt_settlement_active != null ? showOpModal : null} banks={bankAccounts} boxes={cashBoxes} onClose={()=>setShowOpModal(null)}/>
-      {showOpModal && showOpModal.check.receipt_settlement_active == null && (
+      {showOpModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
           <div className="relative max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-white/10 pb-3">
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 <span>⚡</span>
                 <span>
-                  {showOpModal.opType === 'deposit' && 'إيداع الشيك برسم التحصيل'}
+                  {showOpModal.opType === 'deposit' && 'إيداع الشيك برسم التحصيل (في البنك)'}
                   {showOpModal.opType === 'collect' && 'تحصيل الشيك (بنكي أو نقدي)'}
-                  {showOpModal.opType === 'bounce' && 'تسجيل ارتداد / نقل لمحفظة الشيكات المرتجعة'}
+                  {showOpModal.opType === 'bounce' && 'إرجاع الشيك إلى صندوق الشيكات الراجعة'}
                   {showOpModal.opType === 'return_to_customer' && 'إعادة الشيك للمصدر / للزبون وإعادة قيد الذمة'}
                   {showOpModal.opType === 'recollect' && 'إعادة استلام وقبض الشيك في المحفظة'}
                   {showOpModal.opType === 'endorse' && 'تجيير الشيك لصالح مورد'}
                   {showOpModal.opType === 'supplier_return' && 'استلام شيك مجيّر راجع من مورد'}
-                  {showOpModal.opType === 'transfer_cashbox' && 'نقل الشيك إلى صندوق أو فرع آخر'}
+                  {showOpModal.opType === 'transfer_cashbox' && 'ترحيل الشيك إلى صندوق أو خزينة أخرى'}
                 </span>
               </h2>
               <button
@@ -1242,45 +1300,115 @@ export default function ChequesClient({
 
               {showOpModal.opType === 'transfer_cashbox' && (
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-300">الصندوق / الخزينة المحول إليها *</label>
+                  <label className="mb-1 block text-xs font-semibold text-slate-300">صندوق الترحيل المستلم (صناديق الترحيل فقط) *</label>
                   <select
                     required
                     value={opData.target_cashbox_id}
                     onChange={e => setOpData({ ...opData, target_cashbox_id: e.target.value })}
                     className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500"
                   >
-                    {cashBoxes.length === 0 ? (
-                      <option value="">لا توجد صناديق نقدية معرفة</option>
+                    {cashBoxes.filter(cb => cb.type !== 'checks_returned' && cb.id !== showOpModal.check.cashbox_id).length === 0 ? (
+                      <option value="">لا توجد صناديق ترحيل أخرى متاحة</option>
                     ) : (
-                      cashBoxes.map(cb => (
+                      cashBoxes.filter(cb => cb.type !== 'checks_returned' && cb.id !== showOpModal.check.cashbox_id).map(cb => (
                         <option key={cb.id} value={cb.id}>
-                          {cb.name} {cb.is_default ? '(الافتراضي)' : ''}
+                          {cb.name} ({cb.type === 'checks_received' ? 'محفظة شيكات' : 'خزينة نقدية'}) {cb.is_default ? '— الافتراضي' : ''}
                         </option>
                       ))
                     )}
                   </select>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    تظهر صناديق الترحيل فقط لنقل الشيك واستبعاده من صناديق الشيكات الراجعة.
+                  </p>
                 </div>
               )}
 
               {showOpModal.opType === 'deposit' && (
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-300">البنك المودع به برسم التحصيل *</label>
+                  <label className="mb-1 block text-xs font-semibold text-sky-300">الحساب البنكي للإيداع برسم التحصيل (الحسابات البنكية فقط) *</label>
                   <select
                     required
                     value={opData.target_bank_account_id}
                     onChange={e => setOpData({ ...opData, target_bank_account_id: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500"
+                    className="w-full rounded-xl border border-sky-500/30 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500"
                   >
                     {bankAccounts.length === 0 ? (
                       <option value="">لا توجد حسابات بنكية معرفة (يرجى إضافة حساب بنكي أولاً)</option>
                     ) : (
                       bankAccounts.map(b => (
                         <option key={b.id} value={b.id}>
-                          {b.bank_name} — {b.branch_name} ({b.account_number}) [{b.currency}]
+                          🏦 {b.bank_name} — {b.branch_name} ({b.account_number}) [{b.currency}]
                         </option>
                       ))
                     )}
                   </select>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    تظهر الحسابات البنكية فقط لإيداع الشيك برسم التحصيل.
+                  </p>
+                </div>
+              )}
+
+              {showOpModal.opType === 'bounce' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-rose-300">صندوق الشيكات الراجعة المستلم (صندوق الشيكات الراجعة فقط) *</label>
+                    <select
+                      required
+                      value={opData.target_cashbox_id}
+                      onChange={e => setOpData({ ...opData, target_cashbox_id: e.target.value })}
+                      className="w-full rounded-xl border border-rose-500/30 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-rose-500"
+                    >
+                      {cashBoxes.filter(cb => cb.type === 'checks_returned').length === 0 ? (
+                        <option value="">صندوق الشيكات الراجعة (1330)</option>
+                      ) : (
+                        cashBoxes.filter(cb => cb.type === 'checks_returned').map(cb => (
+                          <option key={cb.id} value={cb.id}>
+                            ↩️ {cb.name} (حساب {cb.account?.code || '1330'} — الشيكات الراجعة)
+                          </option>
+                        ))
+                      )}
+                    </select>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      يظهر صندوق الشيكات الراجعة فقط لاستقبال وتتبع الشيك الراجع.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-300">سبب رجوع الشيك *</label>
+                    <select
+                      required
+                      value={opData.return_reason}
+                      onChange={e => setOpData({ ...opData, return_reason: e.target.value })}
+                      className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500"
+                    >
+                      <option value="عدم كفاية الرصيد">عدم كفاية الرصيد (شيك بدون رصيد)</option>
+                      <option value="توقف الحساب أو إغلاقه">توقف الحساب أو إغلاقه</option>
+                      <option value="اختلاف التوقيع عن النموذج المعتمد">اختلاف التوقيع عن النموذج المعتمد</option>
+                      <option value="الشيك مؤجل / لم يحن تاريخ الاستحقاق">الشيك مؤجل / لم يحن تاريخ الاستحقاق</option>
+                      <option value="أمر بوقف الصرف من الساحب">أمر بوقف الصرف من الساحب</option>
+                      <option value="أخطاء شكلية في كتابة الشيك">أخطاء شكلية في كتابة الشيك</option>
+                      <option value="عدم مطابقة التفقيط للأرقام">عدم مطابقة التفقيط للأرقام</option>
+                      <option value="أخرى">سبب آخر (تحديده أدناه)</option>
+                    </select>
+                  </div>
+
+                  {opData.return_reason === 'أخرى' && (
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-amber-300">حدد سبب الإرجاع *</label>
+                      <input
+                        type="text"
+                        required
+                        value={opData.custom_return_reason}
+                        onChange={e => setOpData({ ...opData, custom_return_reason: e.target.value })}
+                        placeholder="اكتب سبب رجوع الشيك..."
+                        className="w-full rounded-xl border border-amber-500/30 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  )}
+
+                  <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-200">
+                    ⚠️ سيتم نقل هذا الشيك تلقائياً إلى <strong>صندوق الشيكات الراجعة</strong> بالخزينة، وتحديث حالته إلى <strong>شيك راجع</strong>، وتسجيل القيد المحاسبي المزدوج المناسب دون تكرار الشيك في النظام.
+                  </div>
                 </div>
               )}
 
@@ -1405,9 +1533,23 @@ export default function ChequesClient({
                 <button
                   type="submit"
                   disabled={loading}
-                  className="flex-1 rounded-xl bg-sky-500 py-2.5 text-xs font-bold text-slate-950 hover:bg-sky-400 transition disabled:opacity-50"
+                  className={`flex-1 rounded-xl py-2.5 text-xs font-bold transition disabled:opacity-50 ${
+                    showOpModal.opType === 'bounce'
+                      ? 'bg-rose-500 text-white hover:bg-rose-400 shadow-lg shadow-rose-500/20'
+                      : showOpModal.opType === 'deposit'
+                      ? 'bg-sky-500 text-slate-950 hover:bg-sky-400'
+                      : 'bg-sky-500 text-slate-950 hover:bg-sky-400'
+                  }`}
                 >
-                  {loading ? 'جارٍ تسجيل القيد...' : 'تأكيد العملية وإنشاء القيد'}
+                  {loading
+                    ? 'جارٍ التنفيذ وتوثيق القيد...'
+                    : showOpModal.opType === 'bounce'
+                    ? '↩️ تأكيد إرجاع الشيك'
+                    : showOpModal.opType === 'deposit'
+                    ? '🏦 تأكيد الإيداع بالبنك'
+                    : showOpModal.opType === 'transfer_cashbox'
+                    ? '📦 تأكيد الترحيل'
+                    : 'تأكيد العملية وإنشاء القيد'}
                 </button>
               </div>
             </form>

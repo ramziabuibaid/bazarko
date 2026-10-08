@@ -227,8 +227,12 @@ export async function executeCheckOperation(
       .single()
 
     if (!check) return { success: false, error: 'الشيك غير موجود' }
-    if (check.payment_voucher_id) return {success:false,error:'شيك صرف مرتبط؛ التسديد والعكس يحتاجان مساراً محاسبياً مستقلاً'}
-    if (check.receipt_settlement_active != null) return {success:false,error:'استخدم التحصيل أو الإعادة المرتبطين بمعرف طلب لضمان عدم التكرار'}
+    if (check.receipt_settlement_active != null) {
+      const reqId = crypto.randomUUID()
+      const r = await linkedChequeOperation(input, reqId, true)
+      if (!r.success) return { success: false, error: r.error || 'فشلت عملية الشيك' }
+      return { success: true }
+    }
 
     // استدعاء الإجراء المخزن الذري
     const { data: rpcRes, error: rpcErr } = await supabase.rpc('execute_check_lifecycle_operation', {
