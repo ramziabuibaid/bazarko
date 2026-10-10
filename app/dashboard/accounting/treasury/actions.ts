@@ -398,3 +398,62 @@ export async function saveUserCashBoxPermissions(
   return { ok: true }
 }
 
+// ── تحويل الأموال بين الصناديق والخزائن ذرياً ───────────────────
+export async function transferBetweenCashBoxes(input: {
+  fromBoxId: string
+  toBoxId: string
+  amount: number
+  date?: string
+  notes?: string
+  requestId?: string
+}): Promise<Result & { journalEntryId?: string; entryNumber?: string }> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: 'غير مصرح' }
+
+  const storeId = await getStoreForUser(supabase, user.id)
+  if (!storeId) return { ok: false, error: 'المتجر غير موجود' }
+
+  if (!input.fromBoxId || !input.toBoxId) {
+    return { ok: false, error: 'يرجى اختيار الصندوق المصدر والمستلم' }
+  }
+  if (input.fromBoxId === input.toBoxId) {
+    return { ok: false, error: 'لا يمكن التحويل إلى نفس الصندوق' }
+  }
+  if (!(input.amount > 0)) {
+    return { ok: false, error: 'يرجى إدخال مبلغ صحيح أكبر من الصفر' }
+  }
+
+  const reqId = input.requestId || crypto.randomUUID()
+  const opDate = input.date || new Date().toISOString().slice(0, 10)
+
+  const { data, error } = await supabase.rpc('transfer_cash_between_boxes_atomic', {
+    p_store_id: storeId,
+    p_request_id: reqId,
+    p_from_box_id: input.fromBoxId,
+    p_to_box_id: input.toBoxId,
+    p_amount: input.amount,
+    p_date: opDate,
+    p_notes: input.notes?.trim() || null,
+    p_actor_id: user.id,
+  })
+
+  if (error) {
+    return { ok: false, error: error.message || 'فشلت عملية التحويل بين الصناديق' }
+  }
+
+  if (!data?.success) {
+    return { ok: false, error: 'فشل تنفيذ عملية التحويل' }
+  }
+
+  revalidatePath('/dashboard/accounting/treasury')
+  revalidatePath('/dashboard/accounting/statement')
+  revalidatePath('/dashboard/accounting/journal')
+  revalidatePath('/dashboard/finance')
+
+  return {
+    ok: true,
+    journalEntryId: data.journalEntryId,
+    entryNumber: data.entryNumber,
+  }
+}

@@ -11,6 +11,7 @@ import {
   getStoreMembersForPermissions,
   getUserCashBoxPermissions,
   saveUserCashBoxPermissions,
+  transferBetweenCashBoxes,
 } from '@/app/dashboard/accounting/treasury/actions'
 
 export type CashBoxType =
@@ -34,7 +35,7 @@ export const BOX_TYPE_OPTIONS: { value: CashBoxType; label: string; icon: string
   { value: 'wallet', label: 'محفظة إلكترونية / سداد رقمي', icon: '📱' },
 ]
 
-type Modal = null | 'in' | 'out' | 'opening' | 'close' | 'new_box' | 'edit_box' | 'permissions'
+type Modal = null | 'in' | 'out' | 'opening' | 'close' | 'new_box' | 'edit_box' | 'permissions' | 'transfer'
 
 interface AccountOption {
   id: string
@@ -109,6 +110,10 @@ export default function TreasuryClient({
   >({})
   const [hasCustomPerms, setHasCustomPerms] = useState(false)
 
+  // حقول تحويل الصناديق
+  const [targetBoxId, setTargetBoxId] = useState('')
+  const [transferDate, setTransferDate] = useState('')
+
   function reset() {
     setAmount('')
     setDesc('')
@@ -123,6 +128,8 @@ export default function TreasuryClient({
     setBoxAccountId('')
     setBoxOpeningBalance('')
     setBoxIsDefault(false)
+    setTargetBoxId('')
+    setTransferDate(new Date().toISOString().slice(0, 10))
   }
 
   async function open(m: Modal) {
@@ -230,6 +237,14 @@ export default function TreasuryClient({
         accountId: boxAccountId || null,
         isDefault: boxIsDefault,
       })
+    } else if (modal === 'transfer') {
+      res = await transferBetweenCashBoxes({
+        fromBoxId: currentBox.id,
+        toBoxId: targetBoxId,
+        amount: parseFloat(amount) || 0,
+        date: transferDate || new Date().toISOString().slice(0, 10),
+        notes: desc,
+      })
     } else if (modal === 'permissions') {
       if (!selectedUserId) {
         setBusy(false)
@@ -285,6 +300,12 @@ export default function TreasuryClient({
           📤 سحب نقد
         </button>
         <button
+          onClick={() => open('transfer')}
+          className="rounded-xl bg-blue-500/15 px-3.5 py-2 text-sm font-semibold text-blue-400 hover:bg-blue-500/25 transition-all shadow-sm"
+        >
+          🔄 تحويل بين الصناديق
+        </button>
+        <button
           onClick={() => open('close')}
           className="rounded-xl bg-sky-500/15 px-3.5 py-2 text-sm font-semibold text-sky-400 hover:bg-sky-500/25 transition-all shadow-sm"
         >
@@ -329,6 +350,7 @@ export default function TreasuryClient({
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 {modal === 'in' && '📥 إيداع نقد في الصندوق'}
                 {modal === 'out' && '📤 سحب نقد من الصندوق'}
+                {modal === 'transfer' && '🔄 تحويل أموال بين الصناديق والخزائن'}
                 {modal === 'opening' && '⚙️ تعديل الرصيد الافتتاحي للصندوق'}
                 {modal === 'close' && '🔒 إغلاق اليومية ومطابقة الرصيد الفعلي'}
                 {modal === 'new_box' && '➕ إضافة صندوق أو خزينة جديدة'}
@@ -482,6 +504,72 @@ export default function TreasuryClient({
                   />
                   <span>تسوية الفرق تلقائياً بحركة تصحيح ليتطابق رصيد الدفتر مع العدّ الفعلي</span>
                 </label>
+              </div>
+            )}
+
+            {/* تحويل أموال بين الصناديق */}
+            {modal === 'transfer' && (
+              <div className="space-y-3.5">
+                <div className="rounded-xl bg-slate-800/60 p-3 border border-white/5 text-xs text-slate-300">
+                  تحويل مالي من: <strong className="text-white">{currentBox.name}</strong> (الرصيد المتاح: {fmt(systemBalance)} {currencyCode})
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-300">
+                    الصندوق / الخزينة المستلمة <span className="text-red-400">*</span>
+                  </label>
+                  <select
+                    value={targetBoxId}
+                    onChange={e => setTargetBoxId(e.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-slate-800 px-3.5 py-2.5 text-white focus:border-sky-500 focus:outline-none"
+                  >
+                    <option value="">-- اختر الصندوق المحول إليه --</option>
+                    {(allBoxes || [])
+                      .filter(b => b.id !== currentBox.id && b.type !== 'checks_returned' && b.type !== 'checks_received')
+                      .map(b => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-300">
+                    المبلغ المراد تحويله ({currencyCode}) <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={amount}
+                    onChange={e => setAmount(e.target.value)}
+                    placeholder="0.00"
+                    dir="ltr"
+                    className="w-full rounded-xl border border-white/10 bg-slate-800 px-3.5 py-2.5 text-white focus:border-sky-500 focus:outline-none text-lg font-bold"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-300">
+                    تاريخ التحويل
+                  </label>
+                  <input
+                    type="date"
+                    value={transferDate}
+                    onChange={e => setTransferDate(e.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-slate-800 px-3.5 py-2.5 text-white focus:border-sky-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-300">
+                    ملاحظات أو سبب التحويل (اختياري)
+                  </label>
+                  <input
+                    value={desc}
+                    onChange={e => setDesc(e.target.value)}
+                    placeholder="مثلاً: تغذية الصندوق الفرعي، تسوية عهدة..."
+                    className="w-full rounded-xl border border-white/10 bg-slate-800 px-3.5 py-2.5 text-white focus:border-sky-500 focus:outline-none"
+                  />
+                </div>
               </div>
             )}
 
