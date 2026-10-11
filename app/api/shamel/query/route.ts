@@ -108,17 +108,26 @@ export async function GET(req: NextRequest) {
 
     // 4. Customers Explorer
     if (kind === 'customers') {
-      let sortColumn = 'code'
-      if (sortBy === 'name') sortColumn = 'name'
-      else if (sortBy === 'balance') sortColumn = 'equivalent_balance'
-      else if (sortBy === 'last_invoice') sortColumn = 'last_invoice_date'
-      else if (sortBy === 'last_receipt') sortColumn = 'last_receipt_date'
+      let sortColumn = 'last_invoice_date'
+      let isAsc = false
+
+      if (sortBy) {
+        if (sortBy === 'code') sortColumn = 'code'
+        else if (sortBy === 'name') sortColumn = 'name'
+        else if (sortBy === 'balance') sortColumn = 'equivalent_balance'
+        else if (sortBy === 'last_invoice') sortColumn = 'last_invoice_date'
+        else if (sortBy === 'last_receipt') sortColumn = 'last_receipt_date'
+        isAsc = sortDir === 'asc'
+      } else if (sortDir) {
+        isAsc = sortDir === 'asc'
+      }
 
       let query = supabase
         .from('shamel_customers')
         .select('*', { count: 'exact' })
         .eq('store_id', storeId)
-        .order(sortColumn, { ascending: sortDir === 'asc', nullsFirst: false })
+        .order(sortColumn, { ascending: isAsc, nullsFirst: false })
+        .order('code', { ascending: true })
 
       if (q) {
         const tokens = q.split(/\s+/).filter(Boolean)

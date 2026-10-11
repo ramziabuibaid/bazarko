@@ -116,8 +116,8 @@ export default function ShamelWizardClient({
   const [pageSize, setPageSize] = useState(50)
 
   // Customer Explorer Sorting & Filtering State
-  const [customerSortBy, setCustomerSortBy] = useState<'code' | 'name' | 'balance' | 'last_invoice' | 'last_receipt'>('code')
-  const [customerSortDir, setCustomerSortDir] = useState<'asc' | 'desc'>('asc')
+  const [customerSortBy, setCustomerSortBy] = useState<'code' | 'name' | 'balance' | 'last_invoice' | 'last_receipt'>('last_invoice')
+  const [customerSortDir, setCustomerSortDir] = useState<'asc' | 'desc'>('desc')
   const [customerHideZero, setCustomerHideZero] = useState(false)
 
   // Dedicated Cheques Search Toolbar State (matching MyShop)
@@ -178,7 +178,7 @@ export default function ShamelWizardClient({
       setCustomerSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
     } else {
       setCustomerSortBy(column)
-      setCustomerSortDir('asc')
+      setCustomerSortDir(column === 'last_invoice' || column === 'last_receipt' || column === 'balance' ? 'desc' : 'asc')
     }
     setCurrentPage(1)
   }
