@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
+import { checkStorePermission } from '@/lib/supabase/permissions'
 import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
 
 export const metadata = {
@@ -21,6 +22,22 @@ export default async function JournalEntriesPage({ searchParams }: { searchParam
 
   const storeId = await getStoreForUser(supabase, user.id)
   if (!storeId) redirect('/onboarding')
+
+  const hasRead = await checkStorePermission(storeId, 'journal.read')
+  if (!hasRead) {
+    return (
+      <div className="p-8 text-center" dir="rtl">
+        <div className="mx-auto max-w-md rounded-2xl border border-rose-500/30 bg-rose-500/10 p-6 text-rose-300">
+          <div className="text-3xl mb-2">🚫</div>
+          <h2 className="text-lg font-bold text-white mb-2">غير مصرح</h2>
+          <p className="text-xs text-slate-300 mb-4">لا تملك صلاحية الاطلاع على دفتر اليومية والقيود المحاسبية. هذا القسم مخصص للمحاسب والمالك فقط.</p>
+          <Link href="/dashboard" className="inline-block rounded-xl bg-slate-800 px-4 py-2 text-xs font-bold text-white hover:bg-slate-700 transition">
+            ← العودة للرئيسية
+          </Link>
+        </div>
+      </div>
+    )
+  }
 
   let query = supabase
     .from('journal_entries')

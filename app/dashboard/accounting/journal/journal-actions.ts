@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
+import { requireStorePermission } from '@/lib/supabase/permissions'
 import { revalidatePath } from 'next/cache'
 
 export interface JournalLineUpdateInput {
@@ -36,6 +37,8 @@ export async function updateJournalEntryAction(input: UpdateJournalEntryInput) {
 
     const storeId = await getStoreForUser(supabase, user.id)
     if (!storeId) return { success: false, error: 'المتجر غير موجود' }
+
+    await requireStorePermission(storeId, 'journal.write')
 
     if (!input.entryId) return { success: false, error: 'معرف القيد مطلوب' }
     if (!input.date) return { success: false, error: 'تاريخ القيد مطلوب' }

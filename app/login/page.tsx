@@ -55,11 +55,28 @@ export default function LoginPage() {
   async function handlePostAuthRedirect() {
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
+      // 1. Check if user is an active store member (staff, accountant, admin, owner)
+      const { data: member } = await supabase
+        .from('store_members')
+        .select('store_id')
+        .eq('profile_id', user.id)
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle()
+
+      if (member?.store_id) {
+        window.location.replace('/dashboard')
+        return
+      }
+
+      // 2. Fallback check if user owns a store directly
       const { data: store } = await supabase
         .from('stores')
         .select('id')
         .eq('owner_id', user.id)
-        .single()
+        .limit(1)
+        .maybeSingle()
 
       window.location.replace(store ? '/dashboard' : '/onboarding')
     }

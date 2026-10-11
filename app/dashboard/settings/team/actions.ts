@@ -20,15 +20,16 @@ async function verifyStoreAdmin(storeId: string) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('غير مصرح - يرجى تسجيل الدخول')
 
-  // Check if store owner or store admin
+  // Check true owner in stores table
   const { data: store } = await supabase
     .from('stores')
     .select('id, owner_id')
     .eq('id', storeId)
     .single()
 
-  if (store && store.owner_id === user.id) {
-    return { user, isOwner: true }
+  const isRealOwner = store?.owner_id === user.id
+  if (isRealOwner) {
+    return { user, isOwner: true, store }
   }
 
   const { data: member } = await supabase
@@ -39,11 +40,11 @@ async function verifyStoreAdmin(storeId: string) {
     .eq('is_active', true)
     .maybeSingle()
 
-  if (!member || !['owner', 'admin'].includes(member.role)) {
+  if (!member || member.role !== 'admin') {
     throw new Error('صلاحيات غير كافية لإدارة مستخدمي المتجر')
   }
 
-  return { user, isOwner: member.role === 'owner' }
+  return { user, isOwner: false, store }
 }
 
 export type StoreMemberRole = 'owner' | 'admin' | 'staff' | 'accountant' | 'viewer'
@@ -59,67 +60,95 @@ export interface CreateStoreUserInput {
 
 export async function createStoreUser(input: CreateStoreUserInput) {
   try {
-    await verifyStoreAdmin(input.storeId)
+    const allowedRoles = ['admin', 'accountant', 'staff', 'viewer'] as const
+    if (!(allowedRoles as readonly string[]).includes(input.role)) {
+      return { success: false, error: 'الدور غير مسموح' }
+    }
+
+    const { isOwner } = await verifyStoreAdmin(input.storeId)
+    if (!isOwner && !['staff', 'viewer'].includes(input.role)) {
+      return { success: false, error: 'منح هذه الصلاحية يتطلب المالك' }
+    }
 
     const email = input.email.trim().toLowerCase()
-    const password = input.password.trim()
+    const password = input.password // Do not trim password; preserve user input
     const fullName = input.fullName.trim()
     const phone = input.phone?.trim() || null
-    const role = input.role || 'staff'
+    const role = input.role
 
     if (!email || !password || !fullName) {
       return { success: false, error: 'الاسم، البريد الإلكتروني، وكلمة المرور مطلوبة' }
     }
-    if (password.length < 6) {
-      return { success: false, error: 'كلمة المرور يجب أن لا تقل عن 6 خانات' }
+    if (password.length < 8) {
+      return { success: false, error: 'كلمة المرور يجب أن لا تقل عن 8 خانات' }
     }
 
     const admin = getAdminSupabase()
 
-    // 1. Check if user already exists in auth
-    const { data: existingUserList } = await admin.auth.admin.listUsers()
-    let targetUser = existingUserList?.users?.find(u => u.email?.toLowerCase() === email)
+    // 1. Attempt to create the user in Auth
+    const { data: newUser, error: createAuthError } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { full_name: fullName },
+    })
 
-    if (!targetUser) {
-      // Create new user in auth
-      const { data: newUser, error: createAuthError } = await admin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-        user_metadata: { full_name: fullName },
-      })
+    if (createAuthError) {
+      const errMsg = createAuthError.message.toLowerCase()
+      if (errMsg.includes('already registered') || errMsg.includes('already exists') || createAuthError.status === 422) {
+        // User exists in auth. Check whether they are already in this store
+        const { data: existingProfiles } = await admin
+          .from('profiles')
+          .select('id')
+          .eq('email', email)
+          .maybeSingle()
 
-      if (createAuthError || !newUser?.user) {
-        return { success: false, error: createAuthError?.message || 'تعذر إنشاء حساب المستخدم' }
+        if (existingProfiles) {
+          const { data: existingMember } = await admin
+            .from('store_members')
+            .select('id')
+            .eq('store_id', input.storeId)
+            .eq('profile_id', existingProfiles.id)
+            .maybeSingle()
+
+          if (existingMember) {
+            return { success: false, error: 'هذا المستخدم مضاف بالفعل إلى هذا المتجر' }
+          }
+        }
+
+        return {
+          success: false,
+          error: 'البريد الإلكتروني مرتبط بحساب مسجل مسبقاً في النظام. تتطلب إضافة مستخدم موجود إرسال دعوة وقبولها حفاظاً على أمان حسابه الشخصي.',
+        }
       }
-      targetUser = newUser.user
+
+      return { success: false, error: createAuthError.message || 'تعذر إنشاء حساب المستخدم' }
     }
 
-    const userId = targetUser.id
+    if (!newUser?.user) {
+      return { success: false, error: 'تعذر إنشاء حساب المستخدم' }
+    }
 
-    // 2. Ensure profile exists or is updated
-    await admin
+    const userId = newUser.user.id
+
+    // 2. Ensure profile exists for the newly created user only
+    const { error: profileError } = await admin
       .from('profiles')
       .upsert({
         id: userId,
         full_name: fullName,
         phone: phone,
+        email: email,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'id' })
 
-    // 3. Check if already a member in this store
-    const { data: existingMember } = await admin
-      .from('store_members')
-      .select('id, role, is_active')
-      .eq('store_id', input.storeId)
-      .eq('profile_id', userId)
-      .maybeSingle()
-
-    if (existingMember) {
-      return { success: false, error: 'هذا المستخدم مضاف بالفعل إلى هذا المتجر' }
+    if (profileError) {
+      // Rollback Auth user creation
+      await admin.auth.admin.deleteUser(userId)
+      return { success: false, error: 'تعذر إنشاء ملف المستخدم: ' + profileError.message }
     }
 
-    // 4. Insert into store_members
+    // 3. Insert into store_members
     const { error: memberError } = await admin
       .from('store_members')
       .insert({
@@ -131,6 +160,8 @@ export async function createStoreUser(input: CreateStoreUserInput) {
       })
 
     if (memberError) {
+      // Rollback Auth user creation
+      await admin.auth.admin.deleteUser(userId)
       return { success: false, error: 'تعذر ربط المستخدم بالمتجر: ' + memberError.message }
     }
 
@@ -144,15 +175,40 @@ export async function createStoreUser(input: CreateStoreUserInput) {
 
 export async function updateStoreUserPassword(storeId: string, profileId: string, newPassword: string) {
   try {
-    await verifyStoreAdmin(storeId)
+    const { isOwner } = await verifyStoreAdmin(storeId)
 
-    if (!newPassword || newPassword.trim().length < 6) {
-      return { success: false, error: 'كلمة المرور يجب أن لا تقل عن 6 خانات' }
+    if (!newPassword || newPassword.length < 8) {
+      return { success: false, error: 'كلمة المرور يجب أن لا تقل عن 8 خانات' }
     }
 
     const admin = getAdminSupabase()
+    const { data: target, error: targetError } = await admin
+      .from('store_members')
+      .select('profile_id, role, is_active')
+      .eq('store_id', storeId)
+      .eq('profile_id', profileId)
+      .maybeSingle()
+
+    const { data: store, error: storeError } = await admin
+      .from('stores')
+      .select('owner_id')
+      .eq('id', storeId)
+      .single()
+
+    if (targetError || storeError || !target || !store) {
+      return { success: false, error: 'المستخدم غير تابع لهذا المتجر' }
+    }
+
+    if (profileId === store.owner_id || target.role === 'owner') {
+      return { success: false, error: 'كلمة مرور المالك تُغيّر من إعدادات حسابه الشخصي' }
+    }
+
+    if (!isOwner && !['staff', 'viewer'].includes(target.role)) {
+      return { success: false, error: 'إعادة ضبط هذا الحساب تتطلب المالك' }
+    }
+
     const { error } = await admin.auth.admin.updateUserById(profileId, {
-      password: newPassword.trim(),
+      password: newPassword,
     })
 
     if (error) {
@@ -172,21 +228,42 @@ export async function updateStoreUserRole(
   isActive: boolean
 ) {
   try {
-    const { user } = await verifyStoreAdmin(storeId)
-    const admin = getAdminSupabase()
-
-    // Prevent deactivating or demoting oneself if you are the one performing action
-    const { data: targetMember } = await admin
-      .from('store_members')
-      .select('profile_id, role')
-      .eq('id', memberId)
-      .single()
-
-    if (targetMember && targetMember.profile_id === user.id && (!isActive || role !== targetMember.role)) {
-      return { success: false, error: 'لا يمكنك تعطيل حسابك أو تغيير دورك بنفسك' }
+    const allowedRoles = ['admin', 'accountant', 'staff', 'viewer'] as const
+    if (!(allowedRoles as readonly string[]).includes(role)) {
+      return { success: false, error: 'الدور غير مسموح' }
     }
 
-    const { error } = await admin
+    const { user, isOwner, store } = await verifyStoreAdmin(storeId)
+    const admin = getAdminSupabase()
+
+    // Query target using id AND store_id together
+    const { data: targetMember, error: targetError } = await admin
+      .from('store_members')
+      .select('profile_id, role, is_active')
+      .eq('id', memberId)
+      .eq('store_id', storeId)
+      .maybeSingle()
+
+    if (targetError || !targetMember) {
+      return { success: false, error: 'العضو غير موجود في هذا المتجر' }
+    }
+
+    // Disallow modifying real owner or self
+    if (targetMember.profile_id === store?.owner_id || targetMember.role === 'owner') {
+      return { success: false, error: 'لا يمكن تعديل دور أو حالة مالك المتجر' }
+    }
+    if (targetMember.profile_id === user.id) {
+      return { success: false, error: 'لا يمكنك تغيير دورك أو تعطيل حسابك بنفسك' }
+    }
+
+    // If not owner, cannot manage admins or accountants
+    if (!isOwner) {
+      if (!['staff', 'viewer'].includes(targetMember.role) || !['staff', 'viewer'].includes(role)) {
+        return { success: false, error: 'إدارة أدوار المشرفين والمحاسبين تتطلب مالك المتجر' }
+      }
+    }
+
+    const { data: updatedRows, error } = await admin
       .from('store_members')
       .update({
         role,
@@ -194,9 +271,14 @@ export async function updateStoreUserRole(
       })
       .eq('id', memberId)
       .eq('store_id', storeId)
+      .select('id')
 
     if (error) {
       return { success: false, error: 'تعذر تعديل الصلاحية: ' + error.message }
+    }
+
+    if (!updatedRows || updatedRows.length === 0) {
+      return { success: false, error: 'لم يتم العثور على العضو لتعديله' }
     }
 
     revalidatePath('/dashboard/settings')
@@ -209,31 +291,45 @@ export async function updateStoreUserRole(
 
 export async function removeStoreUser(storeId: string, memberId: string) {
   try {
-    const { user } = await verifyStoreAdmin(storeId)
+    const { user, isOwner, store } = await verifyStoreAdmin(storeId)
     const admin = getAdminSupabase()
 
-    const { data: targetMember } = await admin
+    const { data: targetMember, error: targetError } = await admin
       .from('store_members')
       .select('profile_id, role')
       .eq('id', memberId)
-      .single()
+      .eq('store_id', storeId)
+      .maybeSingle()
 
-    if (targetMember && targetMember.profile_id === user.id) {
+    if (targetError || !targetMember) {
+      return { success: false, error: 'العضو غير موجود في هذا المتجر' }
+    }
+
+    if (targetMember.profile_id === user.id) {
       return { success: false, error: 'لا يمكنك إزالة حسابك من المتجر بنفسك' }
     }
 
-    if (targetMember?.role === 'owner') {
+    if (targetMember.profile_id === store?.owner_id || targetMember.role === 'owner') {
       return { success: false, error: 'لا يمكن إزالة مالك المتجر الأساسي' }
     }
 
-    const { error } = await admin
+    if (!isOwner && !['staff', 'viewer'].includes(targetMember.role)) {
+      return { success: false, error: 'إزالة المشرفين والمحاسبين تتطلب مالك المتجر' }
+    }
+
+    const { data: deletedRows, error } = await admin
       .from('store_members')
       .delete()
       .eq('id', memberId)
       .eq('store_id', storeId)
+      .select('id')
 
     if (error) {
       return { success: false, error: 'تعذر حذف العضو: ' + error.message }
+    }
+
+    if (!deletedRows || deletedRows.length === 0) {
+      return { success: false, error: 'لم يتم العثور على العضو لحذفه' }
     }
 
     revalidatePath('/dashboard/settings')
