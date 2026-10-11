@@ -350,6 +350,40 @@ export default function ChequesClient({
     }
   }
 
+  const openOpModal = (check: CheckItem, opType: string) => {
+    setError('')
+    const defaultSupplier = check.endorsed_supplier_id
+      ? suppliers.find(s => s.id === check.endorsed_supplier_id)?.id
+      : (check.supplier_id ? suppliers.find(s => s.id === check.supplier_id)?.id : suppliers[0]?.id || '')
+
+    const retBox = cashBoxes.find(b => b.type === 'checks_returned') || cashBoxes[0]
+    const transferBoxes = cashBoxes.filter(b => (b.type === 'checks_received' || b.type === 'checks_collection') && b.id !== check.cashbox_id)
+
+    let targetBoxId = cashBoxes[0]?.id || ''
+    if (opType === 'bounce') {
+      targetBoxId = retBox?.id || ''
+    } else if (opType === 'transfer_cashbox') {
+      targetBoxId = transferBoxes[0]?.id || ''
+    }
+
+    setOpData({
+      collect_mode: 'bank',
+      target_bank_account_id: bankAccounts[0]?.id || '',
+      target_cashbox_id: targetBoxId,
+      target_supplier_id: defaultSupplier || '',
+      return_reason: 'عدم كفاية الرصيد',
+      custom_return_reason: '',
+      notes: '',
+      date: new Date().toISOString().slice(0, 10),
+    })
+    setShowOpModal({ check, opType })
+  }
+
+  const closeOpModal = () => {
+    setShowOpModal(null)
+    setError('')
+  }
+
   // Accounting Formula Preview
   const accountingPreview = useMemo(() => {
     if (!showOpModal) return null
@@ -359,7 +393,8 @@ export default function ChequesClient({
     const selectedBank = bankAccounts.find(b => b.id === opData.target_bank_account_id) || bankAccounts[0]
     const selectedBox = cashBoxes.find(cb => cb.id === opData.target_cashbox_id) || cashBoxes[0]
     const currentBox = cashBoxes.find(cb => cb.id === check.cashbox_id)
-    const selectedSupplier = suppliers.find(s => s.id === opData.target_supplier_id) || suppliers[0]
+    const targetSuppId = opData.target_supplier_id || check.endorsed_supplier_id || check.supplier_id
+    const selectedSupplier = suppliers.find(s => s.id === targetSuppId) || (opType !== 'supplier_return' ? suppliers[0] : undefined)
 
     if (opType === 'deposit') {
       return {
@@ -491,7 +526,7 @@ export default function ChequesClient({
         throw new Error(res.error || 'فشلت العملية')
       }
 
-      setShowOpModal(null)
+      closeOpModal()
       router.refresh()
     } catch (err: any) {
       setError(err.message || 'فشلت العملية')
@@ -791,11 +826,7 @@ export default function ChequesClient({
                             <>
                               {/* 1. ترحيل (صناديق ومحافظ الشيكات فقط) */}
                               <button
-                                onClick={() => {
-                                  const transferBoxes = cashBoxes.filter(b => (b.type === 'checks_received' || b.type === 'checks_collection') && b.id !== check.cashbox_id)
-                                  setOpData(d => ({ ...d, target_cashbox_id: transferBoxes[0]?.id || '' }))
-                                  setShowOpModal({ check, opType: 'transfer_cashbox' })
-                                }}
+                                onClick={() => openOpModal(check, 'transfer_cashbox')}
                                 className="rounded-lg bg-slate-700/80 px-2 py-1 text-[11px] font-bold text-slate-200 hover:bg-slate-700 hover:text-white transition"
                                 title="ترحيل الشيك بين محافظ وصناديق الشيكات (يُمنع الصندوق النقدي)"
                               >
@@ -804,10 +835,7 @@ export default function ChequesClient({
 
                               {/* 2. إيداع (الحسابات البنكية فقط) */}
                               <button
-                                onClick={() => {
-                                  setOpData(d => ({ ...d, target_bank_account_id: bankAccounts[0]?.id || '' }))
-                                  setShowOpModal({ check, opType: 'deposit' })
-                                }}
+                                onClick={() => openOpModal(check, 'deposit')}
                                 className="rounded-lg bg-sky-500/15 px-2 py-1 text-[11px] font-bold text-sky-400 hover:bg-sky-500/25 transition"
                                 title="إيداع الشيك برسم التحصيل (الحسابات البنكية فقط)"
                               >
@@ -816,16 +844,7 @@ export default function ChequesClient({
 
                               {/* 3. إرجاع (صندوق الشيكات الراجعة فقط) */}
                               <button
-                                onClick={() => {
-                                  const retBox = cashBoxes.find(b => b.type === 'checks_returned') || cashBoxes[0]
-                                  setOpData(d => ({
-                                    ...d,
-                                    target_cashbox_id: retBox?.id || '',
-                                    return_reason: 'عدم كفاية الرصيد',
-                                    custom_return_reason: '',
-                                  }))
-                                  setShowOpModal({ check, opType: 'bounce' })
-                                }}
+                                onClick={() => openOpModal(check, 'bounce')}
                                 className="rounded-lg bg-rose-500/15 px-2 py-1 text-[11px] font-bold text-rose-400 hover:bg-rose-500/25 transition"
                                 title="إرجاع الشيك ونقله لصندوق الشيكات الراجعة بالخزينة"
                               >
@@ -834,7 +853,7 @@ export default function ChequesClient({
 
                               {/* تحصيل الشيك */}
                               <button
-                                onClick={() => setShowOpModal({ check, opType: 'collect' })}
+                                onClick={() => openOpModal(check, 'collect')}
                                 className="rounded-lg bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-400 hover:bg-emerald-500/25 transition"
                                 title="تحصيل الشيك (بنكي أو نقدي)"
                               >
@@ -843,7 +862,7 @@ export default function ChequesClient({
 
                               {check.receipt_settlement_active != null && (
                                 <button
-                                  onClick={() => setShowOpModal({ check, opType: 'return_to_customer' })}
+                                  onClick={() => openOpModal(check, 'return_to_customer')}
                                   className="rounded-lg bg-amber-500/15 px-2 py-1 text-[11px] font-bold text-amber-300 hover:bg-amber-500/25 transition"
                                   title="إعادة الشيك للمصدر وإلغاء أثر القبض"
                                 >
@@ -853,7 +872,7 @@ export default function ChequesClient({
 
                               {check.type === 'received' && check.receipt_settlement_active == null && (
                                 <button
-                                  onClick={() => setShowOpModal({ check, opType: 'endorse' })}
+                                  onClick={() => openOpModal(check, 'endorse')}
                                   className="rounded-lg bg-purple-500/15 px-2 py-1 text-[11px] font-bold text-purple-400 hover:bg-purple-500/25 transition"
                                   title="تجيير الشيك لمورد"
                                 >
@@ -867,23 +886,14 @@ export default function ChequesClient({
                           {check.status === 'deposited' && (
                             <>
                               <button
-                                onClick={() => setShowOpModal({ check, opType: 'collect' })}
+                                onClick={() => openOpModal(check, 'collect')}
                                 className="rounded-lg bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-400 hover:bg-emerald-500/25 transition"
                                 title="تأكيد التحصيل والإيداع بالحساب"
                               >
                                 تأكيد تحصيل
                               </button>
                               <button
-                                onClick={() => {
-                                  const retBox = cashBoxes.find(b => b.type === 'checks_returned') || cashBoxes[0]
-                                  setOpData(d => ({
-                                    ...d,
-                                    target_cashbox_id: retBox?.id || '',
-                                    return_reason: 'عدم كفاية الرصيد',
-                                    custom_return_reason: '',
-                                  }))
-                                  setShowOpModal({ check, opType: 'bounce' })
-                                }}
+                                onClick={() => openOpModal(check, 'bounce')}
                                 className="rounded-lg bg-rose-500/15 px-2 py-1 text-[11px] font-bold text-rose-400 hover:bg-rose-500/25 transition"
                                 title="تسجيل ارتداد ونقل لصندوق الشيكات الراجعة"
                               >
@@ -895,7 +905,7 @@ export default function ChequesClient({
                           {/* المرحلة 3: محصل ومودع */}
                           {check.receipt_settlement_active == null && check.status === 'collected' && (
                             <button
-                              onClick={() => setShowOpModal({ check, opType: 'bounce' })}
+                              onClick={() => openOpModal(check, 'bounce')}
                               className="rounded-lg bg-rose-500/15 px-2 py-1 text-[11px] font-bold text-rose-400 hover:bg-rose-500/25 transition"
                               title="تسجيل ارتداد لاحق للشيك"
                             >
@@ -907,14 +917,14 @@ export default function ChequesClient({
                           {check.status === 'bounced' && (
                             <>
                               <button
-                                onClick={() => setShowOpModal({ check, opType: 'return_to_customer' })}
+                                onClick={() => openOpModal(check, 'return_to_customer')}
                                 className="rounded-lg bg-slate-700 px-2 py-1 text-[11px] font-bold text-amber-300 hover:bg-slate-600 transition"
                                 title="إعادة الشيك للزبون وإثبات دينه"
                               >
                                 إعادة للمصدر
                               </button>
                               <button
-                                onClick={() => setShowOpModal({ check, opType: 'recollect' })}
+                                onClick={() => openOpModal(check, 'recollect')}
                                 className="rounded-lg bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-300 hover:bg-emerald-500/25 transition"
                                 title="إعادة قبض بالمحفظة"
                               >
@@ -926,7 +936,7 @@ export default function ChequesClient({
                           {/* المرحلة 5: مجيّر لمورد */}
                           {check.status === 'endorsed' && (
                             <button
-                              onClick={() => setShowOpModal({ check, opType: 'supplier_return' })}
+                              onClick={() => openOpModal(check, 'supplier_return')}
                               className="rounded-lg bg-orange-500/15 px-2 py-1 text-[11px] font-bold text-orange-400 hover:bg-orange-500/25 transition"
                               title="تسجيل إرجاع الشيك من المورد"
                             >
@@ -938,14 +948,14 @@ export default function ChequesClient({
                           {check.status === 'supplier_returned' && (
                             <>
                               <button
-                                onClick={() => setShowOpModal({ check, opType: 'return_to_customer' })}
+                                onClick={() => openOpModal(check, 'return_to_customer')}
                                 className="rounded-lg bg-slate-700 px-2 py-1 text-[11px] font-bold text-amber-300 hover:bg-slate-600 transition"
                                 title="إعادة للساحب الأصلي"
                               >
                                 إعادة للمصدر
                               </button>
                               <button
-                                onClick={() => setShowOpModal({ check, opType: 'recollect' })}
+                                onClick={() => openOpModal(check, 'recollect')}
                                 className="rounded-lg bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-300 hover:bg-emerald-500/25 transition"
                                 title="إعادة قبض بالمحفظة"
                               >
@@ -1252,7 +1262,7 @@ export default function ChequesClient({
                 </span>
               </h2>
               <button
-                onClick={() => setShowOpModal(null)}
+                onClick={closeOpModal}
                 className="text-slate-400 hover:text-white text-sm"
               >
                 ✕
@@ -1548,7 +1558,7 @@ export default function ChequesClient({
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowOpModal(null)}
+                  onClick={closeOpModal}
                   className="flex-1 rounded-xl border border-white/10 py-2.5 text-xs font-bold text-slate-400 hover:bg-slate-800 transition"
                 >
                   إلغاء

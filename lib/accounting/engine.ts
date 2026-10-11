@@ -952,7 +952,8 @@ export async function getOrEnsureAccount(
 ): Promise<string> {
   const effectiveTag = accountTag || (
     code === '5001' ? 'COGS' :
-    code === '1201' ? 'INVENTORY' :
+    (code === '1500' || code === '1205') ? 'INVENTORY' :
+    (code === '1201' || code === '1200') ? 'BANK' :
     code === '4001' ? 'SALES_REVENUE' :
     code === '4002' ? 'SERVICE_REVENUE' :
     code === '4003' ? 'OTHER_REVENUE' :

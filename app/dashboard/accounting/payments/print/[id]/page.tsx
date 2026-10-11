@@ -22,7 +22,7 @@ export default async function PrintPaymentPage({ params }: { params: { id: strin
     { data: voucher }
   ] = await Promise.all([
     supabase.from('stores').select('*').eq('id', storeId).single(),
-    supabase.from('vouchers').select('*, purchase_invoices(invoice_number), cash_boxes(name)').eq('id', params.id).eq('store_id', storeId).eq('type', 'payment').single()
+    supabase.from('vouchers').select('*, purchase_invoices(invoice_number), cash_box:cash_boxes!vouchers_cash_box_id_fkey(name)').eq('id', params.id).eq('store_id', storeId).eq('type', 'payment').single()
   ])
 
   if (!store || !voucher) notFound()

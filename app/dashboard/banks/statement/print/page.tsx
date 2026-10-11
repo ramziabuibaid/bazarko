@@ -31,21 +31,39 @@ export default async function PrintBankStatementPage({ searchParams }: { searchP
 
   // Fetch transactions
   let lines: any[] = []
+  let priorBalance = Number(bank.opening_balance || 0)
+
   if (bank.account_id) {
+    if (searchParams.from) {
+      const { data: priorLines } = await supabase
+        .from('journal_lines')
+        .select('debit, credit, entry:journal_entries!inner(date)')
+        .eq('account_id', bank.account_id)
+        .lt('entry.date', searchParams.from)
+
+      for (const pl of priorLines || []) {
+        priorBalance += Number(pl.debit || 0) - Number(pl.credit || 0)
+      }
+    }
+
     let query = supabase
       .from('journal_lines')
       .select('*, entry:journal_entries!inner(id, entry_number, date, description, source)')
       .eq('account_id', bank.account_id)
-      .order('created_at', { ascending: true })
 
     if (searchParams.from) query = query.gte('entry.date', searchParams.from)
     if (searchParams.to) query = query.lte('entry.date', searchParams.to)
 
     const { data } = await query
-    lines = data || []
+    lines = (data || []).sort((a: any, b: any) => {
+      const dateA = a.entry?.date || a.created_at || ''
+      const dateB = b.entry?.date || b.created_at || ''
+      if (dateA !== dateB) return dateA.localeCompare(dateB)
+      return (a.created_at || '').localeCompare(b.created_at || '')
+    })
   }
 
-  let running = Number(bank.opening_balance || 0)
+  let running = priorBalance
   const statementRows = lines.map(line => {
     const debit = Number(line.debit || 0)
     const credit = Number(line.credit || 0)
@@ -110,9 +128,9 @@ export default async function PrintBankStatementPage({ searchParams }: { searchP
             </span>
           </div>
           <div>
-            <span className="text-slate-500">الرصيد الافتتاحي:</span>{' '}
+            <span className="text-slate-500">{searchParams.from ? 'الرصيد المنقول:' : 'الرصيد الافتتاحي:'}</span>{' '}
             <span className="font-mono font-bold text-slate-900">
-              {Number(bank.opening_balance || 0).toLocaleString('en-GB', { minimumFractionDigits: 2 })} {bank.currency}
+              {Number(priorBalance).toLocaleString('en-GB', { minimumFractionDigits: 2 })} {bank.currency}
             </span>
           </div>
           <div>
@@ -137,12 +155,14 @@ export default async function PrintBankStatementPage({ searchParams }: { searchP
           </thead>
           <tbody className="divide-y divide-slate-200 text-slate-800">
             <tr>
-              <td className="p-2 font-mono">—</td>
+              <td className="p-2 font-mono">{searchParams.from ? new Date(searchParams.from).toLocaleDateString('en-GB') : '—'}</td>
               <td className="p-2 font-mono">OPN</td>
-              <td className="p-2 font-semibold">رصيد افتتاحي</td>
-              <td className="p-2 font-mono">{Number(bank.opening_balance || 0).toLocaleString('en-GB', { minimumFractionDigits: 2 })}</td>
-              <td className="p-2 font-mono">0.00</td>
-              <td className="p-2 font-mono font-bold">{Number(bank.opening_balance || 0).toLocaleString('en-GB', { minimumFractionDigits: 2 })}</td>
+              <td className="p-2 font-semibold">
+                {searchParams.from ? `الرصيد المنقول ما قبل ${searchParams.from}` : 'رصيد افتتاحي'}
+              </td>
+              <td className="p-2 font-mono">{priorBalance >= 0 ? priorBalance.toLocaleString('en-GB', { minimumFractionDigits: 2 }) : '—'}</td>
+              <td className="p-2 font-mono">{priorBalance < 0 ? Math.abs(priorBalance).toLocaleString('en-GB', { minimumFractionDigits: 2 }) : '—'}</td>
+              <td className="p-2 font-mono font-bold">{priorBalance.toLocaleString('en-GB', { minimumFractionDigits: 2 })}</td>
             </tr>
 
             {statementRows.map((row, idx) => (

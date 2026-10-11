@@ -81,12 +81,7 @@ export default async function AccountsTreePage() {
       calculatedBalance: 0,
     }
 
-    const isDebit = acc.normal_balance === 'debit' || acc.type === 'asset' || acc.type === 'expense'
-    const journalBalance = isDebit
-      ? (stat.totalDebit - stat.totalCredit)
-      : (stat.totalCredit - stat.totalDebit)
-
-    const finalBalance = (Number(acc.balance || 0)) + journalBalance
+    const finalBalance = Number(acc.balance || 0)
 
     return {
       ...acc,

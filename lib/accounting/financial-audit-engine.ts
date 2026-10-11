@@ -7,7 +7,7 @@ export type AuditSeverity = 'healthy' | 'notice' | 'warning' | 'critical'
 export interface AuditCheckResult {
   id: string
   title: string
-  category: 'customers' | 'suppliers' | 'journal' | 'checks' | 'inventory'
+  category: 'customers' | 'suppliers' | 'journal' | 'checks' | 'inventory' | 'cash'
   severity: AuditSeverity
   summary: string
   discrepancy: number
@@ -42,7 +42,7 @@ export async function runFinancialAudit(storeId: string): Promise<FinancialAudit
   const today = new Date().toISOString().split('T')[0]
 
   // ─────────────────────────────────────────────────────────────
-  // 1. مطابقة أرصدة الزبائن مع حساب المدينون (Accounts Receivable / 1121)
+  // 1. مطابقة أرصدة الزبائن مع حساب المدينون (Accounts Receivable / 1400)
   // ─────────────────────────────────────────────────────────────
   const { data: customers } = await supabase
     .from('customers')
@@ -56,7 +56,7 @@ export async function runFinancialAudit(storeId: string): Promise<FinancialAudit
     .from('accounts')
     .select('id, code, name')
     .eq('store_id', storeId)
-    .or('code.ilike.112%,code.eq.1121,name.ilike.%عملاء%,name.ilike.%مدينون%')
+    .or('account_tag.eq.CUSTOMER_RECEIVABLE,code.eq.1400,code.ilike.14%,code.ilike.112%,code.eq.1121,name.ilike.%عملاء%,name.ilike.%زبائن%,name.ilike.%مدينون%')
 
   const recAccountIds = (recAccounts || []).map(a => a.id)
 
@@ -80,11 +80,11 @@ export async function runFinancialAudit(storeId: string): Promise<FinancialAudit
 
   if (recAccountIds.length === 0) {
     custSeverity = 'warning'
-    custRecommendations.push('لم يتم العثور على حساب ذمم مدينون (1121) في شجرة الحسابات. يرجى تهيئة الدليل.')
+    custRecommendations.push('لم يتم العثور على حساب ذمم الزبائن والمدينين (1400 / CUSTOMER_RECEIVABLE) في شجرة الحسابات.')
   } else if (custDiff > 1.0) {
     custSeverity = custDiff > 1000 ? 'critical' : 'warning'
     custRecommendations.push(
-      `يوجد فارق قدره ${custDiff.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })} بين مجموع كشوفات الزبائن وحساب الأستاذ العام (1121).`,
+      `يوجد فارق قدره ${custDiff.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })} بين مجموع كشوفات الزبائن وحساب الأستاذ العام للذمم المدينة (1400).`,
     )
     custRecommendations.push(
       'تأكد من ترحيل كافة فواتير وسندات الزبائن إلى قيود يومية، أو تسجيل قيد افتتاحي بالأرصدة السابقة.',
@@ -93,7 +93,7 @@ export async function runFinancialAudit(storeId: string): Promise<FinancialAudit
 
   const checkCustomers: AuditCheckResult = {
     id: 'check_customers_receivables',
-    title: 'مطابقة أرصدة الزبائن مع حساب الذمم المدينة (1121)',
+    title: 'مطابقة أرصدة الزبائن مع حساب الذمم المدينة (1400)',
     category: 'customers',
     severity: custSeverity,
     summary:
@@ -113,7 +113,7 @@ export async function runFinancialAudit(storeId: string): Promise<FinancialAudit
   }
 
   // ─────────────────────────────────────────────────────────────
-  // 2. مطابقة أرصدة الموردين مع حساب الدائنون (Accounts Payable / 2110)
+  // 2. مطابقة أرصدة الموردين مع حساب الدائنون (Accounts Payable / 2100)
   // ─────────────────────────────────────────────────────────────
   const { data: suppliers } = await supabase
     .from('suppliers')
@@ -126,7 +126,7 @@ export async function runFinancialAudit(storeId: string): Promise<FinancialAudit
     .from('accounts')
     .select('id, code, name')
     .eq('store_id', storeId)
-    .or('code.ilike.211%,code.eq.2110,name.ilike.%موردون%,name.ilike.%دائنون%')
+    .or('account_tag.eq.SUPPLIER_PAYABLE,code.eq.2100,code.ilike.21%,code.ilike.211%,code.eq.2110,name.ilike.%مورد%,name.ilike.%دائنون%')
 
   const payAccountIds = (payAccounts || []).map(a => a.id)
 
@@ -150,18 +150,18 @@ export async function runFinancialAudit(storeId: string): Promise<FinancialAudit
 
   if (payAccountIds.length === 0) {
     suppSeverity = 'warning'
-    suppRecommendations.push('لم يتم العثور على حساب ذمم دائنون (2110) في شجرة الحسابات.')
+    suppRecommendations.push('لم يتم العثور على حساب ذمم الموردين والدائنين (2100 / SUPPLIER_PAYABLE) في شجرة الحسابات.')
   } else if (suppDiff > 1.0) {
     suppSeverity = suppDiff > 1000 ? 'critical' : 'warning'
     suppRecommendations.push(
-      `يوجد فارق قدره ${suppDiff.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })} بين مجموع أرصدة الموردين وحساب الأستاذ العام (2110).`,
+      `يوجد فارق قدره ${suppDiff.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })} بين مجموع أرصدة الموردين وحساب الأستاذ العام للذمم الدائنة (2100).`,
     )
     suppRecommendations.push('قم بمراجعة فواتير الشراء وسندات الصرف والتأكد من توليد قيودها اليومية.')
   }
 
   const checkSuppliers: AuditCheckResult = {
     id: 'check_suppliers_payables',
-    title: 'مطابقة أرصدة الموردين مع حساب الذمم الدائنة (2110)',
+    title: 'مطابقة أرصدة الموردين مع حساب الذمم الدائنة (2100)',
     category: 'suppliers',
     severity: suppSeverity,
     summary:
@@ -357,7 +357,66 @@ export async function runFinancialAudit(storeId: string): Promise<FinancialAudit
     recommendations: inventoryRecommendations,
   }
 
-  const allChecks = [checkCustomers, checkSuppliers, checkJournal, checkPortfolio, checkInventory]
+  // ─────────────────────────────────────────────────────────────
+  // 6. مطابقة أرصدة الحسابات البنكية التشغيلية مع الأستاذ العام
+  // ─────────────────────────────────────────────────────────────
+  const { data: bankAccounts } = await supabase
+    .from('bank_accounts')
+    .select('id, bank_name, account_number, balance, account_id, accounts:accounts!account_id(code, name, balance)')
+    .eq('store_id', storeId)
+    .eq('is_active', true)
+
+  const rawBanks = bankAccounts || []
+  const bankDiscrepancies: Array<{
+    id: string
+    code: string
+    title: string
+    value: number
+    extra: string
+  }> = []
+
+  for (const b of rawBanks) {
+    const opBal = Number(b.balance || 0)
+    const ledgerBal = Number((b as any).accounts?.balance || 0)
+    const diff = Math.abs(opBal - ledgerBal)
+    if (diff > 0.01) {
+      bankDiscrepancies.push({
+        id: b.id,
+        code: b.account_number,
+        title: `${b.bank_name} (${(b as any).accounts?.name || 'حساب الأستاذ'})`,
+        value: diff,
+        extra: `رصيد البنك: ${opBal.toFixed(2)} | الأستاذ: ${ledgerBal.toFixed(2)}`,
+      })
+    }
+  }
+
+  let bankSeverity: AuditSeverity = 'healthy'
+  const bankRecommendations: string[] = []
+  if (bankDiscrepancies.length > 0) {
+    bankSeverity = 'critical'
+    bankRecommendations.push(`يوجد فارق بين الرصيد التشغيلي ورصيد الأستاذ في ${bankDiscrepancies.length} حساب بنكي.`)
+    bankRecommendations.push('يرجى التحقق من قيود التحصيل والإيداع البنكية ومزامنة الأرصدة.')
+  }
+
+  const checkBanks: AuditCheckResult = {
+    id: 'check_banks_reconciliation',
+    title: 'مطابقة أرصدة الحسابات البنكية التشغيلية مع الأستاذ العام',
+    category: 'cash',
+    severity: bankSeverity,
+    summary:
+      bankDiscrepancies.length === 0
+        ? 'جميع أرصدة الحسابات البنكية مطابقة تماماً لقيود وحسابات الأستاذ العام.'
+        : `تنبيه: يوجد فارق في مطابقة ${bankDiscrepancies.length} حساب بنكي مع الأستاذ العام.`,
+    discrepancy: bankDiscrepancies.length,
+    items: bankDiscrepancies,
+    details: {
+      totalBanks: rawBanks.length,
+      discrepancyCount: bankDiscrepancies.length,
+    },
+    recommendations: bankRecommendations,
+  }
+
+  const allChecks = [checkCustomers, checkSuppliers, checkJournal, checkPortfolio, checkInventory, checkBanks]
 
   const criticalCount = allChecks.filter(c => c.severity === 'critical').length
   const warningCount = allChecks.filter(c => c.severity === 'warning').length

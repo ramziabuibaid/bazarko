@@ -33,22 +33,42 @@ export default async function BankStatementPage({ searchParams }: { searchParams
 
   // Fetch transactions from journal lines linked to this bank account
   let lines: any[] = []
+  let priorBalance = Number(currentBank?.opening_balance || 0)
+
   if (currentBank?.account_id) {
+    // 1. Calculate running balance before `from` date if filtered
+    if (searchParams.from) {
+      const { data: priorLines } = await supabase
+        .from('journal_lines')
+        .select('debit, credit, entry:journal_entries!inner(date)')
+        .eq('account_id', currentBank.account_id)
+        .lt('entry.date', searchParams.from)
+
+      for (const pl of priorLines || []) {
+        priorBalance += Number(pl.debit || 0) - Number(pl.credit || 0)
+      }
+    }
+
+    // 2. Fetch transactions within filter range
     let query = supabase
       .from('journal_lines')
       .select('*, entry:journal_entries!inner(id, entry_number, date, description, source)')
       .eq('account_id', currentBank.account_id)
-      .order('created_at', { ascending: true })
 
     if (searchParams.from) query = query.gte('entry.date', searchParams.from)
     if (searchParams.to) query = query.lte('entry.date', searchParams.to)
 
     const { data } = await query
-    lines = data || []
+    lines = (data || []).sort((a: any, b: any) => {
+      const dateA = a.entry?.date || a.created_at || ''
+      const dateB = b.entry?.date || b.created_at || ''
+      if (dateA !== dateB) return dateA.localeCompare(dateB)
+      return (a.created_at || '').localeCompare(b.created_at || '')
+    })
   }
 
   // Calculate running balances
-  let running = Number(currentBank?.opening_balance || 0)
+  let running = priorBalance
   const statementRows = lines.map(line => {
     const debit = Number(line.debit || 0)
     const credit = Number(line.credit || 0)
@@ -183,14 +203,16 @@ export default async function BankStatementPage({ searchParams }: { searchParams
             </thead>
             <tbody className="divide-y divide-white/5 text-slate-200">
               <tr className="bg-slate-800/20 font-bold">
-                <td className="p-3 font-mono">—</td>
+                <td className="p-3 font-mono">{searchParams.from ? new Date(searchParams.from).toLocaleDateString('en-GB') : '—'}</td>
                 <td className="p-3 font-mono">OPN-000</td>
-                <td className="p-3">الرصيد الافتتاحي</td>
-                <td className="p-3 text-slate-500">افتتاحي</td>
-                <td className="p-3 font-mono">{Number(currentBank?.opening_balance || 0).toLocaleString('en-GB', { minimumFractionDigits: 2 })}</td>
-                <td className="p-3 font-mono">0.00</td>
+                <td className="p-3">
+                  {searchParams.from ? `الرصيد المنقول ما قبل ${searchParams.from}` : 'الرصيد الافتتاحي'}
+                </td>
+                <td className="p-3 text-slate-500">{searchParams.from ? 'منقول' : 'افتتاحي'}</td>
+                <td className="p-3 font-mono">{priorBalance >= 0 ? priorBalance.toLocaleString('en-GB', { minimumFractionDigits: 2 }) : '—'}</td>
+                <td className="p-3 font-mono">{priorBalance < 0 ? Math.abs(priorBalance).toLocaleString('en-GB', { minimumFractionDigits: 2 }) : '—'}</td>
                 <td className="p-3 font-mono text-white">
-                  {Number(currentBank?.opening_balance || 0).toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                  {priorBalance.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
                 </td>
               </tr>
 

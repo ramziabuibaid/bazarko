@@ -24,7 +24,7 @@ export default async function PrintReceiptPage({ params }: { params: { id: strin
     { data: dbChecks }
   ] = await Promise.all([
     supabase.from('stores').select('*').eq('id', storeId).single(),
-    supabase.from('vouchers').select('*, invoices(invoice_number), cash_boxes(name), bank_accounts(bank_name,account_number)').eq('id', params.id).eq('store_id', storeId).eq('type', 'receipt').single(),
+    supabase.from('vouchers').select('*, invoices(invoice_number), cash_box:cash_boxes!vouchers_cash_box_id_fkey(name), bank_accounts(bank_name,account_number)').eq('id', params.id).eq('store_id', storeId).eq('type', 'receipt').single(),
     supabase.from('checks').select('check_number, bank_name, bank_code, branch_name, branch_code, account_number, drawer_name, amount, due_date').eq('voucher_id', params.id).eq('store_id', storeId)
   ])
 
