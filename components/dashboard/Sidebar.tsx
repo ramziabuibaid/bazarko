@@ -285,8 +285,14 @@ export default function Sidebar({
 
   async function signOut() {
     const supabase = createClient()
-    await supabase.auth.signOut()
-    router.push('/login')
+    const { error } = await supabase.auth.signOut()
+
+    if (error) {
+      console.error('Sign out error:', error)
+      return
+    }
+
+    window.location.replace('/login')
   }
 
   function isActive(href: string) {

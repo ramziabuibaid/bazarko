@@ -30,7 +30,7 @@ export default async function FinanceHubPage() {
     { count: paymentsCount },
   ] = await Promise.all([
     supabase.from('stores').select('id, name, currency_code, plan').eq('id', storeId).single(),
-    supabase.from('cheques').select('id', { count: 'exact', head: true }).eq('store_id', storeId),
+    supabase.from('checks').select('id', { count: 'exact', head: true }).eq('store_id', storeId),
     supabase.from('bank_accounts').select('id', { count: 'exact', head: true }).eq('store_id', storeId),
     supabase.from('vouchers').select('id', { count: 'exact', head: true }).eq('store_id', storeId).eq('type', 'receipt'),
     supabase.from('vouchers').select('id', { count: 'exact', head: true }).eq('store_id', storeId).eq('type', 'payment'),

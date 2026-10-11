@@ -81,7 +81,8 @@ interface Props {
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; border: string }> = {
   in_portfolio: { label: '1. في الحافظة', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20' },
-  deposited: { label: '2. برسم التحصيل', color: 'text-sky-400', bg: 'bg-sky-500/10', border: 'border-sky-500/20' },
+  transferred_for_collection: { label: '1. مرحل للتحصيل', color: 'text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20' },
+  deposited: { label: '2. برسم التحصيل (في البنك)', color: 'text-sky-400', bg: 'bg-sky-500/10', border: 'border-sky-500/20' },
   collected: { label: '3. محصل ومودع', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' },
   bounced: { label: '4. شيك راجع', color: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/20' },
   returned_to_customer: { label: '5. معاد للمصدر (للزبون)', color: 'text-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/20' },
@@ -108,6 +109,10 @@ export default function ChequesClient({
   const [activeTab, setActiveTab] = useState<'received' | 'issued'>('received')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState('')
+
+  useEffect(() => {
+    setChecks(initialChecks)
+  }, [initialChecks])
 
   useEffect(() => {
     const s = searchParams?.get('search')
@@ -192,6 +197,7 @@ export default function ChequesClient({
   const stats = useMemo(() => {
     const list = checks.filter(c => c.type === activeTab)
     const inPortfolio = list.filter(c => c.status === 'in_portfolio')
+    const transferred = list.filter(c => c.status === 'transferred_for_collection')
     const deposited = list.filter(c => c.status === 'deposited')
     const collected = list.filter(c => c.status === 'collected')
     const bounced = list.filter(c => c.status === 'bounced')
@@ -201,6 +207,8 @@ export default function ChequesClient({
       totalAmount: list.reduce((sum, c) => sum + Number(c.amount_ils), 0),
       portfolioCount: inPortfolio.length,
       portfolioAmount: inPortfolio.reduce((sum, c) => sum + Number(c.amount_ils), 0),
+      transferredCount: transferred.length,
+      transferredAmount: transferred.reduce((sum, c) => sum + Number(c.amount_ils), 0),
       depositedCount: deposited.length,
       depositedAmount: deposited.reduce((sum, c) => sum + Number(c.amount_ils), 0),
       collectedCount: collected.length,
@@ -350,30 +358,34 @@ export default function ChequesClient({
     const cur = check.currency || 'ILS'
     const selectedBank = bankAccounts.find(b => b.id === opData.target_bank_account_id) || bankAccounts[0]
     const selectedBox = cashBoxes.find(cb => cb.id === opData.target_cashbox_id) || cashBoxes[0]
+    const currentBox = cashBoxes.find(cb => cb.id === check.cashbox_id)
     const selectedSupplier = suppliers.find(s => s.id === opData.target_supplier_id) || suppliers[0]
 
     if (opType === 'deposit') {
       return {
-        debit: `1320 - شيكات برسم التحصيل (${selectedBank ? selectedBank.bank_name : 'البنك'})`,
-        credit: `1110 - محفظة الشيكات الواردة (أوراق قبض)`,
+        debit: `1320 - شيكات برسم التحصيل لدى ${selectedBank ? selectedBank.bank_name : 'البنك'}`,
+        credit: currentBox ? `محفظة الشيكات (${currentBox.name})` : `1110 - محفظة الشيكات الواردة (أوراق قبض)`,
         amount: amt,
         currency: cur,
         desc: `إيداع شيك #${check.check_number} برسم التحصيل لدى ${selectedBank?.bank_name || 'البنك'}`,
       }
     }
     if (opType === 'collect') {
+      const creditLabel = check.status === 'deposited'
+        ? `1320 - شيكات برسم التحصيل`
+        : (currentBox ? `محفظة الشيكات (${currentBox.name})` : `1110 - محفظة الشيكات الواردة`)
       if (opData.collect_mode === 'cash') {
         return {
           debit: `1100 - حساب الصندوق النقدي (${selectedBox ? selectedBox.name : 'الصندوق'})`,
-          credit: check.status === 'deposited' ? `1320 - شيكات برسم التحصيل` : `1110 - محفظة الشيكات الواردة`,
+          credit: creditLabel,
           amount: amt,
           currency: cur,
           desc: `تحصيل نقدي بالخزينة لشيك #${check.check_number} في ${selectedBox?.name || 'الصندوق'}`,
         }
       }
       return {
-        debit: `1200 - حساب البنك الجاري (${selectedBank ? `${selectedBank.bank_name} (${selectedBank.account_number})` : 'البنك'})`,
-        credit: check.status === 'deposited' ? `1320 - شيكات برسم التحصيل` : `1110 - محفظة الشيكات الواردة`,
+        debit: `حساب البنك الجاري (${selectedBank ? `${selectedBank.bank_name} (${selectedBank.account_number})` : 'البنك'})`,
+        credit: creditLabel,
         amount: amt,
         currency: cur,
         desc: `تحصيل وإيداع شيك #${check.check_number} في حساب ${selectedBank?.bank_name || 'البنك'}`,
@@ -382,7 +394,9 @@ export default function ChequesClient({
     if (opType === 'bounce') {
       return {
         debit: `1330 - محفظة الشيكات المرتجعة (شيكات راجعة ومرفوضة)`,
-        credit: check.status === 'deposited' ? `1320 - شيكات برسم التحصيل` : `1110 - محفظة الشيكات الواردة`,
+        credit: check.status === 'deposited'
+          ? `1320 - شيكات برسم التحصيل`
+          : (currentBox ? `محفظة الشيكات (${currentBox.name})` : `1110 - محفظة الشيكات الواردة`),
         amount: amt,
         currency: cur,
         desc: `إثبات ارتداد ونقل شيك راجع #${check.check_number} إلى محفظة الشيكات المرتجعة`,
@@ -409,7 +423,7 @@ export default function ChequesClient({
     if (opType === 'endorse') {
       return {
         debit: `2100 - ذمم الموردين (تخفيض حساب ${selectedSupplier?.name || 'المورد'})`,
-        credit: `1110 - محفظة الشيكات الواردة (أوراق قبض)`,
+        credit: currentBox ? `محفظة الشيكات (${currentBox.name})` : `1110 - محفظة الشيكات الواردة (أوراق قبض)`,
         amount: amt,
         currency: cur,
         desc: `تجيير شيك #${check.check_number} لصالح المورد ${selectedSupplier?.name || ''}`,
@@ -426,11 +440,11 @@ export default function ChequesClient({
     }
     if (opType === 'transfer_cashbox') {
       return {
-        debit: `1110 - محفظة الشيكات (${selectedBox?.name || 'الصندوق المستلم'})`,
-        credit: `1110 - محفظة الشيكات (الصندوق الحالي)`,
+        debit: `محفظة الشيكات المستلمة (${selectedBox?.name || 'الصندوق المستلم'})`,
+        credit: `محفظة الشيكات الحالية (${currentBox?.name || 'الصندوق الحالي'})`,
         amount: amt,
         currency: cur,
-        desc: `نقل الشيك #${check.check_number} إلى ${selectedBox?.name || 'الصندوق المستلم'}`,
+        desc: `ترحيل الشيك #${check.check_number} إلى ${selectedBox?.name || 'الصندوق المستلم'}`,
       }
     }
     return null
@@ -548,13 +562,21 @@ export default function ChequesClient({
       </div>
 
       {/* ── Stats Summary Cards ── */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 text-right">
           <p className="text-xs font-semibold text-amber-400">في الحافظة (جاهزة)</p>
           <p className="mt-2 text-2xl font-black text-white">
             {stats.portfolioAmount.toLocaleString('en-GB', { minimumFractionDigits: 2 })} <span className="text-xs text-slate-400">₪</span>
           </p>
           <p className="mt-1 text-xs text-slate-400">{stats.portfolioCount} شيك</p>
+        </div>
+
+        <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-4 text-right">
+          <p className="text-xs font-semibold text-indigo-400">مرحل للتحصيل</p>
+          <p className="mt-2 text-2xl font-black text-white">
+            {stats.transferredAmount.toLocaleString('en-GB', { minimumFractionDigits: 2 })} <span className="text-xs text-slate-400">₪</span>
+          </p>
+          <p className="mt-1 text-xs text-slate-400">{stats.transferredCount} شيك</p>
         </div>
 
         <div className="rounded-2xl border border-sky-500/20 bg-sky-500/5 p-4 text-right">
@@ -588,7 +610,8 @@ export default function ChequesClient({
           {[
             { id: 'all', label: 'الكل' },
             { id: 'in_portfolio', label: '1. في الحافظة' },
-            { id: 'deposited', label: '2. برسم التحصيل' },
+            { id: 'transferred_for_collection', label: '1. مرحل للتحصيل' },
+            { id: 'deposited', label: '2. برسم التحصيل (بنك)' },
             { id: 'collected', label: '3. محصل ومودع' },
             { id: 'bounced', label: '4. شيك راجع' },
             { id: 'returned_to_customer', label: '5. معاد للمصدر' },
@@ -654,7 +677,7 @@ export default function ChequesClient({
 
                   const isOverdue =
                     new Date(check.due_date) < new Date() &&
-                    ['in_portfolio', 'deposited'].includes(check.status)
+                    ['in_portfolio', 'transferred_for_collection', 'deposited'].includes(check.status)
 
                   return (
                     <tr key={check.id} className="hover:bg-slate-800/40 transition">
@@ -762,19 +785,19 @@ export default function ChequesClient({
 
                       <td className="p-3.5 text-center">
                         <div className="flex items-center justify-center flex-wrap gap-1">
-                          {/* المرحلة 1: في الحافظة */}
+                          {/* المرحلة 1: في الحافظة أو مرحل للتحصيل */}
                           {check.payment_voucher_id&&<Link href={`/dashboard/accounting/payments/print/${check.payment_voucher_id}`} className="rounded-lg bg-purple-500/15 px-2 py-1 text-xs text-purple-300">{check.type==='received'?'سند تظهير مرتبط':'سند إصدار مرتبط · التسديد غير متاح بعد'}</Link>}
-                          {!check.payment_voucher_id && check.status === 'in_portfolio' && (
+                          {!check.payment_voucher_id && ['in_portfolio', 'transferred_for_collection'].includes(check.status) && (
                             <>
-                              {/* 1. ترحيل (صناديق الترحيل فقط) */}
+                              {/* 1. ترحيل (صناديق ومحافظ الشيكات فقط) */}
                               <button
                                 onClick={() => {
-                                  const transferBoxes = cashBoxes.filter(b => b.type !== 'checks_returned' && b.id !== check.cashbox_id)
+                                  const transferBoxes = cashBoxes.filter(b => (b.type === 'checks_received' || b.type === 'checks_collection') && b.id !== check.cashbox_id)
                                   setOpData(d => ({ ...d, target_cashbox_id: transferBoxes[0]?.id || '' }))
                                   setShowOpModal({ check, opType: 'transfer_cashbox' })
                                 }}
                                 className="rounded-lg bg-slate-700/80 px-2 py-1 text-[11px] font-bold text-slate-200 hover:bg-slate-700 hover:text-white transition"
-                                title="ترحيل الشيك إلى صندوق أو خزينة أخرى (صناديق الترحيل فقط)"
+                                title="ترحيل الشيك بين محافظ وصناديق الشيكات (يُمنع الصندوق النقدي)"
                               >
                                 ترحيل
                               </button>
@@ -1300,25 +1323,25 @@ export default function ChequesClient({
 
               {showOpModal.opType === 'transfer_cashbox' && (
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-300">صندوق الترحيل المستلم (صناديق الترحيل فقط) *</label>
+                  <label className="mb-1 block text-xs font-semibold text-slate-300">صندوق الترحيل المستلم (محافظ وصناديق الشيكات فقط) *</label>
                   <select
                     required
                     value={opData.target_cashbox_id}
                     onChange={e => setOpData({ ...opData, target_cashbox_id: e.target.value })}
                     className="w-full rounded-xl border border-white/10 bg-slate-800 p-2.5 text-xs text-white outline-none focus:border-sky-500"
                   >
-                    {cashBoxes.filter(cb => cb.type !== 'checks_returned' && cb.id !== showOpModal.check.cashbox_id).length === 0 ? (
-                      <option value="">لا توجد صناديق ترحيل أخرى متاحة</option>
+                    {cashBoxes.filter(cb => (cb.type === 'checks_received' || cb.type === 'checks_collection') && cb.id !== showOpModal.check.cashbox_id).length === 0 ? (
+                      <option value="">لا توجد محافظ أو صناديق شيكات ترحيل أخرى متاحة</option>
                     ) : (
-                      cashBoxes.filter(cb => cb.type !== 'checks_returned' && cb.id !== showOpModal.check.cashbox_id).map(cb => (
+                      cashBoxes.filter(cb => (cb.type === 'checks_received' || cb.type === 'checks_collection') && cb.id !== showOpModal.check.cashbox_id).map(cb => (
                         <option key={cb.id} value={cb.id}>
-                          {cb.name} ({cb.type === 'checks_received' ? 'محفظة شيكات' : 'خزينة نقدية'}) {cb.is_default ? '— الافتراضي' : ''}
+                          {cb.name} ({cb.type === 'checks_received' ? 'محفظة شيكات واردة' : 'صندوق شيكات برسم التحصيل'}) {cb.is_default ? '— الافتراضي' : ''}
                         </option>
                       ))
                     )}
                   </select>
                   <p className="mt-1 text-[11px] text-slate-400">
-                    تظهر صناديق الترحيل فقط لنقل الشيك واستبعاده من صناديق الشيكات الراجعة.
+                    تظهر محافظ وصناديق الشيكات فقط؛ يُمنع الترحيل إلى الصناديق النقدية حفاظاً على استقلالية النقدية والسيولة (معيار IAS 7).
                   </p>
                 </div>
               )}
@@ -1605,6 +1628,7 @@ export default function ChequesClient({
                           {op.operation_type === 'recollect' && 'إعادة قبض بالمحفظة'}
                           {op.operation_type === 'endorse' && 'تجيير لمورد'}
                           {op.operation_type === 'supplier_return' && 'معاد من مورد'}
+                          {op.operation_type === 'transfer_cashbox' && 'ترحيل بين محافظ الشيكات'}
                           {op.operation_type === 'status_change' && 'تسجيل الشيك'}
                         </span>
                         <span className="text-slate-400 font-mono">{op.operation_date}</span>

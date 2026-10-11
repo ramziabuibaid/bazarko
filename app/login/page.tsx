@@ -61,7 +61,7 @@ export default function LoginPage() {
         .eq('owner_id', user.id)
         .single()
 
-      router.push(store ? '/dashboard' : '/onboarding')
+      window.location.replace(store ? '/dashboard' : '/onboarding')
     }
   }
 

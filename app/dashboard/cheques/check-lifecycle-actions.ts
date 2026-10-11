@@ -170,17 +170,21 @@ export async function previewCheckAccounting(
       desc = `استلام شيك مجير راجع رقم ${check.check_number} من المورد ${suppName}`
 
     } else if (input.operationType === 'transfer_cashbox') {
-      toStatus = check.status
       let boxTitle = 'الصندوق المستلم'
+      let targetBoxType = ''
       if (input.targetCashBoxId) {
-        const { data: box } = await supabase.from('cash_boxes').select('name').eq('id', input.targetCashBoxId).single()
-        if (box) boxTitle = box.name
+        const { data: box } = await supabase.from('cash_boxes').select('name, type').eq('id', input.targetCashBoxId).single()
+        if (box) {
+          boxTitle = box.name
+          targetBoxType = box.type
+        }
       }
+      toStatus = targetBoxType === 'checks_collection' ? 'transferred_for_collection' : 'in_portfolio'
       debitName = `محفظة الشيكات — ${boxTitle}`
-      debitCode = '1110'
+      debitCode = targetBoxType === 'checks_collection' ? '1321' : '1110'
       creditName = 'محفظة الشيكات — الصندوق الحالي'
       creditCode = '1110'
-      desc = `نقل الشيك رقم ${check.check_number} إلى ${boxTitle}`
+      desc = `ترحيل الشيك رقم ${check.check_number} إلى ${boxTitle}`
     }
 
     return {
