@@ -575,8 +575,14 @@ export function parseEntries(
     let exchange_rate = 1.0
     if (cur !== 'ILS') {
       const hRate = header?.rate
-      if (hRate && hRate >= 0.0001 && hRate <= 1000) {
+      if (hRate && hRate > 1.0 && hRate <= 1000) {
         exchange_rate = hRate
+      } else if (cur === 'JOD') {
+        exchange_rate = 4.78
+      } else if (cur === 'USD') {
+        exchange_rate = 3.65
+      } else if (cur === 'EUR') {
+        exchange_rate = 4.0
       }
     }
     const nis_amount = Math.round(Math.abs(amount) * exchange_rate * 100) / 100
