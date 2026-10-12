@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
+import { checkStorePermission } from '@/lib/supabase/permissions'
 import { runFinancialAudit, type AuditSeverity } from '@/lib/accounting/financial-audit-engine'
 
 interface SearchParams {
@@ -9,6 +10,7 @@ interface SearchParams {
   entity?: string
   action?: string
 }
+
 
 const ENTITY_LABELS: Record<string, string> = {
   invoice: 'فاتورة',
@@ -92,8 +94,32 @@ export default async function AuditPage({ searchParams }: { searchParams: Search
   const cur = store?.currency_code || 'ILS'
   const fmt = (n: number) => n.toLocaleString('ar-u-nu-latn', { maximumFractionDigits: 2 })
 
+  const canReadJournal = await checkStorePermission(storeId, 'journal.read')
+  if (!canReadJournal) {
+    return (
+      <div className="p-6">
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-8 text-center space-y-4 max-w-xl mx-auto">
+          <div className="text-4xl">🔒</div>
+          <h2 className="text-lg font-bold text-amber-200">البيانات المالية محجوبة لعدم توفر الصلاحية</h2>
+          <p className="text-xs leading-relaxed text-slate-300">
+            الاطلاع على تقارير الرقابة والتدقيق الداخلي ومطابقة دفاتر الأستاذ العام وفحص اتزان القيود اليومية مقتصر على المالك والمحاسب المعتمد. لا يتم احتساب البيانات المحجوبة كأصفار حرصاً على الدقة والنزاهة المحاسبية.
+          </p>
+          <div className="pt-2">
+            <Link
+              href="/dashboard/accounting"
+              className="inline-block rounded-xl bg-slate-800 border border-white/10 px-4 py-2 text-xs font-bold text-slate-200 hover:bg-slate-700 transition"
+            >
+              ← العودة إلى لوحة المحاسبة
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // تقرير الرقابة المالية الآلي
   const auditReport = await runFinancialAudit(storeId)
+
 
   // سجل العمليات التاريخي
   let logQuery = supabase

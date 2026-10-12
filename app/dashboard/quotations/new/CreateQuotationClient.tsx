@@ -579,7 +579,7 @@ export default function CreateQuotationClient({ store, customers, products, prev
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (submitting.current || savedId) return
-    const validation = validQuote(items, issueDate, validUntil)
+    const validation = validQuote(items, issueDate, validUntil, specialDiscountType, specialDiscountValue)
     if (validation) {
       setError(validation)
       return

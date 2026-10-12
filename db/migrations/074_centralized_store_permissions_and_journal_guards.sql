@@ -262,30 +262,43 @@ BEGIN
       UPDATE public.cash_movements
       SET
         amount = v_total_debit,
-        movement_date = p_date,
+        date = p_date,
         description = p_description
       WHERE ref_id = v_voucher.id;
 
       IF v_voucher.customer_id IS NOT NULL THEN
-        UPDATE public.customer_ledger
-        SET
-          amount = v_total_debit,
-          date = p_date,
-          description = p_description
-        WHERE ref_id = v_voucher.id;
+        IF v_voucher.type = 'receipt' THEN
+          UPDATE public.customer_ledger
+          SET
+            credit = v_total_debit,
+            date = p_date,
+            description = 'سند قبض ' || COALESCE(v_voucher.voucher_number, '') || ' — ' || p_description
+          WHERE reference_id = v_voucher.id;
+        ELSE
+          UPDATE public.customer_ledger
+          SET
+            debit = v_total_debit,
+            date = p_date,
+            description = 'سند صرف ' || COALESCE(v_voucher.voucher_number, '') || ' — ' || p_description
+          WHERE reference_id = v_voucher.id;
+        END IF;
 
-        UPDATE public.customers
-        SET balance = (
-          SELECT COALESCE(SUM(
-            CASE WHEN type = 'debit' THEN amount
-                 WHEN type = 'credit' THEN -amount
-                 ELSE 0 END
-          ), 0)
-          FROM public.customer_ledger
-          WHERE customer_id = v_voucher.customer_id
-        )
-        WHERE id = v_voucher.customer_id;
+        UPDATE public.customers c
+        SET
+          balance = (
+            SELECT COALESCE(SUM(debit - credit), 0)
+            FROM public.customer_ledger cl
+            WHERE cl.customer_id = v_voucher.customer_id
+          ),
+          total_paid = (
+            SELECT COALESCE(SUM(credit), 0)
+            FROM public.customer_ledger cl
+            WHERE cl.customer_id = v_voucher.customer_id AND cl.type = 'payment'
+          ),
+          updated_at = NOW()
+        WHERE c.id = v_voucher.customer_id;
       END IF;
+
     END IF;
   END IF;
 

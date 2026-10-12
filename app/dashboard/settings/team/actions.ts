@@ -96,29 +96,9 @@ export async function createStoreUser(input: CreateStoreUserInput) {
     if (createAuthError) {
       const errMsg = createAuthError.message.toLowerCase()
       if (errMsg.includes('already registered') || errMsg.includes('already exists') || createAuthError.status === 422) {
-        // User exists in auth. Check whether they are already in this store
-        const { data: existingProfiles } = await admin
-          .from('profiles')
-          .select('id')
-          .eq('email', email)
-          .maybeSingle()
-
-        if (existingProfiles) {
-          const { data: existingMember } = await admin
-            .from('store_members')
-            .select('id')
-            .eq('store_id', input.storeId)
-            .eq('profile_id', existingProfiles.id)
-            .maybeSingle()
-
-          if (existingMember) {
-            return { success: false, error: 'هذا المستخدم مضاف بالفعل إلى هذا المتجر' }
-          }
-        }
-
         return {
           success: false,
-          error: 'البريد الإلكتروني مرتبط بحساب مسجل مسبقاً في النظام. تتطلب إضافة مستخدم موجود إرسال دعوة وقبولها حفاظاً على أمان حسابه الشخصي.',
+          error: 'البريد الإلكتروني مرتبط بحساب مسجل مسبقاً في النظام. تتطلب إضافة مستخدم مسجل مسبقاً إرسال دعوة وقبولها حفاظاً على أمان حسابه الشخصي.',
         }
       }
 
@@ -131,14 +111,13 @@ export async function createStoreUser(input: CreateStoreUserInput) {
 
     const userId = newUser.user.id
 
-    // 2. Ensure profile exists for the newly created user only
+    // 2. مطابقة مخطط profiles المعتمد (لا يحتوي على عمود email، بل في auth.users)
     const { error: profileError } = await admin
       .from('profiles')
       .upsert({
         id: userId,
         full_name: fullName,
         phone: phone,
-        email: email,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'id' })
 
@@ -147,6 +126,7 @@ export async function createStoreUser(input: CreateStoreUserInput) {
       await admin.auth.admin.deleteUser(userId)
       return { success: false, error: 'تعذر إنشاء ملف المستخدم: ' + profileError.message }
     }
+
 
     // 3. Insert into store_members
     const { error: memberError } = await admin
@@ -207,9 +187,23 @@ export async function updateStoreUserPassword(storeId: string, profileId: string
       return { success: false, error: 'إعادة ضبط هذا الحساب تتطلب المالك' }
     }
 
+    // التحقق من تعدد المتاجر: منع إعادة ضبط كلمة المرور إدارياً إذا كان الحساب مشتركاً في متاجر أخرى
+    const { count: storeCount } = await admin
+      .from('store_members')
+      .select('id', { count: 'exact', head: true })
+      .eq('profile_id', profileId)
+
+    if (storeCount && storeCount > 1) {
+      return {
+        success: false,
+        error: 'هذا الحساب عضو في أكثر من متجر. لا يمكن إعادة ضبط كلمة مروره إدارياً من هذا المتجر حفاظاً على خصوصية المتاجر الأخرى. يجب على صاحب الحساب استخدام ميزة استعادة كلمة المرور الشخصية.',
+      }
+    }
+
     const { error } = await admin.auth.admin.updateUserById(profileId, {
       password: newPassword,
     })
+
 
     if (error) {
       return { success: false, error: 'تعذر تحديث كلمة المرور: ' + error.message }

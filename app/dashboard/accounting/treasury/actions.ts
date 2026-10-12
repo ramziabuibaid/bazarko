@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
 import { getDefaultCashBox, getCashBalance } from '@/lib/accounting/treasury'
 import { logFinancialEvent } from '@/lib/accounting/audit'
+import { requireStorePermission } from '@/lib/supabase/permissions'
 import { revalidatePath } from 'next/cache'
 
 type Result = { ok: boolean; error?: string }
@@ -15,6 +16,12 @@ async function resolve(cashBoxId?: string) {
 
   const storeId = await getStoreForUser(supabase, user.id)
   if (!storeId) return { error: 'المتجر غير موجود' as const }
+
+  try {
+    await requireStorePermission(storeId, 'finance.write')
+  } catch {
+    return { error: 'لا تملك صلاحية العمليات المالية والخزينة' as const }
+  }
 
   let box = null
   if (cashBoxId) {
@@ -35,6 +42,7 @@ async function resolve(cashBoxId?: string) {
 
   return { supabase, user, storeId, box }
 }
+
 
 // ── إيداع/سحب يدوي ──────────────────────────────────────────────
 export async function recordManualMovement(

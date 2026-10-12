@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
+import { checkStorePermission } from '@/lib/supabase/permissions'
 import BanksClient from './BanksClient'
 import FeatureGate from '@/components/dashboard/FeatureGate'
 
@@ -19,7 +20,8 @@ export default async function BanksPage() {
   const [
     { data: store },
     { data: bankAccounts },
-    { data: parentAccounts }
+    { data: parentAccounts },
+    canWriteFinance
   ] = await Promise.all([
     supabase.from('stores').select('id, name, currency_code, plan').eq('id', storeId).single(),
     supabase
@@ -33,7 +35,8 @@ export default async function BanksPage() {
       .eq('store_id', storeId)
       .eq('type', 'asset')
       .eq('is_active', true)
-      .order('code', { ascending: true })
+      .order('code', { ascending: true }),
+    checkStorePermission(storeId, 'finance.write')
   ])
 
   return (
@@ -47,6 +50,7 @@ export default async function BanksPage() {
         store={store!}
         initialBankAccounts={bankAccounts || []}
         parentAccounts={parentAccounts || []}
+        canWriteFinance={canWriteFinance}
       />
     </FeatureGate>
   )

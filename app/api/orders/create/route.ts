@@ -202,15 +202,15 @@ export async function POST(req: NextRequest) {
   }
 
   // ── إنشاء فاتورة مبيعات مطابقة في جدول invoices ───────────────
-  const { count: invCount } = await supabase
-    .from('invoices')
-    .select('id', { count: 'exact', head: true })
-    .eq('store_id', store.id)
+  const { data: generatedInvNum } = await supabase.rpc('generate_sequence_number', {
+    p_store_id: store.id,
+    p_prefix: `INV-${new Date().getFullYear()}-`,
+  })
 
-  const invoiceNumber = `INV-${String((invCount ?? 0) + 1).padStart(4, '0')}`
+  const invoiceNumber = generatedInvNum || `INV-${Date.now().toString().slice(-6)}`
   const invoiceStatus = paymentStatus === 'paid' ? 'paid' : paymentStatus === 'partial' ? 'partial' : 'draft'
 
-  const { data: inv } = await supabase
+  const { data: inv, error: invErr } = await supabase
     .from('invoices')
     .insert({
       store_id: store.id,
@@ -233,42 +233,52 @@ export async function POST(req: NextRequest) {
     .select('id, invoice_number')
     .single()
 
-  if (inv) {
-    await supabase.from('invoice_items').insert(
-      items.map(item => {
-        const p = productMap.get(item.productId)
-        return {
-          invoice_id: inv.id,
-          product_id: item.productId,
-          name: item.name,
-          sku: p?.sku || null,
-          quantity: item.quantity,
-          unit_price: item.unitPrice,
-          total: item.unitPrice * item.quantity,
-        }
-      })
-    )
+  if (invErr || !inv) {
+    console.error('Invoice creation failed for order:', invErr)
+    await supabase.from('orders').update({ status: 'cancelled' }).eq('id', order.id)
+    return NextResponse.json({ error: 'فشل حفظ فاتورة المبيعات للطلبية' }, { status: 500 })
   }
 
-  // ── تحديث الصندوق وسند القبض (نقد مقبوض في البيع النقدي أو الدفعة الفورية) ──
+  const { error: invItemsErr } = await supabase.from('invoice_items').insert(
+    items.map(item => {
+      const p = productMap.get(item.productId)
+      return {
+        invoice_id: inv.id,
+        product_id: item.productId,
+        name: item.name,
+        sku: p?.sku || null,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        total: item.unitPrice * item.quantity,
+      }
+    })
+  )
+
+  if (invItemsErr) {
+    console.error('Invoice items creation failed for order:', invItemsErr)
+    await supabase.from('invoices').delete().eq('id', inv.id)
+    await supabase.from('orders').update({ status: 'cancelled' }).eq('id', order.id)
+    return NextResponse.json({ error: 'فشل حفظ بنود فاتورة المبيعات' }, { status: 500 })
+  }
+
+  // ── تحديث الصندوق وسند القبض (نقد مقبوض في البيع النقدي أو الدفعة الفورية للآجل) ──
   let receiptVoucherId: string | null = null
 
-  if (effectiveAmountPaid > 0 && paymentMethod !== 'credit') {
+  if (effectiveAmountPaid > 0) {
     const methodMap: Record<string, 'cash' | 'bank' | 'card' | 'transfer'> = {
-      cash: 'cash', bank_transfer: 'bank', check: 'bank', online: 'card',
+      cash: 'cash', bank_transfer: 'bank', check: 'bank', online: 'card', credit: 'cash',
     }
     const { data: boxId } = await supabase.rpc('ensure_cash_box', { p_store_id: store.id })
 
-    // إنشاء سند قبض (Receipt Voucher) لمبيعات الـ POS النقدية
+    // إنشاء سند قبض (Receipt Voucher) لمبيعات الـ POS وأي دفعة فورية
     if (mode === 'pos') {
       try {
-        const { count: vCount } = await supabase
-          .from('vouchers')
-          .select('id', { count: 'exact', head: true })
-          .eq('store_id', store.id)
-          .eq('type', 'receipt')
+        const { data: generatedVNum } = await supabase.rpc('generate_sequence_number', {
+          p_store_id: store.id,
+          p_prefix: `RCP-${new Date().getFullYear()}-`,
+        })
 
-        const voucherNumber = `RCP-${String((vCount ?? 0) + 1).padStart(4, '0')}`
+        const voucherNumber = generatedVNum || `RCP-${Date.now().toString().slice(-6)}`
 
         const { data: voucher } = await supabase
           .from('vouchers')
@@ -284,10 +294,12 @@ export async function POST(req: NextRequest) {
             customer_id: resolvedCustomerId,
             party_name: resolvedName || 'زبون نقدي',
             payment_method: 'cash',
-            category: 'مبيعات نقدية POS',
-            description: `قبض مبيعات نقدية POS #${order.order_number}`,
+            category: paymentMethod === 'credit' ? 'دفعة مقدمة بيع آجل POS' : 'مبيعات نقدية POS',
+            description: paymentMethod === 'credit'
+              ? `دفعة مقدمة لبيع آجل POS #${order.order_number}`
+              : `قبض مبيعات نقدية POS #${order.order_number}`,
             reference: order.order_number,
-            invoice_id: inv?.id || null,
+            invoice_id: inv.id,
             created_by: user.id,
           })
           .select('id')
@@ -301,14 +313,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (boxId) {
+    // إدراج حركة الصندوق فقط إذا لم يُنشأ سند قبض، لأن سند القبض يملك trigger ينشئ الحركة تلقائياً
+    if (boxId && !receiptVoucherId) {
       await supabase.from('cash_movements').insert({
         store_id:       store.id,
         cash_box_id:    boxId,
         direction:      'in',
         amount:         effectiveAmountPaid,
-        source:         receiptVoucherId ? 'voucher' : 'order',
-        ref_id:         receiptVoucherId || order.id,
+        source:         'order',
+        ref_id:         order.id,
         party_name:     resolvedName || null,
         payment_method: methodMap[paymentMethod] ?? 'cash',
         description:    mode === 'pos' ? `مبيعات نقدية POS #${order.order_number}` : `دفعة نقدية طلبية #${order.order_number}`,
@@ -317,6 +330,7 @@ export async function POST(req: NextRequest) {
       })
     }
   }
+
 
   // ── ترحيل القيود اليومية المحاسبية المزدوجة ──────────────────────
   try {

@@ -60,8 +60,10 @@ export default async function PublicQuotationPage({ params }: Props) {
   } catch {}
 
   const initialGifts: Record<string, boolean> = meta.gifts || {}
-  const initialSpecialDiscount: number = Number(meta.specialDiscount || 0)
   const initialSpecialDiscountType: 'amount' | 'percent' = meta.specialDiscountType === 'percent' ? 'percent' : 'amount'
+  const initialSpecialDiscount: number = initialSpecialDiscountType === 'percent'
+    ? Number(meta.specialDiscountValue ?? (meta.specialDiscount && quote.subtotal ? (Number(meta.specialDiscount) / Number(quote.subtotal)) * 100 : 0))
+    : Number(meta.specialDiscount ?? meta.specialDiscountValue ?? 0)
 
   // Items formatting and sorting by saved order
   const items = (((quote.items as any[]) || []).slice())

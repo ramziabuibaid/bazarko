@@ -340,13 +340,13 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
         }
       }
 
-      // 3. إدارة كشف حساب العميل والذمم: عكس الأثر المالي السابق وتطبيق الجديد
+      // 3. إدارة كشف حساب العميل والذمم: عكس الأثر المالي السابق وتطبيق الجديد مع الحفاظ على الرصيد الدائن
       if (invoice.customer_id) {
         const { data: prevCust } = await supabase.from('customers').select('balance, total_invoiced, total_paid').eq('id', invoice.customer_id).single()
         if (prevCust) {
-          const prevNetDebt = Math.max(0, Number(invoice.total || 0) - Number(invoice.amount_paid || 0))
+          const prevNetDebt = Number(invoice.total || 0) - Number(invoice.amount_paid || 0)
           await supabase.from('customers').update({
-            balance: Math.max(0, Number(prevCust.balance || 0) - prevNetDebt),
+            balance: Number(prevCust.balance || 0) - prevNetDebt,
             total_invoiced: Math.max(0, Number(prevCust.total_invoiced || 0) - Number(invoice.total || 0)),
             total_paid: Math.max(0, Number(prevCust.total_paid || 0) - Number(invoice.amount_paid || 0)),
           }).eq('id', invoice.customer_id)
@@ -393,13 +393,42 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
             })
           }
 
+          // مطابقة الرصيد بدقة مع مجموع قيود كشف الحساب
+          const { data: ledgerSum } = await supabase
+            .from('customer_ledger')
+            .select('debit, credit')
+            .eq('customer_id', customerId)
+
+          const reconciledBalance = (ledgerSum || []).reduce(
+            (acc, row) => acc + (Number(row.debit || 0) - Number(row.credit || 0)),
+            0
+          )
+
           await supabase.from('customers').update({
-            balance: finalBal,
+            balance: reconciledBalance,
             total_invoiced: Number(currCust.total_invoiced || 0) + total,
             total_paid: Number(currCust.total_paid || 0) + effectivePaid,
           }).eq('id', customerId)
         }
       }
+
+      // إعادة مطابقة رصيد العميل السابق إن تغير العميل
+      if (invoice.customer_id && invoice.customer_id !== customerId) {
+        const { data: prevLedgerSum } = await supabase
+          .from('customer_ledger')
+          .select('debit, credit')
+          .eq('customer_id', invoice.customer_id)
+
+        const prevReconciledBalance = (prevLedgerSum || []).reduce(
+          (acc, row) => acc + (Number(row.debit || 0) - Number(row.credit || 0)),
+          0
+        )
+
+        await supabase.from('customers').update({
+          balance: prevReconciledBalance,
+        }).eq('id', invoice.customer_id)
+      }
+
 
       // 4. تحديث سجل الفاتورة نفسه
       const { error: updateErr } = await supabase

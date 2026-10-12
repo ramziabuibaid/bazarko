@@ -50,7 +50,14 @@ export async function middleware(request: NextRequest) {
     return response
   }
 
+  // ── استثناء مسارات الـ API صراحة من أي إعادة كتابة لنطاقات المتاجر ──
+  if (pathname.startsWith('/api/') || pathname === '/api') {
+    return response
+  }
+
   const escaped = MAIN_DOMAIN.replace('.', '\\.')
+
+
 
   // ── ps.bazarko.app → Marketplace دولة ──
   const countryMatch = hostname.match(

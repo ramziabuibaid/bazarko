@@ -6,6 +6,11 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { PALESTINIAN_BANKS, getPmaBankByCode, normalizeBankCode } from '@/lib/palestineBanks'
 import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
+import {
+  executeBankTransferAction,
+  toggleBankAccountAction,
+  saveBankAccountAction,
+} from '@/app/dashboard/banks/bank-actions'
 
 interface BankAccount {
   id: string
@@ -32,12 +37,14 @@ interface Props {
   store: { id: string; name: string; currency_code: string }
   initialBankAccounts: BankAccount[]
   parentAccounts: Array<{ id: string; code: string; name: string }>
+  canWriteFinance?: boolean
 }
 
 export default function BanksClient({
   store,
   initialBankAccounts,
   parentAccounts,
+  canWriteFinance = true,
 }: Props) {
   const router = useRouter()
   const supabase = createClient()
@@ -225,14 +232,16 @@ export default function BanksClient({
 
   // Toggle active
   const handleToggleActive = async (bank: BankAccount) => {
+    if (!canWriteFinance) {
+      setError('لا تملك صلاحية تعديل الحسابات البنكية')
+      return
+    }
     const nextActive = !bank.is_active
-    const { error: err } = await supabase
-      .from('bank_accounts')
-      .update({ is_active: nextActive })
-      .eq('id', bank.id)
-
-    if (!err) {
+    const res = await toggleBankAccountAction(bank.id, nextActive)
+    if (res.ok) {
       setBankAccounts(prev => prev.map(b => b.id === bank.id ? { ...b, is_active: nextActive } : b))
+    } else {
+      setError(res.error || 'فشل تحديث حالة الحساب')
     }
   }
 
@@ -241,46 +250,30 @@ export default function BanksClient({
     e.preventDefault()
     if (!showTransferModal || !transferAmount || Number(transferAmount) <= 0) return
 
+    if (!canWriteFinance) {
+      setError('لا تملك صلاحية تنفيذ العمليات البنكية والتحويل')
+      return
+    }
+
     setLoading(true)
     setError('')
     try {
       const amount = Number(transferAmount)
       const isDeposit = transferType === 'deposit_to_bank'
 
-      // 1. Update bank balance
-      const newBankBal = isDeposit
-        ? Number(showTransferModal.balance) + amount
-        : Number(showTransferModal.balance) - amount
+      const res = await executeBankTransferAction({
+        bankId: showTransferModal.id,
+        amount,
+        isDeposit,
+        notes: transferNotes,
+      })
 
-      await supabase
-        .from('bank_accounts')
-        .update({ balance: newBankBal, updated_at: new Date().toISOString() })
-        .eq('id', showTransferModal.id)
-
-      // 2. Fetch default cashbox
-      const { data: cashBox } = await supabase
-        .from('cash_boxes')
-        .select('id')
-        .eq('store_id', store.id)
-        .limit(1)
-        .single()
-
-      if (cashBox) {
-        // Record cash movement in treasury
-        await supabase.from('cash_movements').insert({
-          store_id: store.id,
-          cash_box_id: cashBox.id,
-          direction: isDeposit ? 'out' : 'in',
-          amount,
-          source: 'transfer',
-          party_name: `${showTransferModal.bank_name} (${showTransferModal.account_number})`,
-          payment_method: 'bank',
-          description: transferNotes || (isDeposit ? `إيداع نقدي في البنك (${showTransferModal.bank_name})` : `سحب نقدي من البنك (${showTransferModal.bank_name})`),
-          date: new Date().toISOString().slice(0, 10),
-        })
+      if (!res.ok) {
+        setError(res.error || 'فشلت عملية التحويل')
+        return
       }
 
-      setBankAccounts(prev => prev.map(b => b.id === showTransferModal.id ? { ...b, balance: newBankBal } : b))
+      setBankAccounts(prev => prev.map(b => b.id === showTransferModal.id ? { ...b, balance: res.newBalance ?? b.balance } : b))
       setShowTransferModal(null)
       setTransferAmount('')
       setTransferNotes('')
@@ -291,6 +284,7 @@ export default function BanksClient({
       setLoading(false)
     }
   }
+
 
   const filteredPmaBanks = PALESTINIAN_BANKS.filter(b =>
     b.name.includes(pmaSearch) ||
@@ -326,31 +320,38 @@ export default function BanksClient({
           >
             🏦 محفظة الشيكات
           </Link>
-          <button
-            onClick={() => {
-              setEditingBank(null)
-              setFormData({
-                bank_code: '01',
-                bank_name: 'بنك فلسطين',
-                branch_code: '450',
-                branch_name: 'فرع رام الله الرئيسي',
-                account_number: '',
-                account_name: `حساب جاري - ${store.name}`,
-                currency: 'ILS',
-                iban: '',
-                account_type: 'checking',
-                opening_balance: '0',
-                account_id: '',
-                notes: '',
-              })
-              setShowAddModal(true)
-            }}
-            className="flex items-center gap-1.5 rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-sky-400 transition shadow"
-          >
-            ➕ فتح وتعريف حساب بنكي للشركة
-          </button>
+          {canWriteFinance ? (
+            <button
+              onClick={() => {
+                setEditingBank(null)
+                setFormData({
+                  bank_code: '01',
+                  bank_name: 'بنك فلسطين',
+                  branch_code: '450',
+                  branch_name: 'فرع رام الله الرئيسي',
+                  account_number: '',
+                  account_name: `حساب جاري - ${store.name}`,
+                  currency: 'ILS',
+                  iban: '',
+                  account_type: 'checking',
+                  opening_balance: '0',
+                  account_id: '',
+                  notes: '',
+                })
+                setShowAddModal(true)
+              }}
+              className="flex items-center gap-1.5 rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-sky-400 transition shadow"
+            >
+              ➕ فتح وتعريف حساب بنكي للشركة
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5 rounded-xl bg-slate-800/80 border border-slate-700/60 px-3.5 py-1.5 text-xs font-semibold text-slate-400">
+              🔒 عرض فقط — العمليات المالية مقتصرة على الإدارة المالية
+            </div>
+          )}
         </div>
       </div>
+
 
       {/* ── Tabs Navigation ── */}
       <div className="flex border-b border-white/10 text-sm font-semibold">
@@ -505,41 +506,45 @@ export default function BanksClient({
                             >
                               📜 كشف الحساب
                             </Link>
-                            <button
-                              onClick={() => {
-                                setShowTransferModal(b)
-                                setTransferAmount('')
-                                setTransferNotes('')
-                              }}
-                              className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-xs font-bold text-emerald-400 hover:bg-emerald-500/20 transition"
-                              title="تحويل بين الصندوق والبنك"
-                            >
-                              🔄 إيداع/سحب
-                            </button>
-                            <button
-                              onClick={() => {
-                                setEditingBank(b)
-                                setFormData({
-                                  bank_code: b.bank_code,
-                                  bank_name: b.bank_name,
-                                  branch_code: b.branch_code,
-                                  branch_name: b.branch_name,
-                                  account_number: b.account_number,
-                                  account_name: b.account_name,
-                                  currency: b.currency,
-                                  iban: b.iban || '',
-                                  account_type: b.account_type,
-                                  opening_balance: String(b.opening_balance || 0),
-                                  account_id: b.account_id || '',
-                                  notes: b.notes || '',
-                                })
-                                setShowAddModal(true)
-                              }}
-                              className="rounded-lg border border-white/10 bg-slate-800 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700 transition"
-                              title="تعديل الحساب"
-                            >
-                              ✏️
-                            </button>
+                            {canWriteFinance && (
+                              <>
+                                <button
+                                  onClick={() => {
+                                    setShowTransferModal(b)
+                                    setTransferAmount('')
+                                    setTransferNotes('')
+                                  }}
+                                  className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-xs font-bold text-emerald-400 hover:bg-emerald-500/20 transition"
+                                  title="تحويل بين الصندوق والبنك"
+                                >
+                                  🔄 إيداع/سحب
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setEditingBank(b)
+                                    setFormData({
+                                      bank_code: b.bank_code,
+                                      bank_name: b.bank_name,
+                                      branch_code: b.branch_code,
+                                      branch_name: b.branch_name,
+                                      account_number: b.account_number,
+                                      account_name: b.account_name,
+                                      currency: b.currency,
+                                      iban: b.iban || '',
+                                      account_type: b.account_type,
+                                      opening_balance: String(b.opening_balance || 0),
+                                      account_id: b.account_id || '',
+                                      notes: b.notes || '',
+                                    })
+                                    setShowAddModal(true)
+                                  }}
+                                  className="rounded-lg border border-white/10 bg-slate-800 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700 transition"
+                                  title="تعديل الحساب"
+                                >
+                                  ✏️
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
