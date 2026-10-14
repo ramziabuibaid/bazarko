@@ -143,82 +143,31 @@ export default function BanksClient({
     setError('')
 
     try {
-      const openBal = Number(formData.opening_balance) || 0
+      const res = await saveBankAccountAction({
+        id: editingBank?.id,
+        bank_code: formData.bank_code,
+        bank_name: formData.bank_name,
+        branch_code: formData.branch_code,
+        branch_name: formData.branch_name,
+        account_number: formData.account_number.trim(),
+        account_name: formData.account_name.trim(),
+        currency: formData.currency,
+        iban: formData.iban.trim() || null,
+        account_type: formData.account_type,
+        account_id: formData.account_id || (editingBank ? editingBank.account_id : null),
+        opening_balance: Number(formData.opening_balance) || 0,
+        notes: formData.notes.trim() || null,
+      })
 
-      if (editingBank) {
-        // Update existing
-        const { data: updated, error: updErr } = await supabase
-          .from('bank_accounts')
-          .update({
-            bank_code: formData.bank_code,
-            bank_name: formData.bank_name,
-            branch_code: formData.branch_code,
-            branch_name: formData.branch_name,
-            account_number: formData.account_number.trim(),
-            account_name: formData.account_name.trim(),
-            currency: formData.currency,
-            iban: formData.iban.trim() || null,
-            account_type: formData.account_type,
-            account_id: formData.account_id || editingBank.account_id,
-            notes: formData.notes.trim() || null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', editingBank.id)
-          .select('*, account:accounts(id, code, name)')
-          .single()
+      if (!res.ok) {
+        throw new Error(res.error || 'فشل حفظ الحساب البنكي')
+      }
 
-        if (updErr) throw updErr
-        setBankAccounts(prev => prev.map(b => b.id === editingBank.id ? updated : b))
+      if (editingBank && res.data) {
+        setBankAccounts(prev => prev.map(b => b.id === editingBank.id ? (res.data as BankAccount) : b))
         setEditingBank(null)
-      } else {
-        // Create new
-        let coaAccountId = formData.account_id || null
-
-        // Auto-create CoA Account node under 1120 if none specified
-        if (!coaAccountId) {
-          const accountCode = `1120-${formData.bank_code}${formData.account_number.slice(-4)}`
-          const { data: coaAccount } = await supabase
-            .from('accounts')
-            .insert({
-              store_id: store.id,
-              code: accountCode,
-              name: `${formData.bank_name} - ${formData.account_number}`,
-              type: 'asset',
-              is_group: false,
-              currency: formData.currency,
-              balance: openBal,
-            })
-            .select('id, code, name')
-            .single()
-
-          if (coaAccount) coaAccountId = coaAccount.id
-        }
-
-        // Insert into bank_accounts
-        const { data: newBank, error: bankErr } = await supabase
-          .from('bank_accounts')
-          .insert({
-            store_id: store.id,
-            bank_code: formData.bank_code,
-            bank_name: formData.bank_name,
-            branch_code: formData.branch_code,
-            branch_name: formData.branch_name,
-            account_number: formData.account_number.trim(),
-            account_name: formData.account_name.trim(),
-            currency: formData.currency,
-            iban: formData.iban.trim() || null,
-            account_type: formData.account_type,
-            account_id: coaAccountId,
-            opening_balance: openBal,
-            balance: openBal,
-            is_active: true,
-            notes: formData.notes.trim() || null,
-          })
-          .select('*, account:accounts(id, code, name)')
-          .single()
-
-        if (bankErr) throw bankErr
-        setBankAccounts(prev => [...prev, newBank])
+      } else if (res.data) {
+        setBankAccounts(prev => [...prev, res.data as BankAccount])
       }
 
       setShowAddModal(false)

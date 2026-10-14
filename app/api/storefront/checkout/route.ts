@@ -22,6 +22,7 @@ interface CheckoutBody {
   selectedZoneName?: string
   selectedMethodName?: string
   shippingCost: number
+  requestId?: string
 }
 
 export async function POST(req: NextRequest) {
@@ -37,10 +38,40 @@ export async function POST(req: NextRequest) {
       selectedZoneName,
       selectedMethodName,
       shippingCost,
+      requestId,
     } = body
 
     if (!storeId || !items || !items.length) {
       return NextResponse.json({ error: 'بيانات الطلبية غير مكتملة' }, { status: 400 })
+    }
+
+    // التحقق الصارم من بيانات العميل
+    if (!form || !form.name?.trim()) {
+      return NextResponse.json({ error: 'يرجى إدخال اسم المستلم' }, { status: 400 })
+    }
+    const cleanPhone = (form.phone || '').replace(/[\s-]/g, '')
+    if (!cleanPhone || cleanPhone.length < 7) {
+      return NextResponse.json({ error: 'يرجى إدخال رقم هاتف صحيح للتواصل' }, { status: 400 })
+    }
+
+    const allowedPaymentMethods = ['cash_on_delivery', 'cash', 'card', 'bank_transfer', 'online']
+    const paymentMethod = form.payment_method || 'cash_on_delivery'
+    if (!allowedPaymentMethods.includes(paymentMethod)) {
+      return NextResponse.json({ error: 'طريقة الدفع غير صالحة' }, { status: 400 })
+    }
+
+    // فحص منع التكرار (Idempotency)
+    if (requestId) {
+      const { data: existingOrder } = await supabase
+        .from('orders')
+        .select('id')
+        .eq('store_id', storeId)
+        .eq('internal_notes', `request_id:${requestId}`)
+        .maybeSingle()
+
+      if (existingOrder) {
+        return NextResponse.json({ orderId: existingOrder.id })
+      }
     }
 
     // 1. التحقق من وجود المتجر وحالته وحد التوصيل المجاني
@@ -88,7 +119,12 @@ export async function POST(req: NextRequest) {
 
     const offerPriceMap = new Map<string, number>()
     for (const oi of (dbOfferItems ?? []) as { product_id: string; offer_price: number; max_quantity: number | null; sold_quantity: number }[]) {
-      if (oi.max_quantity != null && oi.sold_quantity >= oi.max_quantity) continue
+      const itemRequested = items.find(i => i.productId === oi.product_id)
+      const requestedQty = itemRequested ? itemRequested.quantity : 0
+      if (oi.max_quantity != null) {
+        const remainingQuota = oi.max_quantity - (oi.sold_quantity || 0)
+        if (remainingQuota < requestedQty) continue // الكمية المطلوبة تتجاوز حصة العرض المتبقية
+      }
       const existing = offerPriceMap.get(oi.product_id)
       if (existing === undefined || oi.offer_price < existing)
         offerPriceMap.set(oi.product_id, Number(oi.offer_price))
@@ -122,24 +158,28 @@ export async function POST(req: NextRequest) {
         .eq('store_id', storeId)
         .single()
 
-      if (zone && zone.is_active) {
-        verifiedZoneName = zone.name
-        calculatedShippingCost = Number(zone.cost || 0)
+      if (!zone || !zone.is_active) {
+        return NextResponse.json({ error: 'منطقة التوصيل المحددة غير صالحة أو غير مفعلة' }, { status: 400 })
+      }
 
-        if (selectedMethodId) {
-          const { data: method } = await supabase
-            .from('shipping_methods')
-            .select('id, name, cost, is_active')
-            .eq('id', selectedMethodId)
-            .eq('zone_id', selectedZoneId)
-            .eq('store_id', storeId)
-            .single()
+      verifiedZoneName = zone.name
+      calculatedShippingCost = Number(zone.cost || 0)
 
-          if (method && method.is_active) {
-            verifiedMethodName = method.name
-            calculatedShippingCost = Number(method.cost || 0)
-          }
+      if (selectedMethodId) {
+        const { data: method } = await supabase
+          .from('shipping_methods')
+          .select('id, name, cost, is_active')
+          .eq('id', selectedMethodId)
+          .eq('zone_id', selectedZoneId)
+          .eq('store_id', storeId)
+          .single()
+
+        if (!method || !method.is_active) {
+          return NextResponse.json({ error: 'طريقة الشحن المحددة غير صالحة أو غير مفعلة' }, { status: 400 })
         }
+
+        verifiedMethodName = method.name
+        calculatedShippingCost = Number(method.cost || 0)
       }
     }
 
@@ -161,7 +201,7 @@ export async function POST(req: NextRequest) {
         store_id: storeId,
         order_number: orderNum ?? `ORD-${Date.now()}`,
         status: 'pending',
-        payment_method: form.payment_method,
+        payment_method: paymentMethod,
         subtotal: calcSubtotal,
         total_amount: finalTotal,
         shipping_cost: calculatedShippingCost,
@@ -170,11 +210,12 @@ export async function POST(req: NextRequest) {
         shipping_method_id: selectedMethodId || null,
         shipping_zone_name: verifiedZoneName,
         shipping_method_name: verifiedMethodName,
-        customer_name: form.name,
-        customer_phone: form.phone,
-        shipping_address: form.address,
-        shipping_city: form.city || verifiedZoneName || null,
-        customer_notes: form.notes,
+        customer_name: form.name.trim(),
+        customer_phone: cleanPhone,
+        shipping_address: form.address?.trim() || null,
+        shipping_city: form.city?.trim() || verifiedZoneName || null,
+        customer_notes: form.notes?.trim() || null,
+        internal_notes: requestId ? `request_id:${requestId}` : null,
         source: 'store',
       })
       .select('id')
@@ -194,7 +235,12 @@ export async function POST(req: NextRequest) {
       total_price: item.finalPrice * item.quantity,
     }))
     
-    await supabase.from('order_items').insert(orderItems)
+    const { error: itemsErr } = await supabase.from('order_items').insert(orderItems)
+    if (itemsErr) {
+      console.error('Order items insertion error:', itemsErr)
+      await supabase.from('orders').delete().eq('id', order.id)
+      return NextResponse.json({ error: 'حدث خطأ أثناء حفظ أصناف الطلبية' }, { status: 500 })
+    }
 
     await Promise.all(
       pricedItems

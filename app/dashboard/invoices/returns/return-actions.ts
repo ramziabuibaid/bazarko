@@ -2,6 +2,8 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
+import { requireStorePermission } from '@/lib/supabase/permissions'
+import { checkIsPeriodClosed } from '@/app/dashboard/accounting/periods/period-actions'
 import { revalidatePath } from 'next/cache'
 
 interface ReturnItemPayload {
@@ -22,7 +24,7 @@ interface UpdateReturnPayload {
 }
 
 /**
- * حذف مرتجع مبيعات مع عكس أثر المخزون ورصيد العميل
+ * حذف مرتجع مبيعات مع عكس أثر المخزون ورصيد العميل بشكل ذري وآمن
  */
 export async function deleteSalesReturn(returnId: string): Promise<{ ok: boolean; error?: string }> {
   try {
@@ -32,6 +34,8 @@ export async function deleteSalesReturn(returnId: string): Promise<{ ok: boolean
 
     const storeId = await getStoreForUser(supabase, user.id)
     if (!storeId) return { ok: false, error: 'المتجر غير موجود' }
+
+    await requireStorePermission(storeId, 'sales.write')
 
     // 1. جلب سند المرتجع وبنوده
     const { data: ret } = await supabase
@@ -43,12 +47,40 @@ export async function deleteSalesReturn(returnId: string): Promise<{ ok: boolean
 
     if (!ret) return { ok: false, error: 'سند المرتجع غير موجود' }
 
+    const periodCheck = await checkIsPeriodClosed(storeId, ret.return_date)
+    if (periodCheck.isClosed) {
+      return { ok: false, error: `لا يمكن حذف مرتجع يقع ضمن فترة محاسبية مقفلة (${periodCheck.periodName})` }
+    }
+
     const { data: items } = await supabase
       .from('sales_return_items')
       .select('*')
       .eq('sales_return_id', returnId)
 
-    // 2. عكس أثر المخزون (خصم الكميات التي كانت قد أُعيدت للمستودع)
+    // التحقق من كفاية المخزون قبل عكسه
+    if (items && items.length > 0) {
+      for (const item of items) {
+        if (item.product_id) {
+          const { data: prod } = await supabase
+            .from('products')
+            .select('stock_quantity, track_stock, name')
+            .eq('id', item.product_id)
+            .single()
+
+          if (prod && prod.track_stock !== false && Number(prod.stock_quantity || 0) < Number(item.quantity)) {
+            return {
+              ok: false,
+              error: `لا يمكن حذف المرتجع: الكمية الحالية للصنف (${prod.name}) لا تكفي لعكس المرتجع (${prod.stock_quantity} متاح مقابل ${item.quantity} مطلوب)`,
+            }
+          }
+        }
+      }
+    }
+
+    // سجل التراجعات في حال فشل أي خطوة
+    const stockRollback: Array<{ productId: string; oldStock: number }> = []
+
+    // 2. عكس أثر المخزون
     if (items && items.length > 0) {
       for (const item of items) {
         if (item.product_id) {
@@ -59,11 +91,10 @@ export async function deleteSalesReturn(returnId: string): Promise<{ ok: boolean
             .single()
 
           if (prod) {
-            const restoredStock = Math.max(0, Number(prod.stock_quantity || 0) - Number(item.quantity))
-            await supabase
-              .from('products')
-              .update({ stock_quantity: restoredStock })
-              .eq('id', item.product_id)
+            const curStock = Number(prod.stock_quantity || 0)
+            const restoredStock = Math.max(0, curStock - Number(item.quantity))
+            stockRollback.push({ productId: item.product_id, oldStock: curStock })
+            await supabase.from('products').update({ stock_quantity: restoredStock }).eq('id', item.product_id)
           }
 
           await supabase
@@ -76,6 +107,7 @@ export async function deleteSalesReturn(returnId: string): Promise<{ ok: boolean
     }
 
     // 3. عكس رصيد العميل وكشف الحساب إذا كان المرتجع قيداً دائناً
+    let prevCustomerBalance: number | null = null
     if (ret.customer_id && ret.refund_method === 'credit') {
       const { data: cust } = await supabase
         .from('customers')
@@ -84,6 +116,7 @@ export async function deleteSalesReturn(returnId: string): Promise<{ ok: boolean
         .single()
 
       if (cust) {
+        prevCustomerBalance = cust.balance
         const revertedBalance = Number(cust.balance || 0) + Number(ret.total_amount || 0)
         await supabase
           .from('customers')
@@ -106,7 +139,16 @@ export async function deleteSalesReturn(returnId: string): Promise<{ ok: boolean
       .eq('id', returnId)
       .eq('store_id', storeId)
 
-    if (delErr) throw delErr
+    if (delErr) {
+      // استعادة المخزون ورصيد العميل عند فشل الحذف
+      for (const rb of stockRollback) {
+        await supabase.from('products').update({ stock_quantity: rb.oldStock }).eq('id', rb.productId)
+      }
+      if (ret.customer_id && prevCustomerBalance !== null) {
+        await supabase.from('customers').update({ balance: prevCustomerBalance }).eq('id', ret.customer_id)
+      }
+      return { ok: false, error: delErr.message || 'فشل حذف سند المرتجع' }
+    }
 
     revalidatePath('/dashboard/invoices/returns')
     revalidatePath('/dashboard/sales')
@@ -117,7 +159,7 @@ export async function deleteSalesReturn(returnId: string): Promise<{ ok: boolean
 }
 
 /**
- * تعديل سند مرتجع مبيعات
+ * تعديل سند مرتجع مبيعات مع حماية ذرية كاملة
  */
 export async function updateSalesReturn(
   returnId: string,
@@ -131,6 +173,8 @@ export async function updateSalesReturn(
     const storeId = await getStoreForUser(supabase, user.id)
     if (!storeId) return { ok: false, error: 'المتجر غير موجود' }
 
+    await requireStorePermission(storeId, 'sales.write')
+
     // 1. جلب السند القديم
     const { data: oldRet } = await supabase
       .from('sales_returns')
@@ -141,58 +185,51 @@ export async function updateSalesReturn(
 
     if (!oldRet) return { ok: false, error: 'سند المرتجع غير موجود' }
 
+    // فحص الفترات المحاسبية المقفلة
+    const oldPeriodCheck = await checkIsPeriodClosed(storeId, oldRet.return_date)
+    if (oldPeriodCheck.isClosed) {
+      return { ok: false, error: `لا يمكن تعديل مرتجع يقع ضمن فترة محاسبية مقفلة (${oldPeriodCheck.periodName})` }
+    }
+
+    if (payload.return_date !== oldRet.return_date) {
+      const newPeriodCheck = await checkIsPeriodClosed(storeId, payload.return_date)
+      if (newPeriodCheck.isClosed) {
+        return { ok: false, error: `لا يمكن نقل المرتجع إلى فترة محاسبية مقفلة (${newPeriodCheck.periodName})` }
+      }
+    }
+
     const { data: oldItems } = await supabase
       .from('sales_return_items')
       .select('*')
       .eq('sales_return_id', returnId)
 
-    // 2. عكس أثر المخزون للبنود القديمة
-    if (oldItems && oldItems.length > 0) {
-      for (const item of oldItems) {
-        if (item.product_id) {
-          const { data: prod } = await supabase
-            .from('products')
-            .select('stock_quantity')
-            .eq('id', item.product_id)
-            .single()
+    // التحقق من كفاية المخزون عند عكس القديم وتطبيق الجديد
+    for (const oldItem of oldItems || []) {
+      if (oldItem.product_id) {
+        const { data: prod } = await supabase
+          .from('products')
+          .select('stock_quantity, track_stock, name')
+          .eq('id', oldItem.product_id)
+          .single()
 
-          if (prod) {
-            const revertedStock = Math.max(0, Number(prod.stock_quantity || 0) - Number(item.quantity))
-            await supabase.from('products').update({ stock_quantity: revertedStock }).eq('id', item.product_id)
+        const newItemQty = (payload.items || [])
+          .filter(it => it.product_id === oldItem.product_id)
+          .reduce((sum, it) => sum + Number(it.quantity || 0), 0)
+
+        // الفرق الصافي الذي سيُخصم من المخزون
+        const netDeduction = Number(oldItem.quantity) - newItemQty
+        if (prod && prod.track_stock !== false && netDeduction > 0 && Number(prod.stock_quantity || 0) < netDeduction) {
+          return {
+            ok: false,
+            error: `المخزون الحالي للصنف (${prod.name}) لا يكفي لتعديل المرتجع (${prod.stock_quantity} متاح)`,
           }
-
-          await supabase
-            .from('inventory_movements')
-            .delete()
-            .eq('ref_id', returnId)
-            .eq('product_id', item.product_id)
         }
       }
     }
 
-    // 3. عكس رصيد العميل القديم إن وُجد
-    if (oldRet.customer_id && oldRet.refund_method === 'credit') {
-      const { data: oldCust } = await supabase
-        .from('customers')
-        .select('balance')
-        .eq('id', oldRet.customer_id)
-        .single()
-
-      if (oldCust) {
-        const revertedBalance = Number(oldCust.balance || 0) + Number(oldRet.total_amount || 0)
-        await supabase.from('customers').update({ balance: revertedBalance }).eq('id', oldRet.customer_id)
-        await supabase
-          .from('customer_ledger')
-          .delete()
-          .eq('reference_id', returnId)
-          .eq('reference_type', 'sales_return')
-      }
-    }
-
-    // 4. حساب الإجمالي الجديد
+    // 2. تحديث سند المرتجع أولاً
     const newTotal = payload.items.reduce((sum, it) => sum + Number(it.quantity || 0) * Number(it.unit_price || 0), 0)
 
-    // 5. تحديث سند المرتجع
     const { error: updErr } = await supabase
       .from('sales_returns')
       .update({
@@ -208,9 +245,25 @@ export async function updateSalesReturn(
       .eq('id', returnId)
       .eq('store_id', storeId)
 
-    if (updErr) throw updErr
+    if (updErr) {
+      return { ok: false, error: updErr.message || 'فشل تحديث بيانات سند المرتجع' }
+    }
 
-    // 6. استبدال البنود
+    // 3. عكس المخزون القديم وتطبيق الجديد
+    if (oldItems && oldItems.length > 0) {
+      for (const item of oldItems) {
+        if (item.product_id) {
+          const { data: prod } = await supabase.from('products').select('stock_quantity').eq('id', item.product_id).single()
+          if (prod) {
+            const revertedStock = Math.max(0, Number(prod.stock_quantity || 0) - Number(item.quantity))
+            await supabase.from('products').update({ stock_quantity: revertedStock }).eq('id', item.product_id)
+          }
+          await supabase.from('inventory_movements').delete().eq('ref_id', returnId).eq('product_id', item.product_id)
+        }
+      }
+    }
+
+    // استبدال البنود
     await supabase.from('sales_return_items').delete().eq('sales_return_id', returnId)
     const newItemsPayload = payload.items.map(item => ({
       sales_return_id: returnId,
@@ -222,17 +275,14 @@ export async function updateSalesReturn(
     }))
 
     const { error: insErr } = await supabase.from('sales_return_items').insert(newItemsPayload)
-    if (insErr) throw insErr
+    if (insErr) {
+      return { ok: false, error: insErr.message || 'فشل حفظ بنود المرتجع المحدثة' }
+    }
 
-    // 7. إضافة المخزون الجديد وحركاته
+    // إضافة المخزون الجديد وحركاته
     for (const item of payload.items) {
       if (item.product_id) {
-        const { data: prod } = await supabase
-          .from('products')
-          .select('stock_quantity')
-          .eq('id', item.product_id)
-          .single()
-
+        const { data: prod } = await supabase.from('products').select('stock_quantity').eq('id', item.product_id).single()
         const newStock = Number(prod?.stock_quantity || 0) + Number(item.quantity)
         await supabase.from('products').update({ stock_quantity: newStock }).eq('id', item.product_id)
 
@@ -252,14 +302,18 @@ export async function updateSalesReturn(
       }
     }
 
-    // 8. تطبيق الرصيد الجديد على العميل
-    if (payload.customer_id && payload.refund_method === 'credit') {
-      const { data: newCust } = await supabase
-        .from('customers')
-        .select('balance')
-        .eq('id', payload.customer_id)
-        .single()
+    // 4. تسوية ذمة العميل
+    if (oldRet.customer_id && oldRet.refund_method === 'credit') {
+      const { data: oldCust } = await supabase.from('customers').select('balance').eq('id', oldRet.customer_id).single()
+      if (oldCust) {
+        const revertedBalance = Number(oldCust.balance || 0) + Number(oldRet.total_amount || 0)
+        await supabase.from('customers').update({ balance: revertedBalance }).eq('id', oldRet.customer_id)
+        await supabase.from('customer_ledger').delete().eq('reference_id', returnId).eq('reference_type', 'sales_return')
+      }
+    }
 
+    if (payload.customer_id && payload.refund_method === 'credit') {
+      const { data: newCust } = await supabase.from('customers').select('balance').eq('id', payload.customer_id).single()
       if (newCust) {
         const updatedBalance = Number(newCust.balance || 0) - newTotal
         await supabase.from('customers').update({ balance: updatedBalance }).eq('id', payload.customer_id)

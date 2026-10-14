@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getStoreForUser } from '@/lib/supabase/getStore'
 import { ingestExternalImage } from '@/lib/supabase/storage-server'
 import { generateSlug } from '@/lib/utils/slug'
 
@@ -50,13 +51,7 @@ export async function POST(req: NextRequest) {
     // Check session
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
-      const { data: member } = await supabase
-        .from('store_members')
-        .select('store_id')
-        .eq('user_id', user.id)
-        .single()
-
-      if (member) storeId = member.store_id
+      storeId = await getStoreForUser(supabase, user.id)
     }
   }
 

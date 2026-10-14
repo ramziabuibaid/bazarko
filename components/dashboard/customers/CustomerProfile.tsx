@@ -97,6 +97,7 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
     social_url: customer.social_url ?? '',
   })
   const [saving, setSavingEdit] = useState(false)
+  const [editError, setEditError] = useState('')
 
   async function recordPayment(e: React.FormEvent) {
     e.preventDefault()
@@ -137,7 +138,8 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
   async function saveEdit(e: React.FormEvent) {
     e.preventDefault()
     setSavingEdit(true)
-    await createClient().from('customers').update({
+    setEditError('')
+    const { error: updErr } = await createClient().from('customers').update({
       name: editForm.name.trim(),
       phone: editForm.phone.trim() || null,
       phone_alt: editForm.phone_alt.trim() || null,
@@ -150,6 +152,13 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
       social_url: editForm.social_url.trim() || null,
       updated_at: new Date().toISOString(),
     }).eq('id', customer.id)
+
+    if (updErr) {
+      setEditError(updErr.message || 'فشل حفظ بيانات الزبون')
+      setSavingEdit(false)
+      return
+    }
+
     setSavingEdit(false)
     setEditMode(false)
     router.refresh()
@@ -562,6 +571,11 @@ export default function CustomerProfile({ customer, ledger, orders, currencyCode
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setEditMode(false)}>
           <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-6" onClick={e => e.stopPropagation()}>
             <h2 className="mb-5 text-lg font-semibold text-white">تعديل بيانات الزبون</h2>
+            {editError && (
+              <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">
+                {editError}
+              </div>
+            )}
             <form onSubmit={saveEdit} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">

@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
+import { requireStorePermission } from '@/lib/supabase/permissions'
 import { logFinancialEvent } from '@/lib/accounting/audit'
 import { revalidatePath } from 'next/cache'
 
@@ -81,6 +82,8 @@ export async function createAccountingPeriod(input: {
     const storeId = await getStoreForUser(supabase, user.id)
     if (!storeId) return { success: false, error: 'المتجر غير موجود' }
 
+    await requireStorePermission(storeId, 'finance.write')
+
     if (!input.period_name?.trim()) {
       return { success: false, error: 'يرجى إدخال اسم الفترة المحاسبية' }
     }
@@ -141,6 +144,8 @@ export async function closePeriod(periodId: string, notes?: string) {
     const storeId = await getStoreForUser(supabase, user.id)
     if (!storeId) return { success: false, error: 'المتجر غير موجود' }
 
+    await requireStorePermission(storeId, 'finance.write')
+
     const { data: period, error: findErr } = await supabase
       .from('accounting_periods')
       .select('*')
@@ -191,6 +196,8 @@ export async function reopenPeriod(periodId: string) {
 
     const storeId = await getStoreForUser(supabase, user.id)
     if (!storeId) return { success: false, error: 'المتجر غير موجود' }
+
+    await requireStorePermission(storeId, 'period.reopen')
 
     const { data: period, error: findErr } = await supabase
       .from('accounting_periods')

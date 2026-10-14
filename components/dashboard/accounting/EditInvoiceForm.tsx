@@ -268,20 +268,55 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
     setSaving(true)
 
     try {
-      // التحقق من قفل الفترة المحاسبية لتاريخ الفاتورة
-      const { data: closedPeriod } = await supabase
+      // التحقق من قفل الفترة المحاسبية لتاريخ الفاتورة الأصلي والتاريخ الجديد
+      const { data: closedPeriodOriginal } = await supabase
         .from('accounting_periods')
         .select('period_name')
         .eq('store_id', storeId)
         .eq('is_closed', true)
-        .lte('start_date', issueDate)
-        .gte('end_date', issueDate)
+        .lte('start_date', invoice.issue_date)
+        .gte('end_date', invoice.issue_date)
         .maybeSingle()
 
-      if (closedPeriod) {
+      if (closedPeriodOriginal) {
         setSaving(false)
-        setError(`لا يمكن تعديل فاتورة تقع ضمن فترة محاسبية مقفلة (${closedPeriod.period_name})`)
+        setError(`لا يمكن تعديل فاتورة تقع ضمن فترة محاسبية مقفلة (${closedPeriodOriginal.period_name})`)
         return
+      }
+
+      if (issueDate !== invoice.issue_date) {
+        const { data: closedPeriodNew } = await supabase
+          .from('accounting_periods')
+          .select('period_name')
+          .eq('store_id', storeId)
+          .eq('is_closed', true)
+          .lte('start_date', issueDate)
+          .gte('end_date', issueDate)
+          .maybeSingle()
+
+        if (closedPeriodNew) {
+          setSaving(false)
+          setError(`لا يمكن نقل الفاتورة لتاريخ يقع ضمن فترة محاسبية مقفلة (${closedPeriodNew.period_name})`)
+          return
+        }
+      }
+
+      // فحص كفاية المخزون لجميع البنود قبل التطبيق لمنع العجز المخزني
+      for (const newItem of items) {
+        if (newItem.product_id) {
+          const oldQty = invoice.items
+            .filter((it: any) => it.product_id === newItem.product_id)
+            .reduce((s: number, it: any) => s + Number(it.quantity || 0), 0)
+          const { data: prod } = await supabase.from('products').select('stock_quantity, track_stock, name').eq('id', newItem.product_id).single()
+          if (prod && prod.track_stock !== false) {
+            const availableStock = Number(prod.stock_quantity || 0) + oldQty
+            if (availableStock < Number(newItem.quantity)) {
+              setSaving(false)
+              setError(`الكمية المطلوبة من الصنف (${prod.name || newItem.name}) تتجاوز المخزون المتوفر (${availableStock})`)
+              return
+            }
+          }
+        }
       }
 
       // 1. حساب حالة السداد والمبلغ المدفوع بناءً على طريقة الدفع

@@ -196,19 +196,50 @@ export async function postJournalEntry(params: PostJournalEntryParams) {
     return { success: false, error: linesErr.message || 'فشل إدراج سطور القيد' }
   }
 
-  // 7. تحديث رصيد الحسابات
+  // 7. تحديث رصيد الحسابات (تجميع الدلتا لكل حساب لضمان عدم الكتابة فوق السطور المكررة)
+  const accountDeltas = new Map<string, number>()
   for (const line of params.lines) {
     const acc = accMap.get(line.account_id)
     if (acc) {
-      const curBal = Number(acc.balance || 0)
       const d = Number(line.debit || 0)
       const c = Number(line.credit || 0)
-      const delta = acc.normal_balance === 'credit' ? (c - d) : (d - c)
-      await supabase
-        .from('accounts')
-        .update({ balance: curBal + delta })
-        .eq('id', acc.id)
+      const lineDelta = acc.normal_balance === 'credit' ? (c - d) : (d - c)
+      const current = accountDeltas.get(line.account_id) || 0
+      accountDeltas.set(line.account_id, current + lineDelta)
     }
+  }
+
+  let balanceUpdateFailed = false
+  let balanceUpdateError = ''
+  const updatedAccountsRollback: Array<{ id: string; oldBalance: number }> = []
+
+  for (const [accId, totalDelta] of accountDeltas.entries()) {
+    const acc = accMap.get(accId)
+    if (acc) {
+      const curBal = Number(acc.balance || 0)
+      const newBal = curBal + totalDelta
+      const { error: accUpdErr } = await supabase
+        .from('accounts')
+        .update({ balance: newBal })
+        .eq('id', accId)
+
+      if (accUpdErr) {
+        console.error('Failed to update account balance:', accId, accUpdErr)
+        balanceUpdateFailed = true
+        balanceUpdateError = accUpdErr.message || 'فشل تحديث رصيد الحساب'
+        break
+      }
+      updatedAccountsRollback.push({ id: accId, oldBalance: curBal })
+    }
+  }
+
+  if (balanceUpdateFailed) {
+    for (const rb of updatedAccountsRollback) {
+      await supabase.from('accounts').update({ balance: rb.oldBalance }).eq('id', rb.id)
+    }
+    await supabase.from('journal_lines').delete().eq('journal_entry_id', entry.id)
+    await supabase.from('journal_entries').delete().eq('id', entry.id)
+    return { success: false, error: `فشل ترحيل القيد إلى الحسابات: ${balanceUpdateError}` }
   }
 
   // 8. توثيق في سجل التدقيق المالي
@@ -497,70 +528,54 @@ export async function postPosSaleJournalEntries(params: PostPosSaleJournalEntrie
 
       const cashAcc = await resolveAccount(supabase, 'CASH', { storeId, cashBoxId: effectiveCashBoxId })
       const salesLines: JournalLineInput[] = []
-      const posRule = mode === 'pos' ? 'POS_SALE_CASH_POSTED' : 'POS_SALE_CREDIT_POSTED'
+      const cashPortion = Math.max(0, Math.min(amountPaid, totalAmount))
+      const creditPortion = totalAmount - cashPortion
+      const posRule = creditPortion > 0 ? 'POS_SALE_CREDIT_POSTED' : 'POS_SALE_CASH_POSTED'
 
-      if (mode === 'pos') {
-        salesLines.push(
-          {
-            account_id: cashAcc.accountId,
-            debit: totalAmount,
-            credit: 0,
-            description: `مقبوضات مبيعات نقدية POS #${effectiveDocNumber}`,
-            account_tag_used: 'CASH',
-            source_rule: posRule,
-          },
-          {
-            account_id: salesAcc.accountId,
-            debit: 0,
-            credit: totalAmount,
-            description: `إيرادات مبيعات نقدية POS #${effectiveDocNumber}`,
-            account_tag_used: 'SALES_REVENUE',
-            source_rule: posRule,
-          }
-        )
-      } else {
-        const custAcc = await resolveAccount(supabase, 'CUSTOMER_RECEIVABLE', { storeId, customerId, customerName })
-        const cashPortion = Math.max(0, Math.min(amountPaid, totalAmount))
-        const creditPortion = totalAmount - cashPortion
-
-        if (cashPortion > 0) {
-          salesLines.push({
-            account_id: cashAcc.accountId,
-            debit: cashPortion,
-            credit: 0,
-            description: `دفعة نقدية فورية طلبية #${effectiveDocNumber}`,
-            account_tag_used: 'CASH',
-            source_rule: posRule,
-          })
-        }
-
-        if (creditPortion > 0) {
-          salesLines.push({
-            account_id: custAcc.accountId,
-            debit: creditPortion,
-            credit: 0,
-            description: `مبيعات آجلة على الحساب - ${customerName || 'عميل آجل'} #${effectiveDocNumber}`,
-            account_tag_used: 'CUSTOMER_RECEIVABLE',
-            source_rule: posRule,
-          })
-        }
-
+      if (cashPortion > 0) {
         salesLines.push({
-          account_id: salesAcc.accountId,
-          debit: 0,
-          credit: totalAmount,
-          description: `إيرادات مبيعات آجلة POS #${effectiveDocNumber} - ${customerName || 'عميل آجل'}`,
-          account_tag_used: 'SALES_REVENUE',
+          account_id: cashAcc.accountId,
+          debit: cashPortion,
+          credit: 0,
+          description: mode === 'pos'
+            ? `مقبوضات مبيعات نقدية POS #${effectiveDocNumber}`
+            : `دفعة نقدية فورية طلبية #${effectiveDocNumber}`,
+          account_tag_used: 'CASH',
           source_rule: posRule,
         })
       }
 
+      if (creditPortion > 0) {
+        const custAcc = await resolveAccount(supabase, 'CUSTOMER_RECEIVABLE', { storeId, customerId, customerName })
+        salesLines.push({
+          account_id: custAcc.accountId,
+          debit: creditPortion,
+          credit: 0,
+          description: mode === 'pos'
+            ? `مبيعات آجلة POS على الحساب - ${customerName || 'عميل نقدي'} #${effectiveDocNumber}`
+            : `مبيعات آجلة على الحساب - ${customerName || 'عميل آجل'} #${effectiveDocNumber}`,
+          account_tag_used: 'CUSTOMER_RECEIVABLE',
+          source_rule: posRule,
+        })
+      }
+
+      salesLines.push({
+        account_id: salesAcc.accountId,
+        debit: 0,
+        credit: totalAmount,
+        description: mode === 'pos'
+          ? (creditPortion > 0 ? `إيرادات مبيعات جزئية POS #${effectiveDocNumber}` : `إيرادات مبيعات نقدية POS #${effectiveDocNumber}`)
+          : `إيرادات مبيعات آجلة POS #${effectiveDocNumber} - ${customerName || 'عميل آجل'}`,
+        account_tag_used: 'SALES_REVENUE',
+        source_rule: posRule,
+      })
+
       const salesRes = await postJournalEntry({
         storeId,
         date,
-        description: mode === 'pos'
-          ? `قيد تسجيل المبيعات النقدية - نقطة البيع #${effectiveDocNumber}`
-          : `قيد تسجيل المبيعات الآجلة (${customerName || 'على الحساب'}) - نقطة البيع #${effectiveDocNumber}`,
+        description: creditPortion > 0
+          ? `قيد تسجيل مبيعات (${customerName || 'على الحساب'}) - نقطة البيع #${effectiveDocNumber}`
+          : `قيد تسجيل المبيعات النقدية - نقطة البيع #${effectiveDocNumber}`,
         source: 'invoice',
         refId: effectiveRefId,
         accountingRule: posRule,

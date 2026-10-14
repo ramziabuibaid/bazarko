@@ -21,13 +21,32 @@ export default async function AccountingHubPage() {
     { count: journalCount },
     { count: auditCount },
     { count: closedPeriodsCount },
+    { count: draftJournalsCount },
   ] = await Promise.all([
     supabase.from('stores').select('id, name, currency_code, plan').eq('id', storeId).single(),
     supabase.from('accounts').select('id', { count: 'exact', head: true }).eq('store_id', storeId),
     supabase.from('journal_entries').select('id', { count: 'exact', head: true }).eq('store_id', storeId),
     supabase.from('financial_audit_log').select('id', { count: 'exact', head: true }).eq('store_id', storeId),
     supabase.from('accounting_periods').select('id', { count: 'exact', head: true }).eq('store_id', storeId).eq('is_closed', true),
+    supabase.from('journal_entries').select('id', { count: 'exact', head: true }).eq('store_id', storeId).eq('status', 'draft'),
   ])
+
+  const hasDrafts = (draftJournalsCount || 0) > 0
+  const booksStatusText = !journalCount
+    ? 'لا توجد قيود مسجلة'
+    : hasDrafts
+    ? `${draftJournalsCount} مسودة غير مرحلة`
+    : 'متوازنة ومطابقة ✓'
+  const booksStatusClass = !journalCount
+    ? 'text-slate-400'
+    : hasDrafts
+    ? 'text-amber-400'
+    : 'text-emerald-400'
+  const booksSubtext = !journalCount
+    ? 'بانتظار تسجيل أول قيد محاسبي'
+    : hasDrafts
+    ? 'تحتاج اعتماداً وترحيلاً للأستاذ'
+    : 'قيود دفتر الأستاذ العام مرحلة'
 
   const modules = [
     {
@@ -137,8 +156,8 @@ export default async function AccountingHubPage() {
 
         <div className="rounded-2xl border border-white/10 bg-slate-900/90 p-4">
           <span className="text-xs text-slate-400 font-semibold">حالة الدفاتر المحاسبية</span>
-          <p className="mt-1 font-bold text-lg text-emerald-400">متوازنة ومطابقة ✓</p>
-          <span className="text-[11px] text-emerald-400/80">قيود دفتر الأستاذ العام</span>
+          <p className={`mt-1 font-bold text-lg ${booksStatusClass}`}>{booksStatusText}</p>
+          <span className="text-[11px] text-slate-400">{booksSubtext}</span>
         </div>
       </div>
 

@@ -25,7 +25,13 @@ export default async function PurchasesHubPage() {
   ] = await Promise.all([
     supabase.from('stores').select('id, name, currency_code, plan').eq('id', storeId).single(),
     supabase.from('purchase_invoices').select('id', { count: 'exact', head: true }).eq('store_id', storeId),
-    supabase.from('purchase_invoices').select('total_amount, paid_amount').eq('store_id', storeId).eq('payment_status', 'unpaid'),
+    supabase
+      .from('purchase_invoices')
+      .select('total_amount, paid_amount')
+      .eq('store_id', storeId)
+      .neq('status', 'draft')
+      .neq('status', 'cancelled')
+      .in('payment_status', ['unpaid', 'partial']),
     supabase.from('purchase_returns').select('id', { count: 'exact', head: true }).eq('store_id', storeId),
     supabase.from('suppliers').select('id', { count: 'exact', head: true }).eq('store_id', storeId),
     supabase.from('suppliers').select('balance').eq('store_id', storeId).gt('balance', 0),

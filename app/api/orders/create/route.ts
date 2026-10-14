@@ -144,61 +144,26 @@ export async function POST(req: NextRequest) {
   }
 
   // عناصر الطلبية مع التكلفة
-  await supabase.from('order_items').insert(
-    items.map(item => {
-      const p = productMap.get(item.productId)
-      const cost = Number(p?.cost_price || 0)
-      return {
-        order_id: order.id,
-        product_id: item.productId,
-        product_name: item.name,
-        product_sku: p?.sku || null,
-        quantity: item.quantity,
-        unit_price: item.unitPrice,
-        cost_price: cost > 0 ? cost : null,
-        total_price: item.unitPrice * item.quantity,
-      }
-    })
-  )
-
-  // ── تحديث المخزون وحركات المخزون تلقائياً ──────────────────────
-  for (const item of items) {
+  const orderItemsData = items.map(item => {
     const p = productMap.get(item.productId)
-    if (p && p.track_stock !== false) {
-      const curStock = Number(p.stock_quantity || 0)
-      const newStock = Math.max(0, curStock - Number(item.quantity))
-
-      await supabase.from('products').update({ stock_quantity: newStock }).eq('id', p.id)
-
-      await supabase.from('inventory_movements').insert({
-        store_id: store.id,
-        product_id: p.id,
-        movement_type: 'sale',
-        document_number: order.order_number,
-        document_type: mode === 'pos' ? 'نقطة بيع POS (نقدي)' : 'نقطة بيع POS (آجل)',
-        ref_id: order.id,
-        entity_name: mode === 'pos' ? 'مبيعات نقدية' : (resolvedName || 'عميل آجل'),
-        quantity_in: 0,
-        quantity_out: Number(item.quantity),
-        balance_after: newStock,
-        unit_price: Number(item.unitPrice),
-        movement_date: todayStr,
-        created_by: user.id,
-      })
-
-      await supabase.from('stock_movements').insert({
-        store_id: store.id,
-        product_id: p.id,
-        type: 'sale',
-        quantity: Number(item.quantity),
-        quantity_before: curStock,
-        quantity_after: newStock,
-        reference_id: order.id,
-        reference_type: 'order',
-        notes: `نقطة بيع #${order.order_number}`,
-        created_by: user.id,
-      })
+    const cost = Number(p?.cost_price || 0)
+    return {
+      order_id: order.id,
+      product_id: item.productId,
+      product_name: item.name,
+      product_sku: p?.sku || null,
+      quantity: item.quantity,
+      unit_price: item.unitPrice,
+      cost_price: cost > 0 ? cost : null,
+      total_price: item.unitPrice * item.quantity,
     }
+  })
+
+  const { error: orderItemsErr } = await supabase.from('order_items').insert(orderItemsData)
+  if (orderItemsErr) {
+    console.error('Order items insertion failed:', orderItemsErr)
+    await supabase.from('orders').delete().eq('id', order.id)
+    return NextResponse.json({ error: 'فشل حفظ عناصر الطلبية' }, { status: 500 })
   }
 
   // ── إنشاء فاتورة مبيعات مطابقة في جدول invoices ───────────────
@@ -235,7 +200,8 @@ export async function POST(req: NextRequest) {
 
   if (invErr || !inv) {
     console.error('Invoice creation failed for order:', invErr)
-    await supabase.from('orders').update({ status: 'cancelled' }).eq('id', order.id)
+    await supabase.from('order_items').delete().eq('order_id', order.id)
+    await supabase.from('orders').delete().eq('id', order.id)
     return NextResponse.json({ error: 'فشل حفظ فاتورة المبيعات للطلبية' }, { status: 500 })
   }
 
@@ -257,8 +223,71 @@ export async function POST(req: NextRequest) {
   if (invItemsErr) {
     console.error('Invoice items creation failed for order:', invItemsErr)
     await supabase.from('invoices').delete().eq('id', inv.id)
-    await supabase.from('orders').update({ status: 'cancelled' }).eq('id', order.id)
+    await supabase.from('order_items').delete().eq('order_id', order.id)
+    await supabase.from('orders').delete().eq('id', order.id)
     return NextResponse.json({ error: 'فشل حفظ بنود فاتورة المبيعات' }, { status: 500 })
+  }
+
+  // ── تحديث المخزون وحركات المخزون تلقائياً بعد استقرار الفاتورة ──
+  const deductedStockRollbacks: Array<{ productId: string; oldStock: number }> = []
+  let stockUpdateFailed = false
+
+  for (const item of items) {
+    const p = productMap.get(item.productId)
+    if (p && p.track_stock !== false) {
+      const curStock = Number(p.stock_quantity || 0)
+      const newStock = Math.max(0, curStock - Number(item.quantity))
+
+      const { error: stockUpdErr } = await supabase.from('products').update({ stock_quantity: newStock }).eq('id', p.id)
+      if (stockUpdErr) {
+        console.error('Stock update failed for product:', p.id, stockUpdErr)
+        stockUpdateFailed = true
+        break
+      }
+      deductedStockRollbacks.push({ productId: p.id, oldStock: curStock })
+
+      await supabase.from('inventory_movements').insert({
+        store_id: store.id,
+        product_id: p.id,
+        movement_type: 'sale',
+        document_number: order.order_number,
+        document_type: mode === 'pos' ? 'نقطة بيع POS (نقدي)' : 'نقطة بيع POS (آجل)',
+        ref_id: order.id,
+        entity_name: mode === 'pos' ? 'مبيعات نقدية' : (resolvedName || 'عميل آجل'),
+        quantity_in: 0,
+        quantity_out: Number(item.quantity),
+        balance_after: newStock,
+        unit_price: Number(item.unitPrice),
+        movement_date: todayStr,
+        created_by: user.id,
+      })
+
+      await supabase.from('stock_movements').insert({
+        store_id: store.id,
+        product_id: p.id,
+        type: 'sale',
+        quantity: Number(item.quantity),
+        quantity_before: curStock,
+        quantity_after: newStock,
+        reference_id: order.id,
+        reference_type: 'order',
+        notes: `نقطة بيع #${order.order_number}`,
+        created_by: user.id,
+      })
+    }
+  }
+
+  if (stockUpdateFailed) {
+    for (const rb of deductedStockRollbacks) {
+      await supabase.from('products').update({ stock_quantity: rb.oldStock }).eq('id', rb.productId)
+    }
+    await supabase.from('inventory_movements').delete().eq('ref_id', order.id)
+    await supabase.from('stock_movements').delete().eq('reference_id', order.id)
+    await supabase.from('invoice_items').delete().eq('invoice_id', inv.id)
+    await supabase.from('invoices').delete().eq('id', inv.id)
+    await supabase.from('order_items').delete().eq('order_id', order.id)
+    await supabase.from('orders').delete().eq('id', order.id)
+    return NextResponse.json({ error: 'فشل تحديث المخزون للطلبية' }, { status: 500 })
   }
 
   // ── تحديث الصندوق وسند القبض (نقد مقبوض في البيع النقدي أو الدفعة الفورية للآجل) ──

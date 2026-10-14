@@ -2,6 +2,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { sendInvoiceEmail } from '@/lib/email/invoice-email'
 import { getStoreForUser } from '@/lib/supabase/getStore'
+import { requireStorePermission } from '@/lib/supabase/permissions'
 import { logFinancialEvent } from '@/lib/accounting/audit'
 import { checkIsPeriodClosed } from '@/app/dashboard/accounting/periods/period-actions'
 import { reverseJournalEntry } from '@/lib/accounting/engine'
@@ -30,6 +31,8 @@ export async function recordInvoicePayment(
   const storeId = await getStoreForUser(supabase, user.id)
   if (!storeId) return { ok: false, error: 'المتجر غير موجود' }
 
+  await requireStorePermission(storeId, 'finance.write')
+
   const todayStr = new Date().toISOString().slice(0, 10)
   const periodCheck = await checkIsPeriodClosed(storeId, todayStr)
   if (periodCheck.isClosed) {
@@ -51,37 +54,54 @@ export async function recordInvoicePayment(
   const pay       = Math.min(amount, remaining)
   const newPaid   = inv.amount_paid + pay
   const fullyPaid = newPaid >= inv.total - 0.001
-  const newStatus = fullyPaid ? 'paid' : 'draft'
+  const newStatus = fullyPaid ? 'paid' : 'partial'
 
-  // 1) سند قبض → يولّد حركة صندوق (نقد داخل) عبر الـ trigger
-  const { count } = await supabase
-    .from('vouchers')
-    .select('*', { count: 'exact', head: true })
-    .eq('store_id', storeId)
-    .eq('type', 'receipt')
-  const voucherNumber = `RCP-${String((count ?? 0) + 1).padStart(4, '0')}`
-
-  await supabase.from('vouchers').insert({
-    store_id:       storeId,
-    voucher_number: voucherNumber,
-    type:           'receipt',
-    date:           new Date().toISOString().slice(0, 10),
-    amount:         pay,
-    customer_id:    inv.customer_id,
-    party_name:     inv.customer_name,
-    payment_method: method,
-    category:       'تحصيل فاتورة',
-    description:    `دفعة على فاتورة ${inv.invoice_number}`,
-    reference:      inv.invoice_number,
-    created_by:     user.id,
+  // 1) سند قبض → تسلسل آمن وربط الفاتورة
+  const { data: generatedVNum } = await supabase.rpc('generate_sequence_number', {
+    p_store_id: storeId,
+    p_prefix: `RCP-${new Date().getFullYear()}-`,
   })
+  const voucherNumber = generatedVNum || `RCP-${Date.now().toString().slice(-6)}`
+
+  const { data: voucher, error: vErr } = await supabase
+    .from('vouchers')
+    .insert({
+      store_id:       storeId,
+      voucher_number: voucherNumber,
+      type:           'receipt',
+      date:           todayStr,
+      amount:         pay,
+      cash_amount:    method === 'cash' ? pay : 0,
+      checks_amount:  0,
+      customer_id:    inv.customer_id,
+      party_name:     inv.customer_name,
+      payment_method: method,
+      category:       'تحصيل فاتورة',
+      description:    `دفعة على فاتورة ${inv.invoice_number}`,
+      reference:      inv.invoice_number,
+      invoice_id:     inv.id,
+      created_by:     user.id,
+    })
+    .select('id')
+    .single()
+
+  if (vErr || !voucher) {
+    console.error('Failed to create receipt voucher:', vErr)
+    return { ok: false, error: vErr?.message || 'فشل إنشاء سند القبض للدفعة' }
+  }
 
   // 2) تحديث الفاتورة
-  await supabase.from('invoices').update({
+  const { error: invUpdErr } = await supabase.from('invoices').update({
     amount_paid: newPaid,
     status:      newStatus,
     updated_at:  new Date().toISOString(),
   }).eq('id', inv.id)
+
+  if (invUpdErr) {
+    console.error('Failed to update invoice amount_paid:', invUpdErr)
+    await supabase.from('vouchers').delete().eq('id', voucher.id)
+    return { ok: false, error: invUpdErr.message || 'فشل تحديث الفاتورة' }
+  }
 
   // 3) كشف حساب الزبون + رصيده
   if (inv.customer_id) {
@@ -96,7 +116,7 @@ export async function recordInvoicePayment(
       store_id:       storeId,
       customer_id:    inv.customer_id,
       type:           'payment',
-      date:           new Date().toISOString().slice(0, 10),
+      date:           todayStr,
       description:    `دفعة على فاتورة ${inv.invoice_number}`,
       debit:          0,
       credit:         pay,
@@ -181,6 +201,8 @@ export async function deleteInvoice(invoiceId: string): Promise<{ ok: boolean; e
   const storeId = await getStoreForUser(supabase, user.id)
   if (!storeId) return { ok: false, error: 'المتجر غير موجود' }
 
+  await requireStorePermission(storeId, 'sales.write')
+
   // 1. جلب الفاتورة وبنودها
   const { data: inv } = await supabase
     .from('invoices')
@@ -201,7 +223,18 @@ export async function deleteInvoice(invoiceId: string): Promise<{ ok: boolean; e
     .select('*')
     .eq('invoice_id', invoiceId)
 
-  // 2. إعادة المخزون المباع للأصناف
+  // 2. عكس أثر القيد المحاسبي أولاً في دفتر الأستاذ العام (Fail-Closed)
+  try {
+    const revRes = await reverseJournalEntry(inv.id, `حذف فاتورة مبيعات #${inv.invoice_number}`, user.id)
+    if (!revRes.success) {
+      return { ok: false, error: 'فشل عكس القيد المحاسبي للفاتورة' }
+    }
+  } catch (glErr: any) {
+    console.error('Error reversing invoice GL entry:', glErr)
+    return { ok: false, error: `فشل عكس القيد المحاسبي للفاتورة: ${glErr?.message || 'خطأ غير معروف'}` }
+  }
+
+  // 3. إعادة المخزون المباع للأصناف
   if (items && items.length > 0) {
     for (const item of items) {
       if (item.product_id) {
@@ -224,7 +257,7 @@ export async function deleteInvoice(invoiceId: string): Promise<{ ok: boolean; e
     }
   }
 
-  // 3. عكس كشف حساب الزبون ورصيده
+  // 4. عكس كشف حساب الزبون ورصيده مع الحفاظ على الرصيد الدائن
   if (inv.customer_id) {
     const { data: cust } = await supabase
       .from('customers')
@@ -234,7 +267,8 @@ export async function deleteInvoice(invoiceId: string): Promise<{ ok: boolean; e
 
     if (cust) {
       const remainingDebt = Math.max(0, Number(inv.total || 0) - Number(inv.amount_paid || 0))
-      const newBalance = Math.max(0, Number(cust.balance || 0) - remainingDebt)
+      // الحفاظ على إشارة الرصيد وعدم حصر الدائن في الصفر
+      const newBalance = Number(cust.balance || 0) - remainingDebt
       const newInvoiced = Math.max(0, Number(cust.total_invoiced || 0) - Number(inv.total || 0))
       const newPaid = Math.max(0, Number(cust.total_paid || 0) - Number(inv.amount_paid || 0))
 
@@ -252,14 +286,14 @@ export async function deleteInvoice(invoiceId: string): Promise<{ ok: boolean; e
     }
   }
 
-  // 4. حذف سندات القبض المرتبطة بالفاتورة من الصندوق إن وجدت
+  // 5. حذف سندات القبض المرتبطة بالفاتورة من الصندوق إن وجدت
   await supabase
     .from('vouchers')
     .delete()
     .eq('reference', inv.invoice_number)
     .eq('store_id', storeId)
 
-  // 5. توثيق العملية في سجل التدقيق المالي
+  // 6. توثيق العملية في سجل التدقيق المالي
   await logFinancialEvent({
     storeId,
     entityType: 'invoice',
@@ -270,14 +304,7 @@ export async function deleteInvoice(invoiceId: string): Promise<{ ok: boolean; e
     details: { total: inv.total, invoiceNumber: inv.invoice_number, itemsCount: items?.length || 0 },
   })
 
-  // 5.5. عكس القيد المحاسبي في دفتر الأستاذ العام
-  try {
-    await reverseJournalEntry(inv.id, `حذف فاتورة مبيعات #${inv.invoice_number}`, user.id)
-  } catch (glErr) {
-    console.error('Error reversing invoice GL entry:', glErr)
-  }
-
-  // 6. حذف الفاتورة
+  // 7. حذف الفاتورة
   const { error: delErr } = await supabase
     .from('invoices')
     .delete()

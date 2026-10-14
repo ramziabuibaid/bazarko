@@ -596,6 +596,10 @@ export default function CreateQuotationClient({ store, customers, products, prev
     setLoading(true)
     setError('')
 
+    const newlyCreatedProductIds: string[] = []
+    let oldItemsBackup: any[] = []
+    let quoteId = initialQuote?.id || ''
+
     try {
       // 1. معالجة البنود الحرة المطلوب حفظها كمنتجات جديدة
       const preparedItems = items.map(item => ({ ...item }))
@@ -617,6 +621,7 @@ export default function CreateQuotationClient({ store, customers, products, prev
           if (prodErr) throw prodErr
           if (newProd) {
             preparedItems[i].product_id = newProd.id
+            newlyCreatedProductIds.push(newProd.id)
           }
         }
       }
@@ -634,7 +639,7 @@ export default function CreateQuotationClient({ store, customers, products, prev
         netTotal: calculations.netTotal,
       }
       const finalNotes = `${notes.trim()}\n\n[[META:${JSON.stringify(meta)}]]`.trim()
-      let quoteId = initialQuote?.id || ''
+      quoteId = initialQuote?.id || ''
       const finalQuoteNumber = quoteNumber.trim()
 
       if (isEditMode && initialQuote) {
@@ -659,6 +664,13 @@ export default function CreateQuotationClient({ store, customers, products, prev
 
         if (quoteErr) throw quoteErr
         quoteId = initialQuote.id
+
+        // الاحتفاظ بنسخة احتياطية من البنود القديمة قبل حذفها
+        const { data: currentOldItems } = await supabase
+          .from('quotation_items')
+          .select('*')
+          .eq('quotation_id', quoteId)
+        oldItemsBackup = currentOldItems || []
 
         // حذف البنود القديمة لإعادة إدراج البنود المحدثة والمرتبة
         const { error: delErr } = await supabase
@@ -779,6 +791,22 @@ export default function CreateQuotationClient({ store, customers, products, prev
         shareUrl,
       })
     } catch (err: any) {
+      if (!isEditMode && quoteId) {
+        await supabase.from('quotation_items').delete().eq('quotation_id', quoteId)
+        await supabase.from('quotations').delete().eq('id', quoteId)
+      } else if (isEditMode && oldItemsBackup.length > 0) {
+        const { count } = await supabase.from('quotation_items').select('*', { count: 'exact', head: true }).eq('quotation_id', quoteId)
+        if (!count) {
+          const restoredPayload = oldItemsBackup.map(it => {
+            const { id, created_at, ...rest } = it
+            return rest
+          })
+          await supabase.from('quotation_items').insert(restoredPayload)
+        }
+      }
+      for (const pId of newlyCreatedProductIds) {
+        await supabase.from('products').delete().eq('id', pId)
+      }
       setError(err.message || 'فشل حفظ عرض السعر')
     } finally {
       submitting.current = false
