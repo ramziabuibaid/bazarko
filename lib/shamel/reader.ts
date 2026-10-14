@@ -527,8 +527,7 @@ export function parseEntries(
   headersMap?: Map<string, { description: string; kind: string; rate: number }>,
   notesMap?: Map<string, string>
 ): ShamelEntry[] {
-  const entries: ShamelEntry[] = []
-  const seen = new Set<string>()
+  const entriesMap = new Map<string, ShamelEntry>()
 
   for (const r of iterateRecords(data)) {
     const doc = decodeCp1256(r.subarray(0, 9))
@@ -563,10 +562,10 @@ export function parseEntries(
     const amount = readDoubleLE(view, 28)
     const direction = readUInt(view, 36, 2) // 1 = debit, 2 = credit
 
-    // Dedup
-    const dedupKey = `${doc}_${line_index}_${account}_${direction}`
-    if (seen.has(dedupKey)) continue
-    seen.add(dedupKey)
+    // Dedup: a single document line (doc, line_index, direction) maps to exactly one account in Al-Shamel.
+    // If an entry was edited in Shamel, Btrieve leaves the old slot in the file, and the later record
+    // in CTRANS.DAT is the corrected update.
+    const dedupKey = `${doc}_${line_index}_${direction}`
 
     // Narration and exchange rate from headers and journal notes
     const header = headersMap?.get(doc)
@@ -595,7 +594,7 @@ export function parseEntries(
     }
     const nis_amount = Math.round(Math.abs(amount) * exchange_rate * 100) / 100
 
-    entries.push({
+    entriesMap.set(dedupKey, {
       document: doc,
       line_index,
       account,
@@ -610,7 +609,7 @@ export function parseEntries(
     })
   }
 
-  return entries
+  return Array.from(entriesMap.values())
 }
 
 /**

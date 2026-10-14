@@ -76,32 +76,33 @@ export async function fetchGoogleDriveFolderFiles(folderId: string): Promise<{
         }
       }
 
-      // Extract ds:4 data callback which contains the file items
-      const match = html.match(/AF_initDataCallback\(\{key: ['"]ds:4['"][\s\S]*?data:([\s\S]*?),\s*sideChannel:/)
-      if (!match) continue
+      // Extract AF_initDataCallback blocks across all ds:* keys
+      const matches = [...html.matchAll(/AF_initDataCallback\(\{key:\s*['"](ds:[^'"]+)['"][\s\S]*?data:([\s\S]*?),\s*sideChannel:/g)]
 
-      try {
-        const parsed = JSON.parse(match[1])
-        const it0 = parsed[27]?.[7]?.[0]
-        const items = it0?.[0] || []
+      for (const m of matches) {
+        try {
+          const parsed = JSON.parse(m[2])
+          const it0 = parsed?.[27]?.[7]?.[0]
+          const items = it0?.[0] || []
 
-        for (const node of items) {
-          if (node && Array.isArray(node[0]) && typeof node[0][1] === 'string') {
-            const fileId = node[0][1]
-            const str = JSON.stringify(node)
-            // Match files ending in DAT, dat, ZIP, zip, etc.
-            const fnMatch = str.match(/"([a-zA-Z0-9_\-\.\u0600-\u06FF ]+\.(?:DAT|dat|ZIP|zip|bak|BAK))"/)
-            if (fnMatch) {
-              const fileName = fnMatch[1]
-              const key = fileName.toLowerCase()
-              if (!fileMap.has(key)) {
-                fileMap.set(key, { name: fileName, id: fileId })
+          for (const node of items) {
+            if (node && Array.isArray(node[0]) && typeof node[0][1] === 'string') {
+              const fileId = node[0][1]
+              const str = JSON.stringify(node)
+              // Match files ending in DAT, dat, ZIP, zip, etc.
+              const fnMatch = str.match(/"([a-zA-Z0-9_\-\.\u0600-\u06FF ]+\.(?:DAT|dat|ZIP|zip|bak|BAK))"/)
+              if (fnMatch) {
+                const fileName = fnMatch[1]
+                const key = fileName.toLowerCase()
+                if (!fileMap.has(key)) {
+                  fileMap.set(key, { name: fileName, id: fileId })
+                }
               }
             }
           }
+        } catch (parseErr) {
+          // Ignore JSON parse errors for non-matching callbacks
         }
-      } catch (parseErr) {
-        console.warn('Failed parsing ds:4 callback JSON:', parseErr)
       }
     } catch (fetchErr: any) {
       console.warn(`Error fetching Google Drive folder sort ${sortQuery}:`, fetchErr?.message)
