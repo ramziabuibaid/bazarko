@@ -139,6 +139,21 @@ export async function GET(req: NextRequest) {
         const sortedItems = [...parsedData.invoiceItems].sort((a, b) => (b.day || '').localeCompare(a.day || ''))
         await saveIsolated('invoice_items', sortedItems.slice(0, 30000))
 
+        // Refresh Customer activity dates and balances
+        try {
+          await supabase.rpc('shamel_refresh_customer_summaries', { p_store_id: storeId })
+        } catch (sumErr: any) {
+          console.warn('Cron refresh customer summaries warning:', sumErr?.message)
+        }
+
+        // Automatic reconciliation to Bazarko operational tables
+        try {
+          const { executeHybridSync } = await import('@/lib/shamel/hybrid-sync')
+          await executeHybridSync(supabase, storeId)
+        } catch (hybridErr: any) {
+          console.warn('Cron hybrid sync warning:', hybridErr?.message)
+        }
+
         const successMsg = `تمت المزامنة الآلية بنجاح من مجلد ${folderTitle || 'Google Drive'} (${filesDownloaded.length} ملف)`
         await supabase
           .from('shamel_sync_configs')

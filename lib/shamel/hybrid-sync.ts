@@ -183,6 +183,7 @@ export async function executeHybridSync(
       byShamelCode.set(sc.code, existingByPhone)
       result.customersMatchedByPhone++
     } else {
+      byShamelCode.set(sc.code, true)
       customersToInsert.push({
         store_id: storeId,
         name: sc.name,
@@ -209,7 +210,9 @@ export async function executeHybridSync(
 
   for (let i = 0; i < customersToInsert.length; i += 200) {
     const chunk = customersToInsert.slice(i, i + 200)
-    const { error: insertErr } = await supabase.from('customers').insert(chunk)
+    const { error: insertErr } = await supabase
+      .from('customers')
+      .upsert(chunk, { onConflict: 'store_id,shamel_code' })
     if (insertErr) {
       throw new Error(`فشل إدخال دفعة الزبائن: ${insertErr.message}`)
     }
@@ -320,7 +323,9 @@ export async function executeHybridSync(
 
   for (let i = 0; i < productsToInsert.length; i += 200) {
     const chunk = productsToInsert.slice(i, i + 200)
-    const { error: insertProdErr } = await supabase.from('products').insert(chunk)
+    const { error: insertProdErr } = await supabase
+      .from('products')
+      .upsert(chunk, { onConflict: 'store_id,shamel_code' })
     if (insertProdErr) {
       throw new Error(`فشل إدخال دفعة الأصناف: ${insertProdErr.message}`)
     }
