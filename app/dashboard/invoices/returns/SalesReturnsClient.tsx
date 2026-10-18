@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/components/ui/Toast'
 import { useConfirm } from '@/components/ui/Confirm'
 import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
-import { deleteSalesReturn, updateSalesReturn } from './return-actions'
+import { deleteSalesReturn, updateSalesReturn, createSalesReturnAction } from './return-actions'
 
 interface SalesReturnItem {
   id: string
@@ -160,88 +160,22 @@ export default function SalesReturnsClient({
     setError('')
 
     try {
-      // 1. Insert Sales Return
-      const { data: returnRecord, error: returnErr } = await supabase
-        .from('sales_returns')
-        .insert({
-          store_id: store.id,
-          return_number: formData.return_number.trim(),
-          customer_id: formData.customer_id || null,
-          invoice_id: formData.invoice_id || null,
-          refund_method: formData.refund_method,
-          total_amount: returnTotal,
-          return_date: formData.return_date,
-          reason: formData.reason.trim(),
-          notes: formData.notes.trim() || null,
-          status: 'completed',
-        })
-        .select('*, customer:customers(id, name, phone)')
-        .single()
+      const res = await createSalesReturnAction({
+        return_number: formData.return_number.trim(),
+        return_date: formData.return_date,
+        customer_id: formData.customer_id || null,
+        invoice_id: formData.invoice_id || null,
+        refund_method: formData.refund_method,
+        reason: formData.reason.trim(),
+        notes: formData.notes.trim() || null,
+        items: formData.items,
+      })
 
-      if (returnErr) throw returnErr
-
-      // 2. Insert Return Items
-      const itemPayloads = formData.items.map(item => ({
-        sales_return_id: returnRecord.id,
-        product_id: item.product_id || null,
-        product_name: item.product_name,
-        quantity: Number(item.quantity),
-        unit_price: Number(item.unit_price),
-        total_price: Number(item.quantity) * Number(item.unit_price),
-      }))
-
-      const { error: itemsErr } = await supabase.from('sales_return_items').insert(itemPayloads)
-      if (itemsErr) throw itemsErr
-
-      // 3. Restock Inventory and Log Inventory Movements
-      for (const item of formData.items) {
-        if (item.product_id) {
-          const prod = products.find(p => p.id === item.product_id)
-          const newQty = Number(prod?.stock_quantity || 0) + Number(item.quantity)
-
-          await supabase.from('products').update({ stock_quantity: newQty }).eq('id', item.product_id)
-
-          await supabase.from('inventory_movements').insert({
-            store_id: store.id,
-            product_id: item.product_id,
-            movement_type: 'sales_return',
-            document_number: formData.return_number,
-            document_type: 'مرتجع مبيعات',
-            ref_id: returnRecord.id,
-            entity_name: returnRecord.customer?.name || 'عميل نقدي',
-            quantity_in: Number(item.quantity),
-            quantity_out: 0,
-            balance_after: newQty,
-            unit_price: Number(item.unit_price),
-            movement_date: formData.return_date,
-          })
-        }
+      if (!res.ok) {
+        throw new Error(res.error || 'حدث خطأ أثناء حفظ مرتجع المبيعات')
       }
 
-      // 4. Update Customer balance if customer_id provided
-      if (formData.customer_id && formData.refund_method === 'credit') {
-        const cust = customers.find(c => c.id === formData.customer_id)
-        if (cust) {
-          const newBalance = Number(cust.balance || 0) - returnTotal
-          await supabase.from('customers').update({ balance: newBalance }).eq('id', cust.id)
-
-          // Insert into customer ledger
-          await supabase.from('customer_ledger').insert({
-            store_id: store.id,
-            customer_id: cust.id,
-            type: 'return',
-            date: formData.return_date,
-            description: `مرتجع مبيعات رقم #${formData.return_number}`,
-            debit: 0,
-            credit: returnTotal,
-            balance: newBalance,
-            reference_id: returnRecord.id,
-            reference_type: 'sales_return',
-          })
-        }
-      }
-
-      setReturns(prev => [{ ...returnRecord, items: itemPayloads }, ...prev])
+      toast('تم إنشاء سند المرتجع وتحديث المخزون والقيود بنجاح', 'success')
       setShowAddModal(false)
       router.refresh()
     } catch (err: any) {

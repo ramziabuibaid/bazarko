@@ -3,6 +3,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
 import { requireStorePermission } from '@/lib/supabase/permissions'
+import { postJournalEntry } from '@/lib/accounting/engine'
+import { resolveAccount } from '@/lib/accounting/resolver'
 import { revalidatePath } from 'next/cache'
 
 export async function executeBankTransferAction(payload: {
@@ -94,6 +96,40 @@ export async function executeBankTransferAction(payload: {
       .update({ balance: bank.balance, updated_at: new Date().toISOString() })
       .eq('id', bank.id)
     return { ok: false, error: movErr.message || 'فشل تسجيل حركة التحويل في الصندوق' }
+  }
+
+  // ── تسجيل قيد اليومية المزدوج للتحويل البنكي لضمان مطابقة كشف الحساب والأستاذ ──
+  try {
+    const [bankRes, cashRes] = await Promise.all([
+      resolveAccount(supabase, 'BANK', { storeId, bankAccountId: bank.id }),
+      resolveAccount(supabase, 'CASH', { storeId, cashBoxId: cashBox.id }),
+    ])
+
+    if (bankRes?.accountId && cashRes?.accountId) {
+      const todayStr = new Date().toISOString().slice(0, 10)
+      const lines = payload.isDeposit
+        ? [
+            { account_id: bankRes.accountId, debit: payload.amount, credit: 0, description: desc },
+            { account_id: cashRes.accountId, debit: 0, credit: payload.amount, description: desc },
+          ]
+        : [
+            { account_id: cashRes.accountId, debit: payload.amount, credit: 0, description: desc },
+            { account_id: bankRes.accountId, debit: 0, credit: payload.amount, description: desc },
+          ]
+
+      await postJournalEntry({
+        storeId,
+        date: todayStr,
+        description: desc,
+        source: 'transfer',
+        sourceType: 'bank_transfer',
+        sourceId: bank.id,
+        lines,
+        actorId: user.id,
+      })
+    }
+  } catch (jErr) {
+    console.error('Failed to post journal entry for bank transfer:', jErr)
   }
 
   revalidatePath('/dashboard/banks')

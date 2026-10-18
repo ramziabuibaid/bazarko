@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
 import { requireStorePermission } from '@/lib/supabase/permissions'
 import { checkIsPeriodClosed } from '@/app/dashboard/accounting/periods/period-actions'
+import { postJournalEntry, reverseJournalEntry } from '@/lib/accounting/engine'
+import { resolveAccount } from '@/lib/accounting/resolver'
 import { revalidatePath } from 'next/cache'
 
 interface ReturnItemPayload {
@@ -102,6 +104,13 @@ export async function deleteSalesReturn(returnId: string): Promise<{ ok: boolean
             .delete()
             .eq('ref_id', returnId)
             .eq('product_id', item.product_id)
+
+          await supabase
+            .from('stock_movements')
+            .delete()
+            .eq('reference_id', returnId)
+            .eq('reference_type', 'sales_return')
+            .eq('product_id', item.product_id)
         }
       }
     }
@@ -128,6 +137,15 @@ export async function deleteSalesReturn(returnId: string): Promise<{ ok: boolean
           .delete()
           .eq('reference_id', returnId)
           .eq('reference_type', 'sales_return')
+      }
+    }
+
+    // عكس القيد المحاسبي المزدوج في دفتر اليومية إن وُجد
+    if (ret.journal_entry_id) {
+      try {
+        await reverseJournalEntry(ret.journal_entry_id, user.id, `إلغاء سند مرتجع مبيعات #${ret.return_number}`)
+      } catch (jErr) {
+        console.error('Failed to reverse journal entry for sales return:', jErr)
       }
     }
 
@@ -259,6 +277,7 @@ export async function updateSalesReturn(
             await supabase.from('products').update({ stock_quantity: revertedStock }).eq('id', item.product_id)
           }
           await supabase.from('inventory_movements').delete().eq('ref_id', returnId).eq('product_id', item.product_id)
+          await supabase.from('stock_movements').delete().eq('reference_id', returnId).eq('reference_type', 'sales_return').eq('product_id', item.product_id)
         }
       }
     }
@@ -282,8 +301,9 @@ export async function updateSalesReturn(
     // إضافة المخزون الجديد وحركاته
     for (const item of payload.items) {
       if (item.product_id) {
-        const { data: prod } = await supabase.from('products').select('stock_quantity').eq('id', item.product_id).single()
-        const newStock = Number(prod?.stock_quantity || 0) + Number(item.quantity)
+        const { data: prod } = await supabase.from('products').select('stock_quantity, track_stock').eq('id', item.product_id).single()
+        const curStock = Number(prod?.stock_quantity || 0)
+        const newStock = curStock + Number(item.quantity)
         await supabase.from('products').update({ stock_quantity: newStock }).eq('id', item.product_id)
 
         await supabase.from('inventory_movements').insert({
@@ -298,6 +318,20 @@ export async function updateSalesReturn(
           balance_after: newStock,
           unit_price: Number(item.unit_price),
           movement_date: payload.return_date,
+          created_by: user.id,
+        })
+
+        await supabase.from('stock_movements').insert({
+          store_id: storeId,
+          product_id: item.product_id,
+          type: 'return',
+          quantity: Number(item.quantity),
+          quantity_before: curStock,
+          quantity_after: newStock,
+          reference_id: returnId,
+          reference_type: 'sales_return',
+          notes: `مرتجع مبيعات (معدل) #${payload.return_number}`,
+          created_by: user.id,
         })
       }
     }
@@ -334,10 +368,248 @@ export async function updateSalesReturn(
       }
     }
 
+    // 5. تحديث القيد المحاسبي المزدوج
+    if (oldRet.journal_entry_id) {
+      try {
+        await reverseJournalEntry(oldRet.journal_entry_id, user.id, `تعديل سند مرتجع مبيعات #${payload.return_number}`)
+      } catch (jErr) {
+        console.error('Failed to reverse previous journal entry on return edit:', jErr)
+      }
+    }
+
+    try {
+      const returnAccountRes = await resolveAccount(supabase, 'SALES_RETURNS', { storeId })
+      const counterpartRes = payload.refund_method === 'credit' && payload.customer_id
+        ? await resolveAccount(supabase, 'CUSTOMER_RECEIVABLE', { storeId, customerId: payload.customer_id })
+        : await resolveAccount(supabase, 'CASH', { storeId })
+
+      if (returnAccountRes?.accountId && counterpartRes?.accountId) {
+        const lines = [
+          { account_id: returnAccountRes.accountId, debit: newTotal, credit: 0, description: `مرتجع مبيعات معدل #${payload.return_number}` },
+          { account_id: counterpartRes.accountId, debit: 0, credit: newTotal, description: `مرتجع مبيعات معدل #${payload.return_number}` },
+        ]
+
+        await postJournalEntry({
+          storeId,
+          date: payload.return_date,
+          description: `مرتجع مبيعات رقم #${payload.return_number} (معدل)`,
+          source: 'sales_return',
+          sourceType: 'sales_return',
+          sourceId: returnId,
+          sourceNumber: payload.return_number,
+          lines,
+          actorId: user.id,
+        })
+      }
+    } catch (jErr) {
+      console.error('Error posting updated journal entry for sales return:', jErr)
+    }
+
     revalidatePath('/dashboard/invoices/returns')
     revalidatePath('/dashboard/sales')
     return { ok: true }
   } catch (err: any) {
     return { ok: false, error: err.message || 'فشل تحديث سند المرتجع' }
+  }
+}
+
+/**
+ * إنشاء سند مرتجع مبيعات مع تحديث ذري للمخزون والذمم والقيود اليومية
+ */
+export async function createSalesReturnAction(payload: {
+  return_number?: string
+  return_date: string
+  customer_id: string | null
+  invoice_id: string | null
+  refund_method: string
+  reason?: string | null
+  notes?: string | null
+  items: ReturnItemPayload[]
+}): Promise<{ ok: boolean; error?: string; returnId?: string }> {
+  try {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { ok: false, error: 'غير مصرح' }
+
+    const storeId = await getStoreForUser(supabase, user.id)
+    if (!storeId) return { ok: false, error: 'المتجر غير موجود' }
+
+    await requireStorePermission(storeId, 'sales.write')
+
+    const periodCheck = await checkIsPeriodClosed(storeId, payload.return_date)
+    if (periodCheck.isClosed) {
+      return { ok: false, error: `لا يمكن إنشاء مرتجع في فترة محاسبية مقفلة (${periodCheck.periodName})` }
+    }
+
+    if (!payload.items || payload.items.length === 0) {
+      return { ok: false, error: 'يرجى تحديد أصناف وكميات صحيحة للإرجاع' }
+    }
+
+    const returnTotal = payload.items.reduce(
+      (sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0),
+      0
+    )
+
+    if (returnTotal <= 0) {
+      return { ok: false, error: 'إجمالي المرتجع يجب أن يكون أكبر من الصفر' }
+    }
+
+    let returnNumber = payload.return_number?.trim()
+    if (!returnNumber) {
+      const { data: generatedVNum } = await supabase.rpc('generate_sequence_number', {
+        p_store_id: storeId,
+        p_prefix: `RET-${new Date().getFullYear()}-`,
+      })
+      returnNumber = generatedVNum || `RET-${Date.now().toString().slice(-6)}`
+    }
+
+    // 1. إدراج رأس سند المرتجع
+    const { data: returnRecord, error: returnErr } = await supabase
+      .from('sales_returns')
+      .insert({
+        store_id: storeId,
+        return_number: returnNumber,
+        customer_id: payload.customer_id || null,
+        invoice_id: payload.invoice_id || null,
+        refund_method: payload.refund_method,
+        total_amount: returnTotal,
+        return_date: payload.return_date,
+        reason: payload.reason?.trim() || null,
+        notes: payload.notes?.trim() || null,
+        status: 'completed',
+        created_by: user.id,
+      })
+      .select('*, customer:customers(id, name, phone)')
+      .single()
+
+    if (returnErr || !returnRecord) {
+      return { ok: false, error: returnErr?.message || 'فشل حفظ سند المرتجع' }
+    }
+
+    // 2. إدراج بنود المرتجع
+    const itemPayloads = payload.items.map(item => ({
+      sales_return_id: returnRecord.id,
+      product_id: item.product_id || null,
+      product_name: item.product_name,
+      quantity: Number(item.quantity),
+      unit_price: Number(item.unit_price),
+      total_price: Number(item.quantity) * Number(item.unit_price),
+    }))
+
+    const { error: itemsErr } = await supabase.from('sales_return_items').insert(itemPayloads)
+    if (itemsErr) {
+      await supabase.from('sales_returns').delete().eq('id', returnRecord.id)
+      return { ok: false, error: itemsErr.message || 'فشل حفظ بنود المرتجع' }
+    }
+
+    // 3. إعادة كميات المخزون وتسجيل حركات المخزون الثنائية
+    for (const item of payload.items) {
+      if (item.product_id) {
+        const { data: prod } = await supabase
+          .from('products')
+          .select('stock_quantity, track_stock')
+          .eq('id', item.product_id)
+          .single()
+
+        if (prod && prod.track_stock !== false) {
+          const curStock = Number(prod.stock_quantity || 0)
+          const newQty = curStock + Number(item.quantity)
+
+          await supabase.from('products').update({ stock_quantity: newQty }).eq('id', item.product_id)
+
+          await supabase.from('inventory_movements').insert({
+            store_id: storeId,
+            product_id: item.product_id,
+            movement_type: 'sales_return',
+            document_number: returnNumber,
+            document_type: 'مرتجع مبيعات',
+            ref_id: returnRecord.id,
+            entity_name: returnRecord.customer?.name || 'عميل نقدي',
+            quantity_in: Number(item.quantity),
+            quantity_out: 0,
+            balance_after: newQty,
+            unit_price: Number(item.unit_price),
+            movement_date: payload.return_date,
+            created_by: user.id,
+          })
+
+          await supabase.from('stock_movements').insert({
+            store_id: storeId,
+            product_id: item.product_id,
+            type: 'return',
+            quantity: Number(item.quantity),
+            quantity_before: curStock,
+            quantity_after: newQty,
+            reference_id: returnRecord.id,
+            reference_type: 'sales_return',
+            notes: `مرتجع مبيعات #${returnNumber}`,
+            created_by: user.id,
+          })
+        }
+      }
+    }
+
+    // 4. تسوية ذمة العميل وكشف حسابه
+    if (payload.customer_id && payload.refund_method === 'credit') {
+      const { data: cust } = await supabase
+        .from('customers')
+        .select('balance')
+        .eq('id', payload.customer_id)
+        .single()
+
+      if (cust) {
+        const newBalance = Number(cust.balance || 0) - returnTotal
+        await supabase.from('customers').update({ balance: newBalance }).eq('id', payload.customer_id)
+
+        await supabase.from('customer_ledger').insert({
+          store_id: storeId,
+          customer_id: payload.customer_id,
+          type: 'return',
+          date: payload.return_date,
+          description: `مرتجع مبيعات رقم #${returnNumber}`,
+          debit: 0,
+          credit: returnTotal,
+          balance: newBalance,
+          reference_id: returnRecord.id,
+          reference_type: 'sales_return',
+          created_by: user.id,
+        })
+      }
+    }
+
+    // 5. ترحيل القيد المحاسبي المزدوج في دفتر اليومية
+    try {
+      const returnAccountRes = await resolveAccount(supabase, 'SALES_RETURNS', { storeId })
+      const counterpartRes = payload.refund_method === 'credit' && payload.customer_id
+        ? await resolveAccount(supabase, 'CUSTOMER_RECEIVABLE', { storeId, customerId: payload.customer_id, customerName: returnRecord.customer?.name })
+        : await resolveAccount(supabase, 'CASH', { storeId })
+
+      if (returnAccountRes?.accountId && counterpartRes?.accountId) {
+        const lines = [
+          { account_id: returnAccountRes.accountId, debit: returnTotal, credit: 0, description: `مرتجع مبيعات #${returnNumber}` },
+          { account_id: counterpartRes.accountId, debit: 0, credit: returnTotal, description: `مرتجع مبيعات #${returnNumber}` },
+        ]
+
+        await postJournalEntry({
+          storeId,
+          date: payload.return_date,
+          description: `مرتجع مبيعات رقم #${returnNumber}`,
+          source: 'sales_return',
+          sourceType: 'sales_return',
+          sourceId: returnRecord.id,
+          sourceNumber: returnNumber,
+          lines,
+          actorId: user.id,
+        })
+      }
+    } catch (jErr) {
+      console.error('Error posting journal entry for sales return:', jErr)
+    }
+
+    revalidatePath('/dashboard/invoices/returns')
+    revalidatePath('/dashboard/sales')
+    return { ok: true, returnId: returnRecord.id }
+  } catch (err: any) {
+    return { ok: false, error: err.message || 'فشل إنشاء سند المرتجع' }
   }
 }

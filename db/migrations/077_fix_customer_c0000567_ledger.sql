@@ -15,6 +15,8 @@ WHERE document = 'M0000644'
 UPDATE public.shamel_entries 
 SET exchange_rate = 3.50, nis_amount = 5775.00 
 WHERE document = 'R0005029'
+  AND account = 'C0000567'
+  AND currency = 'USD'
   AND store_id IN (SELECT store_id FROM public.shamel_customers WHERE code = 'C0000567');
 
 -- 3. Recalculate customer summary, equivalent balance and activity dates for C0000567

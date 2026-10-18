@@ -538,10 +538,6 @@ export function parseEntries(
     const account = decodeCp1256(r.subarray(15, 24))
     if (!account) continue
 
-    // Skip known deleted drafts or ghost Btrieve entries
-    if (doc === 'J0016528') continue
-    if (doc === 'M0000644' && account === 'C0000567') continue
-
     // Date validation
     const d = r[11]
     const m = r[12]
@@ -580,10 +576,6 @@ export function parseEntries(
       const hRate = header?.rate
       if (hRate && hRate > 1.0 && hRate <= 1000) {
         exchange_rate = hRate
-      } else if (doc === 'R0005029') {
-        exchange_rate = 3.50
-      } else if (doc === 'R0007283') {
-        exchange_rate = 4.78
       } else if (cur === 'JOD') {
         exchange_rate = 4.78
       } else if (cur === 'USD') {
