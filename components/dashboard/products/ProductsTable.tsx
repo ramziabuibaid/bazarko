@@ -353,7 +353,7 @@ export default function ProductsTable({
     setActionError('')
     const { data: updated, error } = await supabase
       .from('products')
-      .update({ status: next, is_active: next === 'active' })
+      .update({ status: next })
       .eq('id', product.id)
       .eq('store_id', storeId)
       .select('id')

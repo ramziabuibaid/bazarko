@@ -220,7 +220,6 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
       track_stock: form.track_stock,
       allow_backorder: form.allow_backorder,
       status: statusOverride||form.status,
-      is_active: (statusOverride||form.status)==='active',
       is_featured: form.is_featured,
       images: form.images,
       thumbnail_url: form.images[0] ?? null,
@@ -245,8 +244,12 @@ export default function ProductForm({ storeId, currencyCode, secondaryCurrencyCo
       const { data: created, error: err } = await supabase
         .from('products').insert(payload).select('id').single()
       if (err) {
-        if(!err.code||!/^\d{5}$/.test(err.code)){setUncertain(true);setError('تعذر التأكد من اكتمال الإنشاء. راجع قائمة المنتجات قبل إعادة المحاولة.');return}
-        setError(err.message.includes('duplicate') ? 'يوجد منتج بنفس الرابط (slug)' : err.message)
+        if (!err.code || (!/^[0-9A-Za-z]{5}$/.test(err.code) && !err.code.startsWith('PGRST'))) {
+          setUncertain(true)
+          setError('تعذر التأكد من اكتمال الإنشاء. راجع قائمة المنتجات قبل إعادة المحاولة.')
+          return
+        }
+        setError(err.message.includes('duplicate') ? 'يوجد منتج بنفس الرابط (slug)' : (err.message || 'تعذر إنشاء المنتج'))
         setSaving(false)
         return
       }
