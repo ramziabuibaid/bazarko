@@ -32,9 +32,15 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  const isLocalhost = hostname === 'localhost:3000' || hostname === '127.0.0.1:3000'
+  const isLocalhost =
+    hostname.startsWith('localhost') ||
+    hostname.startsWith('127.0.0.1') ||
+    hostname.startsWith('192.168.') ||
+    hostname.startsWith('10.') ||
+    hostname.startsWith('172.') ||
+    /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/.test(hostname)
 
-  // ── Localhost: routing مباشر بدون subdomain ──
+  // ── Localhost / Local IP: routing مباشر بدون subdomain ──
   if (isLocalhost) {
     if (pathname.startsWith('/dashboard') && !user) {
       return NextResponse.redirect(new URL('/login', request.url))
