@@ -179,12 +179,14 @@ export default function StoreSettingsForm({ store, customers = [], avgRating, co
 
   const [logoUrl, setLogoUrl] = useState<string | null>(store.logo_url)
   const [coverUrl, setCoverUrl] = useState<string | null>(store.cover_url)
+  const [logoFailed, setLogoFailed] = useState(false)
+  const [coverFailed, setCoverFailed] = useState(false)
   const [uploadingLogo, setUploadingLogo] = useState(false)
 
   // ─── درجة جودة المتجر (تُحسب من الـ state الحالي) ───────────────────────
   const qualityCriteria = [
-    { key: 'logo',    label: 'الشعار',              done: !!logoUrl,                                    pts: 15 },
-    { key: 'cover',   label: 'صورة الغلاف',          done: !!coverUrl,                                   pts: 10 },
+    { key: 'logo',    label: 'الشعار',              done: !!logoUrl && !logoFailed,                     pts: 15 },
+    { key: 'cover',   label: 'صورة الغلاف',          done: !!coverUrl && !coverFailed,                    pts: 10 },
     { key: 'desc',    label: 'وصف المتجر',           done: form.description.trim().length > 10,          pts: 15 },
     { key: 'phone',   label: 'رقم الهاتف',           done: form.phone.trim().length > 0,                 pts: 10 },
     { key: 'whatsapp',label: 'واتساب',               done: form.whatsapp.trim().length > 0,              pts: 10 },
@@ -229,15 +231,30 @@ export default function StoreSettingsForm({ store, customers = [], avgRating, co
     const file = e.target.files?.[0]
     if (!file) return
     setUploadingLogo(true)
+    setError('')
     try {
       const url = await uploadStoreImage(store.id, 'logo', file)
+      const supabase = createClient()
+      const { error: dbError } = await supabase
+        .from('stores')
+        .update({ logo_url: url })
+        .eq('id', store.id)
+
+      if (dbError) {
+        throw new Error(`تعذر حفظ رابط الشعار في بيانات المتجر: ${dbError.message}`)
+      }
+
       setLogoUrl(url)
-      await createClient().from('stores').update({ logo_url: url }).eq('id', store.id)
+      setLogoFailed(false)
+      setSuccess(true)
       router.refresh()
-    } catch {
-      setError('فشل رفع اللوغو')
+    } catch (err: any) {
+      console.error('[StoreSettings] Logo upload error:', err)
+      const msg = err?.message || 'خطأ غير معروف في خادم التخزين'
+      setError(`فشل رفع الشعار: ${msg}`)
     } finally {
       setUploadingLogo(false)
+      if (e.target) e.target.value = ''
     }
   }
 
@@ -245,15 +262,30 @@ export default function StoreSettingsForm({ store, customers = [], avgRating, co
     const file = e.target.files?.[0]
     if (!file) return
     setUploadingCover(true)
+    setError('')
     try {
       const url = await uploadStoreImage(store.id, 'cover', file)
+      const supabase = createClient()
+      const { error: dbError } = await supabase
+        .from('stores')
+        .update({ cover_url: url })
+        .eq('id', store.id)
+
+      if (dbError) {
+        throw new Error(`تعذر حفظ رابط الغلاف في بيانات المتجر: ${dbError.message}`)
+      }
+
       setCoverUrl(url)
-      await createClient().from('stores').update({ cover_url: url }).eq('id', store.id)
+      setCoverFailed(false)
+      setSuccess(true)
       router.refresh()
-    } catch {
-      setError('فشل رفع صورة الغلاف')
+    } catch (err: any) {
+      console.error('[StoreSettings] Cover upload error:', err)
+      const msg = err?.message || 'خطأ غير معروف في خادم التخزين'
+      setError(`فشل رفع الغلاف: ${msg}`)
     } finally {
       setUploadingCover(false)
+      if (e.target) e.target.value = ''
     }
   }
 
@@ -367,11 +399,24 @@ export default function StoreSettingsForm({ store, customers = [], avgRating, co
             className="h-36 w-full bg-slate-800 cursor-pointer group overflow-hidden"
             onClick={() => coverRef.current?.click()}
           >
-            {coverUrl ? (
-              <img src={coverUrl} alt="غلاف" className="h-full w-full object-cover" />
+            {coverUrl && !coverFailed ? (
+              <img
+                src={coverUrl}
+                alt="غلاف"
+                className="h-full w-full object-cover"
+                onError={() => setCoverFailed(true)}
+                onLoad={() => setCoverFailed(false)}
+              />
             ) : (
-              <div className="flex h-full items-center justify-center text-slate-600">
-                <span className="text-sm">صورة الغلاف</span>
+              <div className="flex h-full flex-col items-center justify-center text-slate-500 gap-1 p-2 text-center">
+                {coverFailed ? (
+                  <>
+                    <span className="text-amber-400 text-xs font-semibold">⚠️ تعذر تحميل صورة الغلاف الحالية</span>
+                    <span className="text-[11px] text-slate-400">اضغط لرفع صورة غلاف جديدة</span>
+                  </>
+                ) : (
+                  <span className="text-sm">صورة الغلاف</span>
+                )}
               </div>
             )}
             <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -388,10 +433,22 @@ export default function StoreSettingsForm({ store, customers = [], avgRating, co
               className="relative h-20 w-20 cursor-pointer overflow-hidden rounded-2xl border-4 border-slate-900 bg-slate-800 group"
               onClick={() => logoRef.current?.click()}
             >
-              {logoUrl ? (
-                <img src={logoUrl} alt="لوغو" className="h-full w-full object-cover" />
+              {logoUrl && !logoFailed ? (
+                <img
+                  src={logoUrl}
+                  alt="لوغو"
+                  className="h-full w-full object-cover"
+                  onError={() => setLogoFailed(true)}
+                  onLoad={() => setLogoFailed(false)}
+                />
               ) : (
-                <div className="flex h-full items-center justify-center text-3xl">🏪</div>
+                <div className="flex h-full items-center justify-center text-slate-400">
+                  {logoFailed ? (
+                    <span className="text-amber-400 text-xs font-bold text-center" title="تعذر تحميل الشعار الحالي">⚠️</span>
+                  ) : (
+                    <span className="text-3xl">🏪</span>
+                  )}
+                </div>
               )}
               <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl">
                 {uploadingLogo

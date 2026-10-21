@@ -102,7 +102,11 @@ export async function uploadStoreImage(
     .from(BUCKET)
     .upload(path, file, { upsert: true })
 
-  if (error) throw new Error(error.message)
+  if (error) {
+    const code = (error as any)?.statusCode || (error as any)?.status || ''
+    const msg = error.message || 'فشل رفع الملف إلى خدمة التخزين'
+    throw new Error(`${msg}${code ? ` (رمز: ${code})` : ''}`)
+  }
 
   const { data } = supabase.storage.from(BUCKET).getPublicUrl(path)
   // نضيف timestamp لمنع cache القديم
