@@ -672,6 +672,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
                     type="button"
                     disabled={isOutOfStock||submitting||!!receiptData}
                     aria-label={`إضافة ${product.name}`}
+                    title={product.name}
                     key={product.id}
                     onClick={() => !isOutOfStock && addProduct(product)}
                     className={`${posPresentation?styles.product:'p-3 rounded-2xl'} group relative flex flex-col justify-between border text-right transition duration-150 select-none cursor-pointer ${
@@ -713,7 +714,12 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
                       </div>
 
                       {/* اسم الصنف وكوده */}
-                      <h3 className="font-bold text-white text-xs line-clamp-2 group-hover:text-sky-300 transition leading-snug">
+                      <h3
+                        className={`font-bold text-white group-hover:text-sky-300 transition leading-snug ${
+                          posPresentation ? 'text-xs sm:text-sm line-clamp-4' : 'text-xs line-clamp-2'
+                        }`}
+                        title={product.name}
+                      >
                         {product.name}
                       </h3>
                       {product.sku && (
