@@ -19,11 +19,13 @@ export default async function NewPurchasePage({searchParams}:{searchParams?:{sup
   const [
     { data: store },
     suppliers,
-    products
+    products,
+    { data: nextInvoiceNumber },
   ] = await Promise.all([
     supabase.from('stores').select('id, name, currency_code').eq('id', storeId).single(),
     allRows<any>((a,b)=>supabase.from('suppliers').select('id,name,phone,balance').eq('store_id',storeId).order('id').range(a,b)),
-    allRows<any>((a,b)=>supabase.from('products').select('id,name,sku,barcode,price,cost_price,stock_quantity').eq('store_id',storeId).order('id').range(a,b))
+    allRows<any>((a,b)=>supabase.from('products').select('id,name,sku,barcode,price,cost_price,stock_quantity').eq('store_id',storeId).order('id').range(a,b)),
+    supabase.rpc('get_next_purchase_invoice_number_preview', { p_store_id: storeId }),
   ])
 
   if(!store)throw new Error('تعذر تحميل المتجر')
@@ -33,6 +35,7 @@ export default async function NewPurchasePage({searchParams}:{searchParams?:{sup
   return (
     <CreatePurchaseClient
       initialSupplier={searchParams?.supplier_id}
+      suggestedInvoiceNumber={nextInvoiceNumber || 'BIL-0001'}
       cashBoxes={boxes||[]}
       store={store!}
       suppliers={suppliers || []}

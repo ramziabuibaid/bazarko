@@ -33,11 +33,21 @@ export default function PurchaseDetail({
           </Link>
           <h1 className="text-2xl font-bold mt-3">{printOnly ? 'طباعة فاتورة مشتريات' : 'تفاصيل فاتورة المشتريات'}</h1>
         </div>
-        <PrintButton
-          elementId="purchase-document"
-          label="طباعة الفاتورة PDF"
-          filename={`purchase-${purchase.invoice_number.replace(/[^a-zA-Z0-9-]/g, '')}.pdf`}
-        />
+        <div className="flex items-center gap-2">
+          {purchase.status !== 'cancelled' && (
+            <Link
+              href={`/dashboard/purchases/${purchase.id}/edit`}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-sky-500/30 bg-sky-600/20 px-3.5 py-2 text-xs font-bold text-sky-200 hover:bg-sky-600/30 transition shadow-sm"
+            >
+              <span>✏️</span> تعديل الفاتورة
+            </Link>
+          )}
+          <PrintButton
+            elementId="purchase-document"
+            label="طباعة الفاتورة PDF"
+            filename={`purchase-${purchase.invoice_number.replace(/[^a-zA-Z0-9-]/g, '')}.pdf`}
+          />
+        </div>
       </header>
 
       {!printOnly && purchase.status === 'draft' && store.id && (

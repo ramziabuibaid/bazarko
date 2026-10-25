@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
+import { checkStorePermission } from '@/lib/supabase/permissions'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import NewOrderForm from '@/components/dashboard/orders/NewOrderForm'
@@ -17,11 +18,19 @@ export default async function PosPage() {
   const storeId = await getStoreForUser(supabase, user!.id)
   if (!storeId) redirect('/onboarding')
 
-  const { data: store } = await supabase
-    .from('stores')
-    .select('id, name, phone, address, currency_code, tax_number, pos_receipt_footer')
-    .eq('id', storeId)
-    .single()
+  const [
+    canApproveBelowCost,
+    { data: store },
+    { data: profile },
+  ] = await Promise.all([
+    checkStorePermission(storeId, 'sales.below_cost'),
+    supabase
+      .from('stores')
+      .select('id, name, phone, address, currency_code, tax_number, pos_receipt_footer')
+      .eq('id', storeId)
+      .single(),
+    supabase.from('profiles').select('full_name').eq('id', user.id).maybeSingle(),
+  ])
 
   if (!store) redirect('/onboarding')
 
@@ -47,6 +56,8 @@ export default async function PosPage() {
         posPresentation
         storeId={store.id}
         currencyCode={store.currency_code}
+        canApproveBelowCost={canApproveBelowCost}
+        userName={profile?.full_name || user.email?.split('@')[0] || ''}
         storeInfo={{
           name: store.name,
           phone: store.phone,

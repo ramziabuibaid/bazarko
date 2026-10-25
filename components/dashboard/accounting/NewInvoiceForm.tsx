@@ -8,6 +8,8 @@ import Link from 'next/link'
 import styles from './new-invoice.module.css'
 import {invoiceAmounts,validInvoiceInput} from '@/lib/invoices/create-presentation'
 import {businessDay} from '@/lib/dashboard/simple-metrics'
+import { checkBelowCostItems, type BelowCostAnalysis } from '@/lib/sales/below-cost'
+import BelowCostModal from '@/components/dashboard/sales/BelowCostModal'
 
 export interface Product {
   id: string
@@ -80,11 +82,13 @@ interface Props {
   prefill?: Prefill
   cashBoxes?: {id:string;name:string}[]
   previewData?: {products:Product[];customers:Customer[]}
+  canApproveBelowCost?: boolean
+  userName?: string
 }
 
 type CustomerMode = 'search' | 'manual' | null
 
-export default function NewInvoiceForm({ storeId, userId, currencyCode, storeName, prefill, previewData, cashBoxes=[] }: Props) {
+export default function NewInvoiceForm({ storeId, userId, currencyCode, storeName, prefill, previewData, cashBoxes=[], canApproveBelowCost = true, userName = '' }: Props) {
   const router  = useRouter()
   const supabase = createClient()
 
@@ -155,6 +159,9 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
   const remaining=total-effectivePaid
   const totalCost=items.reduce((sum,i)=>sum+i.quantity*Number(i.cost_price||0),0)
   const [reviewing,setReviewing]=useState(false)
+  const [showBelowCostModal, setShowBelowCostModal] = useState(false)
+  const [belowCostWarning, setBelowCostWarning] = useState<BelowCostAnalysis | null>(null)
+  const [approvedBelowCostHash, setApprovedBelowCostHash] = useState<string | null>(null)
   const [draftNotice,setDraftNotice]=useState('')
   const [hasDraft,setHasDraft]=useState(false)
   const [createdId,setCreatedId]=useState<string|null>(null)
@@ -248,6 +255,7 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
 
   function addProductToItems(p: Product) {
     productVersion.current++
+    setApprovedBelowCostHash(null)
     setItems(prev => [
       ...prev.filter(i=>i.name.trim()||i.product_id),
       {
@@ -269,11 +277,13 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
 
   function updateItem(key: number, field: keyof LineItem, value: string | number) {
     setReviewing(false)
+    setApprovedBelowCostHash(null)
     setItems(prev => prev.map(i => i.key === key ? { ...i, [field]: value } : i))
   }
 
   function removeItem(key: number) {
     setReviewing(false)
+    setApprovedBelowCostHash(null)
     setItems(prev => prev.filter(i => i.key !== key))
   }
 
@@ -288,8 +298,20 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
     setCustomerMode(null)
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  function handleApproveBelowCost(reason?: string) {
+    if (!belowCostWarning) return
+    const currentHash = belowCostWarning.itemsHash
+    setApprovedBelowCostHash(currentHash)
+    setShowBelowCostModal(false)
+    executeSave(currentHash, {
+      approvedBy: userName || 'المستخدم',
+      approvedAt: new Date().toISOString(),
+      reason,
+      items: belowCostWarning.items,
+    })
+  }
+
+  async function executeSave(approvedHash?: string | null, approvalDetails?: any) {
     if(saveLock.current||createdId)return
     setError('')
     const validation=validInvoiceInput(items,discountType,discountValue,issueDate,dueDate)
@@ -298,9 +320,20 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
     if(!Number.isFinite(effectivePaid)||effectivePaid<0||effectivePaid>total||(collectionMode==='partial'&&(effectivePaid<=0||effectivePaid>=total))){setError('الدفعة الجزئية يجب أن تكون أكبر من صفر وأقل من الإجمالي.');return}
     if(remaining>0&&!selectedCustomer&&!(customerMode==='manual'&&customerName.trim())){setError('اختر زبوناً مسجلاً أو أدخل اسم الزبون للفاتورة غير المسددة بالكامل.');return}
     if(effectivePaid>0&&!cashBoxId){setError('اختر صندوق قبض نقدي.');return}
-    if(!reviewing){setReviewing(true);return}
     if(previewData){setError('معاينة فقط؛ لم تُحفظ فاتورة أو دفعة.');return}
-    const payload:SalesInvoiceInput={customerId:selectedCustomer?.id||null,customerName:selectedCustomer?.name||(customerMode==='manual'?customerName.trim():''),customerPhone:selectedCustomer?.phone||(customerMode==='manual'?customerPhone.trim():''),customerAddress:customerAddress.trim(),issueDate,dueDate,notes:notes.trim(),discountType,discountValue,collectionMode,amountPaid:effectivePaid,cashBoxId:effectivePaid>0?cashBoxId:null,orderId:pendingRequest.current?pendingRequest.current.payload.orderId:prefill?.orderId||null,quotationId:pendingRequest.current?pendingRequest.current.payload.quotationId:prefill?.quotationId||null,items:items.map(i=>({product_id:i.product_id,name:i.name.trim(),sku:i.sku,quantity:i.quantity,unit_price:i.unit_price}))}
+    const payload:SalesInvoiceInput={
+      customerId:selectedCustomer?.id||null,
+      customerName:selectedCustomer?.name||(customerMode==='manual'?customerName.trim():''),
+      customerPhone:selectedCustomer?.phone||(customerMode==='manual'?customerPhone.trim():''),
+      customerAddress:customerAddress.trim(),
+      issueDate,dueDate,notes:notes.trim(),discountType,discountValue,collectionMode,
+      amountPaid:effectivePaid,
+      cashBoxId:effectivePaid>0?cashBoxId:null,
+      orderId:pendingRequest.current?pendingRequest.current.payload.orderId:prefill?.orderId||null,
+      quotationId:pendingRequest.current?pendingRequest.current.payload.quotationId:prefill?.quotationId||null,
+      items:items.map(i=>({product_id:i.product_id,name:i.name.trim(),sku:i.sku,quantity:i.quantity,unit_price:i.unit_price})),
+      belowCostApproval: approvalDetails,
+    }
     if(pendingRequest.current&&JSON.stringify(pendingRequest.current.payload)!==JSON.stringify(payload)){setError('يوجد طلب سابق لم تُؤكد نتيجته. استعده وأعد محاولته قبل إنشاء فاتورة أخرى.');return}
     const request=pendingRequest.current||{id:crypto.randomUUID(),payload}
     try{sessionStorage.setItem(pendingKey,JSON.stringify(request))}catch{setError('تعذر حفظ معرف الطلب محلياً. تحقق من إتاحة تخزين المتصفح قبل الحفظ.');return}
@@ -315,10 +348,39 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
     finally{saveLock.current=false;setSaving(false)}
   }
 
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if(saveLock.current||createdId)return
+    setError('')
+    const validation=validInvoiceInput(items,discountType,discountValue,issueDate,dueDate)
+    if(validation){setError(validation);return}
+    if(total<=0){setError('الإجمالي يجب أن يكون موجباً.');return}
+    if(!Number.isFinite(effectivePaid)||effectivePaid<0||effectivePaid>total||(collectionMode==='partial'&&(effectivePaid<=0||effectivePaid>=total))){setError('الدفعة الجزئية يجب أن تكون أكبر من صفر وأقل من الإجمالي.');return}
+    if(remaining>0&&!selectedCustomer&&!(customerMode==='manual'&&customerName.trim())){setError('اختر زبوناً مسجلاً أو أدخل اسم الزبون للفاتورة غير المسددة بالكامل.');return}
+    if(effectivePaid>0&&!cashBoxId){setError('اختر صندوق قبض نقدي.');return}
+    if(!reviewing){setReviewing(true);return}
+
+    // التحقق من البيع بأقل من التكلفة
+    const analysis = checkBelowCostItems(items, discountType, discountValue)
+    if (analysis.hasBelowCost && approvedBelowCostHash !== analysis.itemsHash) {
+      setBelowCostWarning(analysis)
+      setShowBelowCostModal(true)
+      return
+    }
+
+    const approvalDetails = (analysis.hasBelowCost && approvedBelowCostHash === analysis.itemsHash) ? {
+      approvedBy: userName || 'المستخدم',
+      approvedAt: new Date().toISOString(),
+      items: analysis.items,
+    } : undefined
+
+    await executeSave(approvedBelowCostHash, approvalDetails)
+  }
+
   // ── Render ────────────────────────────────────────────────────
 
   return (
-    <form noValidate onSubmit={handleSubmit} onChangeCapture={()=>setReviewing(false)} className={styles.form} dir="rtl">
+    <form noValidate onSubmit={handleSubmit} onChangeCapture={() => { setReviewing(false); setApprovedBelowCostHash(null); }} className={styles.form} dir="rtl">
 <div className={styles.main}>
 
       {/* شارة الطلبية المرتبطة */}
@@ -845,6 +907,19 @@ export default function NewInvoiceForm({ storeId, userId, currencyCode, storeNam
         </button>
       </div>
 </aside>{reviewing&&<section className={styles.review} role="region" aria-label="مراجعة الفاتورة"><h2>راجع الفاتورة قبل تأكيد الحفظ</h2><p>الزبون: {selectedCustomer?.name||customerName||'عميل نقدي'} · {items.length} بنود · الإصدار: {issueDate}</p><p>الإجمالي: {fmt(total)} {currencyCode} · المدفوع: {fmt(effectivePaid)} · المتبقي: {fmt(remaining)}</p><p className={styles.notice}>سيتم حفظ الفاتورة وبنودها وتحديث المخزون وحساب الزبون. راجع الطباعة من صفحة الفاتورة بعد الحفظ.</p></section>}
+
+      {showBelowCostModal && belowCostWarning && (
+        <BelowCostModal
+          isOpen={showBelowCostModal}
+          items={belowCostWarning.items}
+          totalLoss={belowCostWarning.totalLoss}
+          currencyCode={currencyCode}
+          canApprove={canApproveBelowCost}
+          userName={userName}
+          onClose={() => setShowBelowCostModal(false)}
+          onApprove={handleApproveBelowCost}
+        />
+      )}
     </form>
   )
 }

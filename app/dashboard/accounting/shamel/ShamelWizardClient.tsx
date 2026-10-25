@@ -730,6 +730,30 @@ export default function ShamelWizardClient({
     }
   }
 
+  const pollSyncStatus = async (maxAttempts = 40): Promise<any> => {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise(r => setTimeout(r, 3000))
+      try {
+        const checkRes = await fetch('/api/shamel/sync')
+        if (checkRes.ok) {
+          const checkData = await checkRes.json()
+          const cfg = checkData?.config
+          if (cfg?.last_sync_status === 'success') {
+            return { ok: true, config: cfg, message: cfg.last_sync_message || 'اكتملت المزامنة بنجاح.' }
+          }
+          if (cfg?.last_sync_status === 'error') {
+            throw new Error(cfg.last_sync_message || 'فشلت المزامنة في الخلفية')
+          }
+        }
+      } catch (pollErr: any) {
+        if (pollErr.message && !pollErr.message.includes('fetch')) {
+          throw pollErr
+        }
+      }
+    }
+    throw new Error('المزامنة ما زالت قيد المعالجة في الخلفية. يمكنك تحديث الصفحة بعد قليل لمشاهدة النتائج.')
+  }
+
   const handleSyncNow = async () => {
     setSyncingNow(true)
     setErrorMsg(null)
@@ -743,6 +767,23 @@ export default function ShamelWizardClient({
       
       let data: any = {}
       const text = await res.text()
+      const isHtmlResponse = text.trim().startsWith('<') || res.status === 524 || res.status === 504 || res.status === 502
+
+      if (isHtmlResponse) {
+        // Gateway / Cloudflare timeout on the HTTP connection, but process may still be running in background
+        setSuccessMsg('جاري استكمال سحب ملفات الشامل ومعالجة البيانات في الخلفية، يرجى الانتظار...')
+        const pollResult = await pollSyncStatus()
+        setSuccessMsg(pollResult.message)
+        if (pollResult.config) {
+          setSyncConfig(pollResult.config)
+          if (pollResult.config.gdrive_folder_name) {
+            setFolderNameInput(pollResult.config.gdrive_folder_name)
+          }
+        }
+        router.refresh()
+        return
+      }
+
       try {
         data = JSON.parse(text)
       } catch {

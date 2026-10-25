@@ -8,6 +8,8 @@ import {allRows} from '@/lib/dashboard/load-simple-dashboard'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import PosReceiptModal, { ReceiptData } from './PosReceiptModal'
+import { checkBelowCostItems, type BelowCostAnalysis } from '@/lib/sales/below-cost'
+import BelowCostModal from '@/components/dashboard/sales/BelowCostModal'
 import ProductAttributePillFilters, {
   type ProductAttributeFilters,
   getProductType,
@@ -71,6 +73,8 @@ interface Props {
   currencyCode: string
   posPresentation?: boolean
   previewCatalog?: {products:Product[];categories:Category[]}
+  canApproveBelowCost?: boolean
+  userName?: string
   storeInfo?: {
     name?: string
     phone?: string | null
@@ -89,7 +93,7 @@ function useDebounce<T>(value: T, delay: number): T {
   return debounced
 }
 
-export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPresentation=false, previewCatalog }: Props) {
+export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPresentation=false, previewCatalog, canApproveBelowCost = true, userName = '' }: Props) {
   const router = useRouter()
   const supabase = createClient()
 
@@ -99,6 +103,11 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
   const [items, setItems] = useState<LineItem[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+
+  // البيع بأقل من التكلفة
+  const [showBelowCostModal, setShowBelowCostModal] = useState(false)
+  const [belowCostWarning, setBelowCostWarning] = useState<BelowCostAnalysis | null>(null)
+  const [approvedBelowCostHash, setApprovedBelowCostHash] = useState<string | null>(null)
 
   // إيصال الطباعة الفوري
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null)
@@ -239,6 +248,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
 
   function addProduct(product: Product) {
     if(product.track_stock&&(product.stock_available??0)<=0){setError('هذا المنتج غير متوفر حالياً');return}
+    setApprovedBelowCostHash(null)
     setItems(prev => {
       const existing = prev.find(i => i.productId === product.id)
       if (existing) {
@@ -261,6 +271,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
   function updateQty(productId: string, qty: number) {
     const item=items.find(i=>i.productId===productId)
     if(!item||!allowedQuantity(qty,item.max)){setError('الكمية تتجاوز المخزون المتاح');return}
+    setApprovedBelowCostHash(null)
     if (qty <= 0) {
       setItems(prev => prev.filter(i => i.productId !== productId))
     } else {
@@ -271,6 +282,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
   function updatePrice(productId: string, price: string) {
     const v = parseFloat(price)
     if (!isNaN(v) && v >= 0) {
+      setApprovedBelowCostHash(null)
       setItems(prev => prev.map(i => i.productId === productId ? { ...i, unitPrice: v } : i))
     }
   }
@@ -352,19 +364,22 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
     }
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  function handleApproveBelowCost(reason?: string) {
+    if (!belowCostWarning) return
+    const currentHash = belowCostWarning.itemsHash
+    setApprovedBelowCostHash(currentHash)
+    setShowBelowCostModal(false)
+    executeOrderSubmit(currentHash, {
+      approvedBy: userName || 'المستخدم',
+      approvedAt: new Date().toISOString(),
+      reason,
+      items: belowCostWarning.items,
+    })
+  }
+
+  async function executeOrderSubmit(approvedHash?: string | null, approvalDetails?: any) {
     if(lock.current||receiptData)return
     setError('')
-    if(items.some(i=>!allowedQuantity(i.quantity,i.max)||!Number.isFinite(i.unitPrice)||i.unitPrice<0)||totalAmount<=0){setError('تحقق من الكميات والأسعار');return}
-    if(mode==='pos'&&!cash.valid){setError('المبلغ المستلم أقل من إجمالي البيع');return}
-    if(mode==='account'&&(!Number.isFinite(Number(amountPaid||0))||Number(amountPaid)<0||Number(amountPaid)>totalAmount)){setError('الدفعة يجب أن تكون بين صفر والإجمالي');return}
-
-    if (!items.length) { setError('أضف منتجاً واحداً على الأقل للسلة'); return }
-    if (mode === 'account' && !selectedCustomer) { setError('يرجى اختيار اسم العميل من دليل الحسابات في حالة البيع الآجل'); return }
-
-    if(previewCatalog){setError('معاينة فقط؛ لم تسجل فاتورة أو دفعة.');return}
-
     lock.current=true
     setSubmitting(true)
     try {
@@ -389,6 +404,7 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
           paymentMethod: activePayMethod,
           amountPaid: activeEffectivePaid,
           notes,
+          belowCostApproval: approvalDetails,
         }),
       })
 
@@ -430,6 +446,36 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
       lock.current=false
       setSubmitting(false)
     }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if(lock.current||receiptData)return
+    setError('')
+    if(items.some(i=>!allowedQuantity(i.quantity,i.max)||!Number.isFinite(i.unitPrice)||i.unitPrice<0)||totalAmount<=0){setError('تحقق من الكميات والأسعار');return}
+    if(mode==='pos'&&!cash.valid){setError('المبلغ المستلم أقل من إجمالي البيع');return}
+    if(mode==='account'&&(!Number.isFinite(Number(amountPaid||0))||Number(amountPaid)<0||Number(amountPaid)>totalAmount)){setError('الدفعة يجب أن تكون بين صفر والإجمالي');return}
+
+    if (!items.length) { setError('أضف منتجاً واحداً على الأقل للسلة'); return }
+    if (mode === 'account' && !selectedCustomer) { setError('يرجى اختيار اسم العميل من دليل الحسابات في حالة البيع الآجل'); return }
+
+    if(previewCatalog){setError('معاينة فقط؛ لم تسجل فاتورة أو دفعة.');return}
+
+    // التحقق من البيع بأقل من التكلفة
+    const analysis = checkBelowCostItems(items, totalAmount, 0)
+    if (analysis.hasBelowCost && approvedBelowCostHash !== analysis.itemsHash) {
+      setBelowCostWarning(analysis)
+      setShowBelowCostModal(true)
+      return
+    }
+
+    const approvalDetails = (analysis.hasBelowCost && approvedBelowCostHash === analysis.itemsHash) ? {
+      approvedBy: userName || 'المستخدم',
+      approvedAt: new Date().toISOString(),
+      items: analysis.items,
+    } : undefined
+
+    await executeOrderSubmit(approvedBelowCostHash, approvalDetails)
   }
 
   function handleNewSale() {
@@ -1122,6 +1168,19 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
             </form>
           </div>
         </div>
+      )}
+
+      {showBelowCostModal && belowCostWarning && (
+        <BelowCostModal
+          isOpen={showBelowCostModal}
+          items={belowCostWarning.items}
+          totalLoss={belowCostWarning.totalLoss}
+          currencyCode={currencyCode}
+          canApprove={canApproveBelowCost}
+          userName={userName}
+          onClose={() => setShowBelowCostModal(false)}
+          onApprove={handleApproveBelowCost}
+        />
       )}
     </div>
   )

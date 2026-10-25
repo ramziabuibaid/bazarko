@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { getStoreForUser } from '@/lib/supabase/getStore'
+import { checkStorePermission } from '@/lib/supabase/permissions'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import {getInvoiceCashBoxes} from './create-invoice-action'
@@ -121,6 +122,10 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: S
   }
 
   const cashBoxes=await getInvoiceCashBoxes()
+  const canApproveBelowCost = await checkStorePermission(storeId, 'sales.below_cost')
+  const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', user.id).maybeSingle()
+  const userName = profile?.full_name || user.email || 'المستخدم'
+
   return (
     <div className="p-4 sm:p-6 max-w-[1600px]" dir="rtl">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -149,6 +154,8 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: S
         storeName={store.name}
         prefill={prefill}
         cashBoxes={cashBoxes}
+        canApproveBelowCost={canApproveBelowCost}
+        userName={userName}
       />
     </div>
   )

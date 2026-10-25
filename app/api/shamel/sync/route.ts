@@ -150,7 +150,8 @@ export async function POST(req: NextRequest) {
 
         const saveIsolated = async (kind: string, items: any[]) => {
           if (!items || items.length === 0) return
-          const chunks = chunkArray(items, 300)
+          const batchSize = (kind === 'entries' || kind === 'invoice_items' || kind === 'cheques') ? 1500 : 500
+          const chunks = chunkArray(items, batchSize)
           for (const c of chunks) {
             const { error: rpcErr } = await supabase.rpc('shamel_save_isolated_batch', {
               p_store_id: storeId,

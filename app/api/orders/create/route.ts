@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { sendOrderEmail } from '@/lib/email/order-email'
 import { postPosSaleJournalEntries } from '@/lib/accounting/engine'
+import { logFinancialEvent } from '@/lib/accounting/audit'
 
 interface LineItem {
   productId: string
@@ -22,6 +23,12 @@ interface CreateOrderBody {
   paymentMethod: 'cash' | 'bank_transfer' | 'check' | 'online' | 'credit'
   amountPaid: number
   notes?: string
+  belowCostApproval?: {
+    approvedBy: string
+    approvedAt: string
+    reason?: string
+    items: any[]
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -480,6 +487,26 @@ export async function POST(req: NextRequest) {
         total_price: i.unitPrice * i.quantity,
       })),
     })
+  }
+
+  if (body.belowCostApproval && inv?.id) {
+    await logFinancialEvent({
+      storeId: store.id,
+      entityType: 'invoice',
+      entityId: inv.id,
+      entityLabel: `نقطة بيع POS بيع بأقل من التكلفة — طلب #${order.order_number}`,
+      action: 'create',
+      actorId: user.id,
+      details: {
+        below_cost_approved: true,
+        order_id: order.id,
+        order_number: order.order_number,
+        approved_by: body.belowCostApproval.approvedBy,
+        approved_at: body.belowCostApproval.approvedAt,
+        reason: body.belowCostApproval.reason,
+        items: body.belowCostApproval.items,
+      },
+    }).catch(() => {})
   }
 
   return NextResponse.json({

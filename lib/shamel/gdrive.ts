@@ -193,7 +193,7 @@ export async function syncFromGoogleDriveFolder(folderId: string): Promise<Googl
   const extractedFiles = new Map<string, ExtractedFile>()
   const downloadedNames: string[] = []
 
-  // Check which known tables exist
+  // Check which known tables exist (only download what Shamel parser actually uses)
   const tablesToDownload: { key: string; name: string; id: string }[] = []
   for (const table of KNOWN_SHAMEL_TABLES) {
     const key = table.filename.toLowerCase()
@@ -203,21 +203,14 @@ export async function syncFromGoogleDriveFolder(folderId: string): Promise<Googl
     }
   }
 
-  // Also include any other .dat files present (e.g. sitems.dat, cpage.dat, etc.)
-  for (const [key, info] of files.entries()) {
-    if (key.endsWith('.dat') && !tablesToDownload.some(t => t.key === key)) {
-      tablesToDownload.push({ key, name: info.name, id: info.id })
-    }
-  }
-
   if (tablesToDownload.length === 0) {
     throw new Error(
       'لم يتم العثور على أي ملفات محاسبية للشامل (.DAT) داخل مجلد Google Drive المحدد. يرجى التأكد من اختيار المجلد الصحيح الذي يحتوي على ملفات الشامل.'
     )
   }
 
-  // Download all files in parallel (batched in chunks of 5 to avoid connection flooding)
-  const chunkSize = 5
+  // Download files in parallel (batched with concurrency of 8)
+  const chunkSize = 8
   for (let i = 0; i < tablesToDownload.length; i += chunkSize) {
     const batch = tablesToDownload.slice(i, i + chunkSize)
     await Promise.all(

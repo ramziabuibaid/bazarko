@@ -317,3 +317,139 @@ export async function deleteInvoice(invoiceId: string): Promise<{ ok: boolean; e
   revalidatePath('/dashboard/sales')
   return { ok: true }
 }
+
+export interface UpdateSalesInvoiceInput {
+  customerId: string | null
+  customerName: string
+  customerPhone?: string | null
+  customerAddress?: string | null
+  issueDate: string
+  dueDate?: string | null
+  paymentMethod: 'cash' | 'credit' | 'bank' | 'check' | 'card'
+  discountType: 'amount' | 'percent'
+  discountValue: number
+  amountPaid: number
+  notes?: string | null
+  items: {
+    product_id: string | null
+    name: string
+    sku?: string | null
+    quantity: number
+    unit_price: number
+  }[]
+  belowCostApproval?: {
+    approvedBy: string
+    approvedAt: string
+    reason?: string
+    items: any[]
+  }
+}
+
+/**
+ * تعديل فاتورة مبيعات ذرياً مع تحديث المخزون، كشف حساب الزبون، والقيد المحاسبي المرتبط
+ */
+export async function updateSalesInvoice(
+  invoiceId: string,
+  input: UpdateSalesInvoiceInput,
+): Promise<{ ok: boolean; error?: string; data?: any }> {
+  try {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { ok: false, error: 'غير مصرح؛ يرجى تسجيل الدخول' }
+
+    const storeId = await getStoreForUser(supabase, user.id)
+    if (!storeId) return { ok: false, error: 'المتجر غير موجود' }
+
+    await requireStorePermission(storeId, 'sales.write')
+
+    if (!input || !Array.isArray(input.items) || input.items.length === 0) {
+      return { ok: false, error: 'يجب إضافة بند واحد على الأقل للفاتورة' }
+    }
+
+    let activeCustomerId = input.customerId
+    if (!activeCustomerId && input.customerName?.trim()) {
+      const trimmedName = input.customerName.trim()
+      const trimmedPhone = input.customerPhone?.trim() || null
+      const trimmedAddress = input.customerAddress?.trim() || null
+
+      const { data: existing } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('store_id', storeId)
+        .eq('is_active', true)
+        .ilike('name', trimmedName)
+        .limit(1)
+
+      if (existing && existing.length > 0) {
+        activeCustomerId = existing[0].id
+      } else {
+        const { data: newCust, error: custErr } = await supabase
+          .from('customers')
+          .insert({
+            store_id: storeId,
+            name: trimmedName,
+            phone: trimmedPhone,
+            address: trimmedAddress,
+            customer_type: 'retail',
+            is_active: true,
+          })
+          .select('id')
+          .single()
+        if (!custErr && newCust?.id) {
+          activeCustomerId = newCust.id
+        }
+      }
+    }
+
+    const payload = {
+      ...input,
+      customerId: activeCustomerId,
+    }
+
+    const { data, error } = await supabase.rpc('update_sales_invoice_atomic', {
+      p_store_id: storeId,
+      p_invoice_id: invoiceId,
+      p_payload: payload,
+    })
+
+    if (error) {
+      console.error('Error in update_sales_invoice_atomic RPC:', error)
+      return { ok: false, error: error.message || 'فشل تعديل الفاتورة' }
+    }
+
+    if (input.belowCostApproval) {
+      await logFinancialEvent({
+        storeId,
+        entityType: 'invoice',
+        entityId: invoiceId,
+        entityLabel: `فاتورة مبيعات بيع بأقل من التكلفة`,
+        action: 'update',
+        actorId: user.id,
+        details: {
+          below_cost_approved: true,
+          approved_by: input.belowCostApproval.approvedBy,
+          approved_at: input.belowCostApproval.approvedAt,
+          reason: input.belowCostApproval.reason,
+          items: input.belowCostApproval.items,
+        },
+      }).catch(() => {})
+    }
+
+    revalidatePath('/dashboard')
+    revalidatePath('/dashboard/accounting')
+    revalidatePath('/dashboard/accounting/invoices')
+    revalidatePath(`/dashboard/accounting/invoices/${invoiceId}`)
+    revalidatePath(`/dashboard/accounting/invoices/${invoiceId}/edit`)
+    revalidatePath('/dashboard/accounting/journal')
+    revalidatePath('/dashboard/customers')
+    revalidatePath('/dashboard/customers/ledger')
+    revalidatePath('/dashboard/products')
+    revalidatePath('/dashboard/finance')
+
+    return { ok: true, data }
+  } catch (err: any) {
+    console.error('Exception in updateSalesInvoice:', err)
+    return { ok: false, error: err.message || 'حدث خطأ غير متوقع أثناء تعديل الفاتورة' }
+  }
+}
+

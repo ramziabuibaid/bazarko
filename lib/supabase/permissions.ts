@@ -7,6 +7,7 @@ export type Permission =
   | 'team.privileged'
   | 'settings.write'
   | 'sales.write'
+  | 'sales.below_cost'
   | 'purchases.write'
   | 'inventory.write'
   | 'journal.read'

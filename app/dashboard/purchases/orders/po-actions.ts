@@ -168,13 +168,14 @@ export async function convertPOToPurchaseInvoice(poId: string): Promise<{ ok: bo
       return { ok: false, error: 'تم تحويل أمر الشراء هذا مسبقاً إلى فاتورة مشتريات' }
     }
 
-    // 2. توليد رقم فاتورة شراء جديدة
+    // 2. توليد رقم فاتورة شراء جديدة تلقائي متسلسل
+    const { data: generatedNum } = await supabase.rpc('generate_purchase_invoice_number', { p_store_id: storeId })
     const { count } = await supabase
       .from('purchase_invoices')
       .select('*', { count: 'exact', head: true })
       .eq('store_id', storeId)
 
-    const nextInvoiceNum = `PINV-${String((count ?? 0) + 1).padStart(4, '0')}`
+    const nextInvoiceNum = generatedNum || `BIL-${String((count ?? 0) + 1).padStart(4, '0')}`
 
     // 3. إنشاء فاتورة المشتريات
     const { data: newInv, error: invErr } = await supabase

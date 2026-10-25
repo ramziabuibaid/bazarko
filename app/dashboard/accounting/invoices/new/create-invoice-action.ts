@@ -3,12 +3,19 @@ import {createClient} from '@/lib/supabase/server'
 import {getStoreForUser} from '@/lib/supabase/getStore'
 import {revalidatePath} from 'next/cache'
 import {validInvoiceInput} from '@/lib/invoices/create-presentation'
+import {logFinancialEvent} from '@/lib/accounting/audit'
 export interface SalesInvoiceInput {
  customerId:string|null;customerName:string;customerPhone:string;customerAddress:string;
  issueDate:string;dueDate:string;notes:string;discountType:'amount'|'percent';discountValue:number;
  collectionMode:'full'|'partial'|'none';amountPaid:number;cashBoxId:string|null;
  orderId:string|null;quotationId:string|null;
  items:{product_id:string|null;name:string;sku:string;quantity:number;unit_price:number}[];
+ belowCostApproval?: {
+   approvedBy: string;
+   approvedAt: string;
+   reason?: string;
+   items: any[];
+ };
 }
 export async function createSalesInvoice(storeId:string,requestId:string,input:SalesInvoiceInput):Promise<{ok:boolean;invoiceId?:string;error?:string;uncertain?:boolean}>{
  const supabase=createClient()
@@ -64,6 +71,23 @@ export async function createSalesInvoice(storeId:string,requestId:string,input:S
    const {data,error}=await supabase.rpc('create_sales_invoice_atomic',{p_store_id:storeId,p_request_id:requestId,p_payload:payloadWithCustomer})
    if(error)return {ok:false,error:error.message,uncertain:!error.code||!/^[0-9A-Z]{5}$/.test(error.code)}
    if(!data?.invoiceId)return {ok:false,error:'تعذر تأكيد نتيجة الحفظ؛ أعد المحاولة بنفس الطلب.',uncertain:true}
+   if (input.belowCostApproval) {
+     await logFinancialEvent({
+       storeId,
+       entityType: 'invoice',
+       entityId: data.invoiceId,
+       entityLabel: 'فاتورة مبيعات بيع بأقل من التكلفة',
+       action: 'create',
+       actorId: user.id,
+       details: {
+         below_cost_approved: true,
+         approved_by: input.belowCostApproval.approvedBy,
+         approved_at: input.belowCostApproval.approvedAt,
+         reason: input.belowCostApproval.reason,
+         items: input.belowCostApproval.items,
+       },
+     }).catch(() => {})
+   }
    // Cache invalidation must not turn a committed invoice into a failed save.
    try{
      revalidatePath('/dashboard/accounting/invoices')

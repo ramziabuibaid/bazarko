@@ -3,15 +3,17 @@
 import { useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { recordAuditEvent } from '@/app/dashboard/accounting/audit-actions'
-import { deleteInvoice } from '@/app/dashboard/accounting/invoices/invoice-actions'
+import { deleteInvoice, updateSalesInvoice } from '@/app/dashboard/accounting/invoices/invoice-actions'
 import BackToDashboardButton from '@/components/dashboard/BackToDashboardButton'
+import { checkBelowCostItems, type BelowCostAnalysis } from '@/lib/sales/below-cost'
+import BelowCostModal from '@/components/dashboard/sales/BelowCostModal'
 
 interface Product {
   id: string
   name: string
   sku: string | null
   price: number
+  cost_price?: number
   thumbnail_url: string | null
 }
 
@@ -30,6 +32,7 @@ interface LineItem {
   sku: string
   quantity: number
   unit_price: number
+  cost_price?: number
 }
 
 interface InvoiceData {
@@ -57,6 +60,7 @@ interface InvoiceData {
     sku: string | null
     quantity: number
     unit_price: number
+    cost_price?: number
     total: number
   }[]
 }
@@ -67,6 +71,8 @@ interface Props {
   currencyCode: string
   storeName: string
   invoice: InvoiceData
+  canApproveBelowCost?: boolean
+  userName?: string
 }
 
 let keySeq = 1000
@@ -79,7 +85,7 @@ function useDebounce<T extends (...args: Parameters<T>) => void>(fn: T, ms: numb
   }, [fn, ms])
 }
 
-export default function EditInvoiceForm({ storeId, userId, currencyCode, storeName, invoice }: Props) {
+export default function EditInvoiceForm({ storeId, userId, currencyCode, storeName, invoice, canApproveBelowCost = true, userName = '' }: Props) {
   const router = useRouter()
   const supabase = createClient()
 
@@ -103,8 +109,14 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
       sku: i.sku || '',
       quantity: Number(i.quantity),
       unit_price: Number(i.unit_price),
+      cost_price: Number(i.cost_price || 0),
     }))
   )
+
+  // ── البيع بأقل من التكلفة ────────────────────────────────────
+  const [showBelowCostModal, setShowBelowCostModal] = useState(false)
+  const [belowCostWarning, setBelowCostWarning] = useState<BelowCostAnalysis | null>(null)
+  const [approvedBelowCostHash, setApprovedBelowCostHash] = useState<string | null>(null)
 
   // ── طريقة الدفع ──────────────────────────────────────────────
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'credit' | 'bank' | 'check' | 'card'>(
@@ -201,7 +213,7 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
 
     let query = supabase
       .from('products')
-      .select('id, name, sku, price, thumbnail_url')
+      .select('id, name, sku, price, cost_price, thumbnail_url')
       .eq('store_id', storeId)
       .eq('is_active', true)
 
@@ -217,6 +229,7 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
   }, 200)
 
   function addProductToItems(p: Product) {
+    setApprovedBelowCostHash(null)
     setItems(prev => [
       ...prev,
       {
@@ -226,6 +239,7 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
         sku: p.sku ?? '',
         quantity: 1,
         unit_price: p.price,
+        cost_price: Number(p.cost_price || 0),
       },
     ])
     setProductSearch('')
@@ -233,6 +247,7 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
   }
 
   function addEmptyItem() {
+    setApprovedBelowCostHash(null)
     setItems(prev => [
       ...prev,
       {
@@ -242,20 +257,84 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
         sku: '',
         quantity: 1,
         unit_price: 0,
+        cost_price: 0,
       },
     ])
   }
 
   function updateItem(key: number, field: keyof LineItem, value: any) {
+    setApprovedBelowCostHash(null)
     setItems(prev => prev.map(i => (i.key === key ? { ...i, [field]: value } : i)))
   }
 
   function removeItem(key: number) {
     if (items.length <= 1) return
+    setApprovedBelowCostHash(null)
     setItems(prev => prev.filter(i => i.key !== key))
   }
 
-  // ── الحفظ ومعالجة الأثر المحاسبي والمخزني ───────────────────────
+  function handleApproveBelowCost(reason?: string) {
+    if (!belowCostWarning) return
+    const currentHash = belowCostWarning.itemsHash
+    setApprovedBelowCostHash(currentHash)
+    setShowBelowCostModal(false)
+    executeSave(currentHash, {
+      approvedBy: userName || 'المستخدم',
+      approvedAt: new Date().toISOString(),
+      reason,
+      items: belowCostWarning.items,
+    })
+  }
+
+  async function executeSave(approvedHash?: string | null, approvalDetails?: any) {
+    setSaving(true)
+    setError('')
+    try {
+      let effectivePaid = amountPaid
+      if (paymentMethod === 'credit') {
+        effectivePaid = Math.min(amountPaid, total - 0.01 > 0 ? total - 0.01 : 0)
+      } else if (paymentMethod === 'cash') {
+        effectivePaid = total
+      }
+
+      const res = await updateSalesInvoice(invoice.id, {
+        customerId,
+        customerName: customerName.trim(),
+        customerPhone: customerPhone.trim() || null,
+        customerAddress: customerAddress.trim() || null,
+        issueDate,
+        dueDate: dueDate || null,
+        paymentMethod,
+        discountType,
+        discountValue: Number(discountValue) || 0,
+        amountPaid: effectivePaid,
+        notes: notes.trim() || null,
+        items: items.map(i => ({
+          product_id: i.product_id || null,
+          name: i.name.trim(),
+          sku: i.sku || null,
+          quantity: Number(i.quantity),
+          unit_price: Number(i.unit_price),
+        })),
+        belowCostApproval: approvalDetails,
+      })
+
+      if (!res.ok) {
+        setError(res.error || 'حدث خطأ أثناء تعديل الفاتورة')
+        return
+      }
+
+      router.push(`/dashboard/accounting/invoices/${invoice.id}`)
+      router.refresh()
+    } catch (err: any) {
+      console.error(err)
+      setError(err?.message || 'حدث خطأ أثناء تعديل الفاتورة')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // ── الحفظ ومعالجة الأثر المحاسبي والمخزني ذرياً ────────────────
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
@@ -265,267 +344,25 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
     if (items.some(i => i.unit_price < 0)) { setError('السعر لا يمكن أن يكون سالباً'); return }
     if (items.some(i => i.quantity < 1)) { setError('الكمية يجب أن تكون 1 على الأقل'); return }
 
-    setSaving(true)
-
-    try {
-      // التحقق من قفل الفترة المحاسبية لتاريخ الفاتورة الأصلي والتاريخ الجديد
-      const { data: closedPeriodOriginal } = await supabase
-        .from('accounting_periods')
-        .select('period_name')
-        .eq('store_id', storeId)
-        .eq('is_closed', true)
-        .lte('start_date', invoice.issue_date)
-        .gte('end_date', invoice.issue_date)
-        .maybeSingle()
-
-      if (closedPeriodOriginal) {
-        setSaving(false)
-        setError(`لا يمكن تعديل فاتورة تقع ضمن فترة محاسبية مقفلة (${closedPeriodOriginal.period_name})`)
-        return
-      }
-
-      if (issueDate !== invoice.issue_date) {
-        const { data: closedPeriodNew } = await supabase
-          .from('accounting_periods')
-          .select('period_name')
-          .eq('store_id', storeId)
-          .eq('is_closed', true)
-          .lte('start_date', issueDate)
-          .gte('end_date', issueDate)
-          .maybeSingle()
-
-        if (closedPeriodNew) {
-          setSaving(false)
-          setError(`لا يمكن نقل الفاتورة لتاريخ يقع ضمن فترة محاسبية مقفلة (${closedPeriodNew.period_name})`)
-          return
-        }
-      }
-
-      // فحص كفاية المخزون لجميع البنود قبل التطبيق لمنع العجز المخزني
-      for (const newItem of items) {
-        if (newItem.product_id) {
-          const oldQty = invoice.items
-            .filter((it: any) => it.product_id === newItem.product_id)
-            .reduce((s: number, it: any) => s + Number(it.quantity || 0), 0)
-          const { data: prod } = await supabase.from('products').select('stock_quantity, track_stock, name').eq('id', newItem.product_id).single()
-          if (prod && prod.track_stock !== false) {
-            const availableStock = Number(prod.stock_quantity || 0) + oldQty
-            if (availableStock < Number(newItem.quantity)) {
-              setSaving(false)
-              setError(`الكمية المطلوبة من الصنف (${prod.name || newItem.name}) تتجاوز المخزون المتوفر (${availableStock})`)
-              return
-            }
-          }
-        }
-      }
-
-      // 1. حساب حالة السداد والمبلغ المدفوع بناءً على طريقة الدفع
-      let effectivePaid = amountPaid
-      let effectiveStatus = 'draft'
-
-      if (paymentMethod === 'credit') {
-        // آجل / على الحساب: لا يعتبر مدفوعاً
-        effectivePaid = Math.min(amountPaid, total - 0.01 > 0 ? total - 0.01 : 0)
-        effectiveStatus = effectivePaid > 0 ? 'partial' : 'draft'
-      } else if (paymentMethod === 'cash') {
-        // نقداً
-        effectivePaid = total
-        effectiveStatus = 'paid'
-      } else {
-        effectiveStatus = effectivePaid >= total ? 'paid' : effectivePaid > 0 ? 'partial' : 'draft'
-      }
-
-      // 2. إدارة المخزون: عكس الكميات السابقة أولاً لتجنب التكرار
-      for (const oldItem of invoice.items) {
-        if (oldItem.product_id) {
-          const { data: p } = await supabase.from('products').select('stock_quantity').eq('id', oldItem.product_id).single()
-          if (p) {
-            const restoredStock = Number(p.stock_quantity || 0) + Number(oldItem.quantity)
-            await supabase.from('products').update({ stock_quantity: restoredStock }).eq('id', oldItem.product_id)
-          }
-        }
-      }
-
-      // حذف حركات المخزون السابقة للفاتورة
-      await supabase.from('inventory_movements').delete().eq('ref_id', invoice.id)
-
-      // خصم الكميات الجديدة وتسجيل حركات المخزون المحدثة
-      for (const newItem of items) {
-        if (newItem.product_id) {
-          const { data: p } = await supabase.from('products').select('stock_quantity').eq('id', newItem.product_id).single()
-          if (p) {
-            const newStock = Math.max(0, Number(p.stock_quantity || 0) - Number(newItem.quantity))
-            await supabase.from('products').update({ stock_quantity: newStock }).eq('id', newItem.product_id)
-
-            await supabase.from('inventory_movements').insert({
-              store_id: storeId,
-              product_id: newItem.product_id,
-              movement_type: 'sale',
-              document_number: invoice.invoice_number,
-              document_type: 'فاتورة مبيعات (معدلة)',
-              ref_id: invoice.id,
-              entity_name: customerName || 'عميل نقدي',
-              quantity_in: 0,
-              quantity_out: Number(newItem.quantity),
-              balance_after: newStock,
-              unit_price: Number(newItem.unit_price),
-              movement_date: issueDate,
-            })
-          }
-        }
-      }
-
-      // 3. إدارة كشف حساب العميل والذمم: عكس الأثر المالي السابق وتطبيق الجديد مع الحفاظ على الرصيد الدائن
-      if (invoice.customer_id) {
-        const { data: prevCust } = await supabase.from('customers').select('balance, total_invoiced, total_paid').eq('id', invoice.customer_id).single()
-        if (prevCust) {
-          const prevNetDebt = Number(invoice.total || 0) - Number(invoice.amount_paid || 0)
-          await supabase.from('customers').update({
-            balance: Number(prevCust.balance || 0) - prevNetDebt,
-            total_invoiced: Math.max(0, Number(prevCust.total_invoiced || 0) - Number(invoice.total || 0)),
-            total_paid: Math.max(0, Number(prevCust.total_paid || 0) - Number(invoice.amount_paid || 0)),
-          }).eq('id', invoice.customer_id)
-        }
-        // مسح قيود كشف الحساب السابقة للفاتورة
-        await supabase.from('customer_ledger').delete().eq('reference_id', invoice.id).eq('reference_type', 'invoice')
-      }
-
-      // تطبيق الذمة للعميل المحدث
-      if (customerId) {
-        const { data: currCust } = await supabase.from('customers').select('balance, total_invoiced, total_paid').eq('id', customerId).single()
-        if (currCust) {
-          const currentBal = Number(currCust.balance || 0)
-          const newBalAfterInv = currentBal + total
-          const finalBal = newBalAfterInv - effectivePaid
-
-          await supabase.from('customer_ledger').insert({
-            store_id: storeId,
-            customer_id: customerId,
-            type: 'invoice',
-            date: issueDate,
-            description: `فاتورة مبيعات معدلة ${invoice.invoice_number}`,
-            debit: total,
-            credit: 0,
-            balance: newBalAfterInv,
-            reference_id: invoice.id,
-            reference_type: 'invoice',
-            created_by: userId,
-          })
-
-          if (effectivePaid > 0) {
-            await supabase.from('customer_ledger').insert({
-              store_id: storeId,
-              customer_id: customerId,
-              type: 'payment',
-              date: issueDate,
-              description: `دفعة مسددة على فاتورة ${invoice.invoice_number}`,
-              debit: 0,
-              credit: effectivePaid,
-              balance: finalBal,
-              reference_id: invoice.id,
-              reference_type: 'invoice',
-              created_by: userId,
-            })
-          }
-
-          // مطابقة الرصيد بدقة مع مجموع قيود كشف الحساب
-          const { data: ledgerSum } = await supabase
-            .from('customer_ledger')
-            .select('debit, credit')
-            .eq('customer_id', customerId)
-
-          const reconciledBalance = (ledgerSum || []).reduce(
-            (acc, row) => acc + (Number(row.debit || 0) - Number(row.credit || 0)),
-            0
-          )
-
-          await supabase.from('customers').update({
-            balance: reconciledBalance,
-            total_invoiced: Number(currCust.total_invoiced || 0) + total,
-            total_paid: Number(currCust.total_paid || 0) + effectivePaid,
-          }).eq('id', customerId)
-        }
-      }
-
-      // إعادة مطابقة رصيد العميل السابق إن تغير العميل
-      if (invoice.customer_id && invoice.customer_id !== customerId) {
-        const { data: prevLedgerSum } = await supabase
-          .from('customer_ledger')
-          .select('debit, credit')
-          .eq('customer_id', invoice.customer_id)
-
-        const prevReconciledBalance = (prevLedgerSum || []).reduce(
-          (acc, row) => acc + (Number(row.debit || 0) - Number(row.credit || 0)),
-          0
-        )
-
-        await supabase.from('customers').update({
-          balance: prevReconciledBalance,
-        }).eq('id', invoice.customer_id)
-      }
-
-
-      // 4. تحديث سجل الفاتورة نفسه
-      const { error: updateErr } = await supabase
-        .from('invoices')
-        .update({
-          customer_id: customerId || null,
-          customer_name: customerName.trim() || null,
-          customer_phone: customerPhone.trim() || null,
-          customer_address: customerAddress.trim() || null,
-          issue_date: issueDate,
-          due_date: dueDate || null,
-          payment_method: paymentMethod,
-          subtotal,
-          discount_type: discountType,
-          discount_value: Number(discountValue) || 0,
-          discount_amount: finalDiscount,
-          total,
-          amount_paid: effectivePaid,
-          status: effectiveStatus,
-          notes: notes.trim() || null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', invoice.id)
-
-      if (updateErr) throw updateErr
-
-      // 5. حذف بنود الفاتورة القديمة وإدراج الجديدة
-      await supabase.from('invoice_items').delete().eq('invoice_id', invoice.id)
-
-      await supabase.from('invoice_items').insert(
-        items.map(i => ({
-          invoice_id: invoice.id,
-          product_id: i.product_id || null,
-          name: i.name,
-          sku: i.sku || null,
-          quantity: Number(i.quantity),
-          unit_price: Number(i.unit_price),
-          total: Number(i.quantity) * Number(i.unit_price),
-        }))
-      )
-
-      // 6. توثيق التعديل في سجل الرقابة
-      await recordAuditEvent({
-        entityType: 'invoice',
-        entityId: invoice.id,
-        entityLabel: invoice.invoice_number,
-        action: 'update',
-        details: { total, effectivePaid, paymentMethod, itemsCount: items.length },
-      })
-
-      router.push(`/dashboard/accounting/invoices/${invoice.id}`)
-      router.refresh()
-    } catch (err: any) {
-      console.error(err)
-      setError(err.message || 'حدث خطأ أثناء تعديل الفاتورة')
-    } finally {
-      setSaving(false)
+    // التحقق من البيع بأقل من التكلفة
+    const analysis = checkBelowCostItems(items, discountType, discountValue)
+    if (analysis.hasBelowCost && approvedBelowCostHash !== analysis.itemsHash) {
+      setBelowCostWarning(analysis)
+      setShowBelowCostModal(true)
+      return
     }
+
+    const approvalDetails = (analysis.hasBelowCost && approvedBelowCostHash === analysis.itemsHash) ? {
+      approvedBy: userName || 'المستخدم',
+      approvedAt: new Date().toISOString(),
+      items: analysis.items,
+    } : undefined
+
+    await executeSave(approvedBelowCostHash, approvalDetails)
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6" dir="rtl">
+    <form onSubmit={handleSubmit} onChangeCapture={() => setApprovedBelowCostHash(null)} className="space-y-6" dir="rtl">
       {/* Top Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -894,6 +731,19 @@ export default function EditInvoiceForm({ storeId, userId, currencyCode, storeNa
           </div>
         </div>
       </div>
+
+      {showBelowCostModal && belowCostWarning && (
+        <BelowCostModal
+          isOpen={showBelowCostModal}
+          items={belowCostWarning.items}
+          totalLoss={belowCostWarning.totalLoss}
+          currencyCode={currencyCode}
+          canApprove={canApproveBelowCost}
+          userName={userName}
+          onClose={() => setShowBelowCostModal(false)}
+          onApprove={handleApproveBelowCost}
+        />
+      )}
     </form>
   )
 }
