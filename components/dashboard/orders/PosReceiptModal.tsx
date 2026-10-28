@@ -142,20 +142,23 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
       html, body {
         margin: 0 !important;
         padding: 0 !important;
-        width: 76mm !important;
-        max-width: 76mm !important;
+        width: 72mm !important;
+        max-width: 72mm !important;
         background: #ffffff !important;
         color: #000000 !important;
         direction: rtl !important;
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 11px;
+        line-height: 1.3;
       }
       #pos-receipt-print-area {
-        width: 76mm !important;
-        max-width: 76mm !important;
+        width: 68mm !important;
+        max-width: 68mm !important;
         margin: 0 auto !important;
-        padding: 2mm 3mm !important;
+        padding: 1mm 2mm 2mm 5mm !important;
         box-shadow: none !important;
         border: none !important;
+        box-sizing: border-box !important;
       }
       .print\\:hidden, .no-print {
         display: none !important;
@@ -362,7 +365,7 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
             id="pos-receipt-print-area"
             className={`mx-auto bg-white text-black font-mono transition-all ${
               printLayout === 'thermal'
-                ? 'w-[80mm] max-w-full p-4 border border-slate-200 shadow-sm rounded-lg print:border-none print:shadow-none print:w-[78mm] print:p-1'
+                ? 'w-[74mm] max-w-full p-3 border border-slate-200 shadow-sm rounded-lg print:border-none print:shadow-none print:w-[68mm] print:p-0'
                 : 'w-full max-w-2xl p-6 border border-slate-200 shadow-sm rounded-lg print:border-none print:shadow-none print:p-4'
             }`}
           >
@@ -389,32 +392,32 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
                 <tbody>
                   <tr>
                     <td style={{ textAlign: 'right', padding: '1.5px 0' }} className="text-neutral-700">رقم الفاتورة:</td>
-                    <td style={{ textAlign: 'left', padding: '1.5px 0' }} className="font-bold font-mono" dir="ltr">{receipt.orderNumber}</td>
+                    <td style={{ textAlign: 'left', padding: '1.5px 0 1.5px 4px' }} className="font-bold font-mono" dir="ltr">{receipt.orderNumber}</td>
                   </tr>
                   <tr>
                     <td style={{ textAlign: 'right', padding: '1.5px 0' }} className="text-neutral-700">التاريخ:</td>
-                    <td style={{ textAlign: 'left', padding: '1.5px 0' }}>{dateStr}</td>
+                    <td style={{ textAlign: 'left', padding: '1.5px 0 1.5px 4px' }}>{dateStr}</td>
                   </tr>
                   <tr>
                     <td style={{ textAlign: 'right', padding: '1.5px 0' }} className="text-neutral-700">الوقت:</td>
-                    <td style={{ textAlign: 'left', padding: '1.5px 0' }} dir="ltr">{timeStr}</td>
+                    <td style={{ textAlign: 'left', padding: '1.5px 0 1.5px 4px' }} dir="ltr">{timeStr}</td>
                   </tr>
                   {receipt.cashierName && (
                     <tr>
                       <td style={{ textAlign: 'right', padding: '1.5px 0' }} className="text-neutral-700">الكاشير:</td>
-                      <td style={{ textAlign: 'left', padding: '1.5px 0' }}>{receipt.cashierName}</td>
+                      <td style={{ textAlign: 'left', padding: '1.5px 0 1.5px 4px' }}>{receipt.cashierName}</td>
                     </tr>
                   )}
                   <tr style={{ borderTop: '1px dotted #9ca3af' }}>
                     <td style={{ textAlign: 'right', padding: '3px 0 1.5px' }} className="text-neutral-700">العميل:</td>
-                    <td style={{ textAlign: 'left', padding: '3px 0 1.5px' }} className="font-semibold">
+                    <td style={{ textAlign: 'left', padding: '3px 0 1.5px 4px' }} className="font-semibold">
                       {receipt.customerName || (isCredit ? 'عميل على الحساب' : 'زبون نقدي')}
                     </td>
                   </tr>
                   {receipt.customerPhone && (
                     <tr>
                       <td style={{ textAlign: 'right', padding: '1.5px 0' }} className="text-neutral-700">الهاتف:</td>
-                      <td style={{ textAlign: 'left', padding: '1.5px 0' }} dir="ltr">{receipt.customerPhone}</td>
+                      <td style={{ textAlign: 'left', padding: '1.5px 0 1.5px 4px' }} dir="ltr">{receipt.customerPhone}</td>
                     </tr>
                   )}
                 </tbody>
@@ -436,8 +439,8 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
                   <tr className="border-b border-black font-bold text-neutral-900">
                     <th style={{ width: '48%', textAlign: 'right', paddingBottom: '4px' }}>الصنف</th>
                     <th style={{ width: '16%', textAlign: 'center', paddingBottom: '4px' }}>الكمية</th>
-                    <th style={{ width: '18%', textAlign: 'left', paddingBottom: '4px' }}>السعر</th>
-                    <th style={{ width: '18%', textAlign: 'left', paddingBottom: '4px' }}>الإجمالي</th>
+                    <th style={{ width: '18%', textAlign: 'left', paddingBottom: '4px', paddingLeft: '4px' }}>السعر</th>
+                    <th style={{ width: '18%', textAlign: 'left', paddingBottom: '4px', paddingLeft: '4px' }}>الإجمالي</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-dotted divide-neutral-300">
@@ -471,7 +474,7 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
                         style={{
                           width: '18%',
                           textAlign: 'left',
-                          padding: '4px 0',
+                          padding: '4px 0 4px 4px',
                           fontSize: '11px',
                         }}
                         dir="ltr"
@@ -482,7 +485,7 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
                         style={{
                           width: '18%',
                           textAlign: 'left',
-                          padding: '4px 0',
+                          padding: '4px 0 4px 4px',
                           fontSize: '11px',
                         }}
                         className="font-bold"
@@ -502,17 +505,17 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
                 <tbody>
                   <tr>
                     <td style={{ textAlign: 'right', padding: '2px 0' }} className="text-neutral-700">المجموع الفرعي:</td>
-                    <td style={{ textAlign: 'left', padding: '2px 0' }} dir="ltr">{fmt(receipt.subtotal)} {receipt.currencyCode}</td>
+                    <td style={{ textAlign: 'left', padding: '2px 0 2px 4px' }} dir="ltr">{fmt(receipt.subtotal)} {receipt.currencyCode}</td>
                   </tr>
                   {Number(receipt.discountAmount || 0) > 0 && (
                     <tr>
                       <td style={{ textAlign: 'right', padding: '2px 0' }} className="text-neutral-800">الخصم الممنوح:</td>
-                      <td style={{ textAlign: 'left', padding: '2px 0' }} dir="ltr">- {fmt(receipt.discountAmount!)} {receipt.currencyCode}</td>
+                      <td style={{ textAlign: 'left', padding: '2px 0 2px 4px' }} dir="ltr">- {fmt(receipt.discountAmount!)} {receipt.currencyCode}</td>
                     </tr>
                   )}
                   <tr style={{ borderTop: '1px solid black' }}>
                     <td style={{ textAlign: 'right', padding: '4px 0 2px' }} className="font-black text-sm">المجموع الإجمالي:</td>
-                    <td style={{ textAlign: 'left', padding: '4px 0 2px' }} className="font-black text-sm" dir="ltr">{fmt(receipt.totalAmount)} {receipt.currencyCode}</td>
+                    <td style={{ textAlign: 'left', padding: '4px 0 2px 4px' }} className="font-black text-sm" dir="ltr">{fmt(receipt.totalAmount)} {receipt.currencyCode}</td>
                   </tr>
                 </tbody>
               </table>
@@ -524,7 +527,7 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
             <div className="my-2.5 rounded-lg border-2 border-black bg-neutral-50 p-2.5 text-xs text-black">
               <div className="flex items-center justify-between pb-1 border-b border-black mb-1.5">
                 <span className="font-black uppercase tracking-wider">حالة وطريقة الدفع:</span>
-                <span className="font-bold text-[11px] underline">
+                <span className="font-bold text-[11px] underline pl-1">
                   {methodInfo.ar} / {methodInfo.en}
                 </span>
               </div>
@@ -556,24 +559,24 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
                   <tbody>
                     <tr>
                       <td style={{ textAlign: 'right', padding: '2px 0' }} className="font-bold">المبلغ المستلم / المدفوع:</td>
-                      <td style={{ textAlign: 'left', padding: '2px 0' }} className="font-bold" dir="ltr">{fmt(receipt.amountPaid)} {receipt.currencyCode}</td>
+                      <td style={{ textAlign: 'left', padding: '2px 0 2px 4px' }} className="font-bold" dir="ltr">{fmt(receipt.amountPaid)} {receipt.currencyCode}</td>
                     </tr>
                     {changeGiven > 0 && (
                       <tr style={{ borderTop: '1px dotted black' }}>
                         <td style={{ textAlign: 'right', padding: '3px 0 2px' }} className="font-black text-sm">الباقي المُعاد للزبون:</td>
-                        <td style={{ textAlign: 'left', padding: '3px 0 2px' }} className="font-black text-sm" dir="ltr">{fmt(changeGiven)} {receipt.currencyCode}</td>
+                        <td style={{ textAlign: 'left', padding: '3px 0 2px 4px' }} className="font-black text-sm" dir="ltr">{fmt(changeGiven)} {receipt.currencyCode}</td>
                       </tr>
                     )}
                     {remaining > 0 && (
                       <tr style={{ borderTop: '1px dotted black' }}>
                         <td style={{ textAlign: 'right', padding: '3px 0 2px' }} className="font-black text-sm">المتبقي في الذمة:</td>
-                        <td style={{ textAlign: 'left', padding: '3px 0 2px' }} className="font-black text-sm" dir="ltr">{fmt(remaining)} {receipt.currencyCode}</td>
+                        <td style={{ textAlign: 'left', padding: '3px 0 2px 4px' }} className="font-black text-sm" dir="ltr">{fmt(remaining)} {receipt.currencyCode}</td>
                       </tr>
                     )}
                     {receipt.customerBalance !== undefined && receipt.customerBalance !== null && (
                       <tr style={{ borderTop: '1px solid #d1d5db' }}>
                         <td style={{ textAlign: 'right', padding: '3px 0 2px', fontSize: '11px' }} className="text-neutral-700">إجمالي رصيد العميل الحالي:</td>
-                        <td style={{ textAlign: 'left', padding: '3px 0 2px', fontSize: '11px' }} className="font-bold" dir="ltr">{fmt(receipt.customerBalance)} {receipt.currencyCode}</td>
+                        <td style={{ textAlign: 'left', padding: '3px 0 2px 4px', fontSize: '11px' }} className="font-bold" dir="ltr">{fmt(receipt.customerBalance)} {receipt.currencyCode}</td>
                       </tr>
                     )}
                   </tbody>
