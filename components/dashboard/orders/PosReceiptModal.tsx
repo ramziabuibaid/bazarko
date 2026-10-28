@@ -91,15 +91,110 @@ export default function PosReceiptModal({ receipt, isOpen, onClose, onNewSale }:
 
   // الطباعة المباشرة السريعة (Direct Print)
   const handleDirectPrint = () => {
-    window.print()
+    if (printLayout === 'thermal') {
+      printThermalReceipt('pos-receipt-print-area')
+    } else {
+      window.print()
+    }
+  }
+
+  const printThermalReceipt = (elementId: string) => {
+    const element = document.getElementById(elementId)
+    if (!element) {
+      window.print()
+      return
+    }
+
+    let iframe = document.getElementById('pos-thermal-print-iframe') as HTMLIFrameElement | null
+    if (!iframe) {
+      iframe = document.createElement('iframe')
+      iframe.id = 'pos-thermal-print-iframe'
+      iframe.style.position = 'fixed'
+      iframe.style.right = '0'
+      iframe.style.bottom = '0'
+      iframe.style.width = '0'
+      iframe.style.height = '0'
+      iframe.style.border = '0'
+      iframe.style.visibility = 'hidden'
+      document.body.appendChild(iframe)
+    }
+
+    const iframeDoc = iframe.contentWindow?.document
+    if (!iframeDoc) {
+      window.print()
+      return
+    }
+
+    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+      .map(node => node.outerHTML)
+      .join('\n')
+
+    const thermalCss = `
+      @page {
+        size: 80mm auto;
+        margin: 0;
+      }
+      * {
+        box-sizing: border-box;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 76mm !important;
+        max-width: 76mm !important;
+        background: #ffffff !important;
+        color: #000000 !important;
+        direction: rtl !important;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+      #pos-receipt-print-area {
+        width: 76mm !important;
+        max-width: 76mm !important;
+        margin: 0 auto !important;
+        padding: 2mm 3mm !important;
+        box-shadow: none !important;
+        border: none !important;
+      }
+      .print\\:hidden, .no-print {
+        display: none !important;
+      }
+    `
+
+    iframeDoc.open()
+    iframeDoc.write(`
+      <!DOCTYPE html>
+      <html dir="rtl" lang="ar">
+        <head>
+          <meta charset="utf-8" />
+          <title>فاتورة مبيعات</title>
+          ${styles}
+          <style>${thermalCss}</style>
+        </head>
+        <body>
+          ${element.outerHTML}
+        </body>
+      </html>
+    `)
+    iframeDoc.close()
+
+    setTimeout(() => {
+      try {
+        iframe?.contentWindow?.focus()
+        iframe?.contentWindow?.print()
+      } catch (e) {
+        console.error('Iframe print error, falling back to window.print()', e)
+        window.print()
+      }
+    }, 250)
   }
 
   const handlePrint = async () => {
     setPrinting(true)
     try {
       if (printLayout === 'thermal') {
-        // للطابعات الحرارية (USB / Network / ZKT / Xprinter): استدعاء نافذة الطباعة المباشرة بأبعاد الإيصال
-        window.print()
+        printThermalReceipt('pos-receipt-print-area')
       } else {
         await generateAndPrintPdf({
           elementId: 'pos-receipt-print-area',

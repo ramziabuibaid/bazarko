@@ -36,7 +36,7 @@ export default async function PosPage() {
 
   return (
     <div className="p-4 sm:p-6" dir="rtl">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3 print:hidden">
         <div className="flex items-center gap-3">
           <BackToDashboardButton href="/dashboard/sales" label="العودة إلى لوحة إدارة المبيعات" />
           <h1 className="text-xl font-black text-white flex items-center gap-2">

@@ -497,7 +497,9 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
 
   return (
     <div className={`${posPresentation?styles.page:''} space-y-4`} dir="rtl">
-      {/* ── Mode Selection Header ── */}
+      {/* ── Main POS Interface (Hidden during printing so only the receipt prints) ── */}
+      <div className="print:hidden space-y-4">
+        {/* ── Mode Selection Header ── */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900 border border-white/10 p-2.5 rounded-2xl shadow-sm">
         <div className="flex rounded-xl bg-slate-950 p-1 border border-white/5">
           <button
@@ -1102,7 +1104,9 @@ export default function NewOrderForm({ storeId, currencyCode, storeInfo, posPres
 
       </div>
 
-      {receiptData&&!showReceipt&&<div className={styles.hold}><button onClick={()=>setShowReceipt(true)}>عرض الإيصال المحفوظ</button><button onClick={handleNewSale}>بدء بيع جديد</button></div>}
+        {receiptData&&!showReceipt&&<div className={styles.hold}><button onClick={()=>setShowReceipt(true)}>عرض الإيصال المحفوظ</button><button onClick={handleNewSale}>بدء بيع جديد</button></div>}
+      </div>
+
       {/* مودال الإيصال الفوري والطباعة الحرارية */}
       {showReceipt && receiptData && (
         <PosReceiptModal
